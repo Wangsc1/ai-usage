@@ -1,10 +1,10 @@
 import {
-  Button, Form, LabeledContent, Navigation, NavigationStack, Script, Section,
+  Button, Form, LabeledContent, Navigation, NavigationStack, Picker, Script, Section,
   SecureField, Text, TextField, Toggle, Widget, useState, useEffect,
 } from "scripting"
-import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getSelectedAccounts, saveSelectedAccounts, widgetAccounts } from "./api"
+import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getSelectedAccounts, saveSelectedAccounts, widgetAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS } from "./api"
 
-const VERSION = "1.5.5"
+const VERSION = "1.5.6"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -50,6 +50,7 @@ function SettingsView() {
   const [status, setStatus] = useState(hasKey ? "已配置，可点“测试连接”" : "未配置：填写后点“保存并测试”")
   const [lines, setLines] = useState<string[]>([])
   const [updateMsg, setUpdateMsg] = useState("")
+  const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
   const [selected, setSelected] = useState<string[]>(getSelectedAccounts() ?? widgetAccounts(cachedAccounts()).map(a => a.id))
 
@@ -154,6 +155,16 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>
 
+      <Section header={<Text>小组件刷新</Text>} footer={<Text>这是请求刷新间隔，实际时间由iOS调度，可能延后。更短间隔会增加网络请求与耗电。</Text>}>
+        <Picker title={"刷新间隔"} value={refreshMinutes} onChanged={async (value: string) => {
+          setRefreshMinutes(value)
+          saveRefreshMinutes(Number(value))
+          await Widget.reloadAll()
+        }}>
+          {REFRESH_OPTIONS.map(m => <Text tag={String(m)}>{m}分钟</Text>)}
+        </Picker>
+      </Section>
+
       <Section header={<Text>预览小组件</Text>}>
         <Button title={"小"} action={() => Widget.preview({ family: "systemSmall" })} />
         <Button title={"中"} action={() => Widget.preview({ family: "systemMedium" })} />
@@ -176,6 +187,7 @@ function SettingsView() {
             setLines([])
             setAccounts([])
             setSelected([])
+            setRefreshMinutes("15")
             setStatus("已清除配置")
             await Widget.reloadAll()
           }}

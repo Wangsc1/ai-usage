@@ -1,5 +1,5 @@
 import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, Widget, VirtualNode } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, widgetAccounts } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, widgetAccounts, getRefreshMinutes } from "./api"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
 type DC = { light: string; dark: string }
@@ -277,7 +277,7 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
 async function run() {
   const r = await loadUsage()
   Widget.present(<Root data={r.data} stale={r.stale} error={r.error} />, {
-    reloadPolicy: { policy: "after", date: new Date(Date.now() + 15 * 60 * 1000) },
+    reloadPolicy: { policy: "after", date: new Date(Date.now() + getRefreshMinutes() * 60 * 1000) },
   })
 }
 

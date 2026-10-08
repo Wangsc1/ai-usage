@@ -45,6 +45,16 @@ export type UsageData = {
 
 export type LoadResult = { data: UsageData | null; stale: boolean; error: string | null }
 
+const KEY_REFRESH = "ai_usage_refresh_minutes_v1"
+export const REFRESH_OPTIONS = [5, 15, 30, 60]
+export function getRefreshMinutes(): number {
+  const m = Storage.get<number>(KEY_REFRESH)
+  return m != null && REFRESH_OPTIONS.includes(m) ? m : 15
+}
+export function saveRefreshMinutes(minutes: number) {
+  if (REFRESH_OPTIONS.includes(minutes)) Storage.set(KEY_REFRESH, minutes)
+}
+
 const KEY_SELECTION = "ai_usage_selected_accounts_v1"
 export function getSelectedAccounts(): string[] | null {
   return Storage.get<string[]>(KEY_SELECTION)
@@ -94,6 +104,7 @@ export function clearConfig() {
   Storage.remove(KEY_CACHE)
   Storage.remove(KEY_CREDITS)
   Storage.remove(KEY_SELECTION)
+  Storage.remove(KEY_REFRESH)
 }
 
 // ---------- 请求 ----------
