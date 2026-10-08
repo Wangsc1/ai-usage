@@ -301,7 +301,7 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     <ZStack padding={{ bottom: data ? 14 : 0 }} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>{body}</ZStack>
     {data ? <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
       <Spacer />
-      <HStack offset={{ x: 7, y: 6 }}><Spacer /><RefreshTime data={data} stale={stale} /></HStack>
+      <HStack offset={{ x: 3, y: 6 }}><Spacer /><RefreshTime data={data} stale={stale} /></HStack>
     </VStack> : null}
   </ZStack>
 }
