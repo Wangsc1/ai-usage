@@ -239,6 +239,11 @@ function LargeQuota({ label, w, fmt }: Win) {
 function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const m = data.today
   const month = data.month
+  // Token缓存命中率：缓存读取占全部输入侧Token的比例，不包含输出。
+  const cacheRate = (m: UsageData["today"]) => {
+    const total = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
+    return total > 0 ? (m.cacheReadTokens / total * 100).toFixed(1) + "%" : "--"
+  }
   const stat = (label: string, value: string) => <VStack alignment="leading" spacing={1} frame={{ maxWidth: "infinity" }}>
     <Text font={9} foregroundStyle={SUB}>{label}</Text>
     <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
@@ -248,16 +253,16 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
     <HStack spacing={6}>
       {stat("输入", fmtTokens(m.inputTokens))}
       {stat("输出", fmtTokens(m.outputTokens))}
-      {stat("缓存读", fmtTokens(m.cacheReadTokens))}
-      {stat("缓存写", fmtTokens(m.cacheCreationTokens))}
+      {stat("缓存", fmtTokens(m.cacheReadTokens + m.cacheCreationTokens))}
+      {stat("缓存率", cacheRate(m))}
       {stat("估算花费", fmtUsd(m.costUsd))}
     </HStack>
     <Text font={9} foregroundStyle={SUB}>本月</Text>
     <HStack spacing={6}>
       {stat("输入", fmtTokens(month.inputTokens))}
       {stat("输出", fmtTokens(month.outputTokens))}
-      {stat("缓存读", fmtTokens(month.cacheReadTokens))}
-      {stat("缓存写", fmtTokens(month.cacheCreationTokens))}
+      {stat("缓存", fmtTokens(month.cacheReadTokens + month.cacheCreationTokens))}
+      {stat("缓存率", cacheRate(month))}
       {stat("估算花费", fmtUsd(month.costUsd))}
     </HStack>
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
