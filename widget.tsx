@@ -238,6 +238,7 @@ function LargeQuota({ label, w, fmt }: Win) {
 
 function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const m = data.today
+  const month = data.month
   const stat = (label: string, value: string) => <VStack alignment="leading" spacing={1} frame={{ maxWidth: "infinity" }}>
     <Text font={9} foregroundStyle={SUB}>{label}</Text>
     <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
@@ -250,6 +251,14 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
       {stat("缓存读", fmtTokens(m.cacheReadTokens))}
       {stat("缓存写", fmtTokens(m.cacheCreationTokens))}
       {stat("估算花费", fmtUsd(m.costUsd))}
+    </HStack>
+    <Text font={9} foregroundStyle={SUB}>本月</Text>
+    <HStack spacing={6}>
+      {stat("输入", fmtTokens(month.inputTokens))}
+      {stat("输出", fmtTokens(month.outputTokens))}
+      {stat("缓存读", fmtTokens(month.cacheReadTokens))}
+      {stat("缓存写", fmtTokens(month.cacheCreationTokens))}
+      {stat("估算花费", fmtUsd(month.costUsd))}
     </HStack>
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
     <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
