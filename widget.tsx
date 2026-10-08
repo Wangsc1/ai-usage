@@ -1,4 +1,4 @@
-import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, Widget, VirtualNode } from "scripting"
+import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, LazyVGrid, Widget, VirtualNode } from "scripting"
 import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes } from "./api"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
@@ -140,7 +140,7 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
 
 function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   return <HStack spacing={3}>
-    <Image systemName={stale ? "wifi.slash" : "arrow.clockwise"} font={8} foregroundStyle={stale ? ORANGE : SUB} />
+    <Image systemName={stale ? "wifi.slash" : "arrow.triangle.2.circlepath"} font={8} foregroundStyle={stale ? ORANGE : SUB} />
     <Text font={9} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
   </HStack>
 }
@@ -238,6 +238,13 @@ function LargeQuota({ label, w, fmt }: Win) {
   </HStack>
 }
 
+// Both periods share six equal flexible tracks, independent of text intrinsic width.
+const STAT_COLUMNS = Array.from({ length: 6 }, () => ({
+  size: { type: "flexible" as const, min: 0, max: "infinity" as const },
+  spacing: 4,
+  alignment: "leading" as const,
+}))
+
 function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const m = data.today
   const month = data.month
@@ -246,30 +253,30 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
     const total = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
     return total > 0 ? (m.cacheReadTokens / total * 100).toFixed(1) + "%" : "--"
   }
-  const stat = (label: string, value: string) => <VStack alignment="leading" spacing={1} frame={{ maxWidth: "infinity" }}>
+  const stat = (label: string, value: string) => <VStack alignment="leading" spacing={1} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
     <Text font={9} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.7}>{label}</Text>
     <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
   </VStack>
   return <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
     {m && month ? <>
     <Text font={9} foregroundStyle={SUB}>今日</Text>
-    <HStack spacing={4}>
+    <LazyVGrid columns={STAT_COLUMNS} alignment="leading" spacing={0} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
       {stat("输入", fmtTokens(m.inputTokens))}
       {stat("输出", fmtTokens(m.outputTokens))}
       {stat("缓存", fmtTokens(m.cacheReadTokens + m.cacheCreationTokens))}
       {stat("缓存率", cacheRate(m))}
       {stat("Token", fmtTokens(m.totalTokens))}
       {stat("估算花费", fmtUsd(m.costUsd))}
-    </HStack>
+    </LazyVGrid>
     <Text font={9} foregroundStyle={SUB}>本月</Text>
-    <HStack spacing={4}>
+    <LazyVGrid columns={STAT_COLUMNS} alignment="leading" spacing={0} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
       {stat("输入", fmtTokens(month.inputTokens))}
       {stat("输出", fmtTokens(month.outputTokens))}
       {stat("缓存", fmtTokens(month.cacheReadTokens + month.cacheCreationTokens))}
       {stat("缓存率", cacheRate(month))}
       {stat("Token", fmtTokens(month.totalTokens))}
       {stat("估算花费", fmtUsd(month.costUsd))}
-    </HStack>
+    </LazyVGrid>
     </> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
     <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>

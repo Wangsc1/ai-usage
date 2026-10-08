@@ -149,8 +149,29 @@ async function main() {
   result=await api.loadUsage(); assert.equal(result.stale,false);assert.equal(result.data.today.totalTokens,370)
   api.saveSelectedAccounts(result.data.accounts.map(a=>a.id))
   const parrotTree=expand(Root({data:result.data,stale:false,error:null}))
-  const labels=parrotTree.filter(x=>x.type==='HStack' && x.props.spacing===4 && Array.isArray(x.props.children) && x.props.children.length===6)
+  const labels=parrotTree.filter(x=>x.type==='LazyVGrid' && Array.isArray(x.props.children) && x.props.children.length===6)
   assert.equal(labels.length,2)
+  assert.equal(labels[0].props.columns,labels[1].props.columns) // exact shared definition, not independent content sizing
+  for(const row of labels) {
+    assert.equal(row.props.alignment,'leading');assert.equal(row.props.frame.alignment,'leading')
+    assert.equal(row.props.columns.length,6)
+    for(const col of row.props.columns){assert.equal(col.size.type,'flexible');assert.equal(col.size.min,0);assert.equal(col.size.max,'infinity');assert.equal(col.spacing,4);assert.equal(col.alignment,'leading')}
+    for(const cell of row.props.children){assert.equal(cell.props.alignment,'leading');assert.equal(cell.props.frame.alignment,'leading');assert.equal(cell.props.spacing,1);assert.equal(cell.props.children[0].props.font,9);assert.equal(cell.props.children[1].props.font,12)}
+  }
+  // Deliberately different string widths must not alter shared column tracks.
+  const varied={...result.data,month:{...result.data.month,inputTokens:987654321,outputTokens:1,cacheReadTokens:70000000,costUsd:1234.56,totalTokens:1057654322}}
+  const variedRows=expand(Root({data:varied,stale:false,error:null})).filter(x=>x.type==='LazyVGrid')
+  assert.equal(variedRows[0].props.columns,variedRows[1].props.columns)
+  assert.notEqual(variedRows[0].props.children[0].props.children[1].props.children,variedRows[1].props.children[0].props.children[1].props.children)
+  for(const family of ['systemSmall','systemMedium','systemLarge']) {
+    scripting.Widget.family=family
+    for(const stale of [false,true]) {
+      const images=expand(Root({data:result.data,stale,error:null})).filter(x=>x.type==='Image')
+      const icon=images.find(x=>x.props.systemName===(stale?'wifi.slash':'arrow.triangle.2.circlepath'))
+      assert.ok(icon);assert.equal(icon.props.font,8);assert.ok(!images.some(x=>x.props.systemName==='arrow.clockwise'))
+    }
+  }
+  scripting.Widget.family='systemLarge'
   for(const row of labels){assert.deepEqual(Array.from(row.props.children,x=>x.props.children[0].props.children),['输入','输出','缓存','缓存率','Token','估算花费']);assert.equal(row.props.children[4].props.children[1].props.children,'370');assert.ok(row.props.children.every(x=>x.props.children.every(t=>t.props.lineLimit===1)))}
   // Exercise App sorting controls with persistent mock hook state, not only the data helper.
   const states=[];let hook=0
@@ -197,11 +218,11 @@ async function main() {
   assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>{throw Error('must not load')}}),false)
   api.saveSource('parrot')
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.1')
+  assert.equal(api.VERSION,'1.7.2')
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/selection/parameters/pruning; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/selection/parameters/pruning; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared 6 equal grid columns/leading alignment; dual-arrow refresh icon in 3 families')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
