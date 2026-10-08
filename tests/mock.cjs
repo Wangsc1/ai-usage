@@ -7,6 +7,7 @@ const kc = new Map(), storage = new Map(), storageWrites = []
 class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])) } static now() { return now } }
 const modules = {}
 const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { return o[k] || k } })
+scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;return v=>{calls.push([k,v]);return m}}});return m}
 const jsx = (type, props, key) => key === undefined ? ({type, props}) : ({type, props, key})
 const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise,
   Keychain: { get(k) { reads.push(k); return kc.get(k) ?? null }, set(k,v) { kc.set(k,v); return true }, remove(k) { kc.delete(k); return true } },
@@ -18,7 +19,7 @@ function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
   let code = fs.readFileSync(name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
-  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, largeHeightBudget, smallRegionLayout, AccountTitle }')
+  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle }')
   if (name === 'baseline-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
@@ -130,7 +131,7 @@ async function main() {
   assert.ok(!api.widgetAccounts(official.officialCached().accounts).some(a=>a.id===first.id))
   assert.equal(kc.get('parrot_management_key'),'mock-management'); api.saveSource('parrot'); assert.equal(storage.get('ai_usage_selected_accounts_v1')[0],'parrot-account')
   // JSX tree simulation verifies official stats not rendered as zero and unchanged family geometry.
-  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd,largeHeightBudget,smallRegionLayout,AccountTitle}=load('widget.tsx')
+  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd,smallRegionLayout,AccountTitle}=load('widget.tsx')
   scripting.Widget.displaySize={width:358,height:376}
   let normalizeLargeBar=false
   let skipAccountTitles=false
@@ -167,8 +168,9 @@ async function main() {
   result=await api.loadUsage(); assert.equal(result.stale,false);assert.equal(result.data.today.totalTokens,370)
   const parrotTree=expand(Root({data:result.data,stale:false,error:null}))
   function checkStatsLayout(tree,count,labelFont,valueFont,gap,verticalGap){
-    const readers=tree.filter(x=>x.type==='GeometryReader'&&x.props.frame?.height!==5&&x.props.frame?.height!=null);assert.equal(readers.length,1)
-    assert.equal(readers[0].props.frame.height,4*Math.ceil(labelFont*1.2)+2*Math.ceil(valueFont*1.2)+3*verticalGap+2)
+    const readers=tree.filter(x=>x.type==='GeometryReader'&&x.props.frame?.height!==5&&x.props.frame?.height!=null)
+    assert.ok(readers.length<=1)
+    if(readers.length)assert.equal(readers[0].props.frame.height,4*Math.ceil(labelFont*1.2)+2*Math.ceil(valueFont*1.2)+3*verticalGap+2)
     assert.ok(!tree.some(x=>x.type==='Grid'||x.type==='GridRow'))
     const row=tree.find(x=>x.type==='HStack'&&x.props.spacing===0&&x.props.children?.length===count*2-1)
     assert.ok(row);assert.equal(row.props.frame.alignment,'leading');assert.equal(row.props.alignment,'top')
@@ -323,8 +325,7 @@ async function main() {
   }
   scripting.Widget.family='systemLarge';scripting.Widget.parameter=''
   const largeTree=expand(Root({data:singleData,stale:false,error:null}))
-  const largeReaders=largeTree.filter(x=>x.type==='GeometryReader'&&x.props.frame.height===5)
-  assert.equal(largeReaders.length,8)
+  assert.ok(!largeTree.some(x=>x.type==='GeometryReader'),'no GeometryReader anywhere in Large')
   const largeBarRows=largeTree.filter(x=>x.type==='HStack'&&x.props.spacing===2.25)
   assert.equal(largeBarRows.length,8)
   for(const row of largeBarRows)assert.equal(row.props.children.length,largeSegmentLayout(330,358).count)
@@ -349,27 +350,33 @@ async function main() {
   assert.equal(largeWindows.length,8)
   for(const window of largeWindows){
     assert.equal(window.props.alignment,'leading');assert.equal(window.props.spacing,mediumRowGap)
-    assert.equal(window.props.frame.maxWidth,'infinity')
+    assert.equal(JSON.stringify(window.props.modifiers.calls),JSON.stringify([['fixedSize',{horizontal:false,vertical:true}],['frame',{minHeight:19,maxWidth:'infinity'}]]))
     const top=window.props.children[0];assert.equal(top.type,'HStack');assert.equal(top.props.alignment,'bottom');assert.equal(top.props.frame.maxWidth,'infinity')
     const [texts,spacer,lcd]=top.props.children;assert.equal(spacer.type,'Spacer');assert.equal(lcd.type.name,'Lcd');assert.equal(lcd.props.height,12)
     assert.equal(texts.props.children[0].props.font,9);assert.equal(texts.props.children[1].props.font,9)
   }
-  for(const height of [354,376,382,400]){
-    const budget=largeHeightBudget(height,4,true);assert.equal(budget.fits,true);assert.ok(budget.estimated+budget.reserve<=budget.available+1e-9);assert.equal(budget.reserve,2)
-    assert.ok(budget.windowGap<=3);assert.ok(budget.accountGap<=5)
-    scripting.Widget.displaySize={width:358,height};scripting.Widget.family='systemLarge';scripting.Widget.parameter=''
-    const actual=expand(Root({data:singleData,stale:false,error:null}))
-    assert.equal(actual.filter(x=>x.type==='GeometryReader'&&x.props.frame?.height===85).length,1)
-    assert.equal(actual.filter(x=>x.type==='VStack'&&x.props.children?.[1]?.type?.name==='LargeSegBar').length,8)
-    const blocks=actual.filter(x=>x.type==='VStack'&&x.props.children?.[1]?.type?.name==='AccountTitle')
-    assert.ok(blocks.length>0);assert.ok(blocks.every(x=>x.props.spacing===budget.windowGap))
-    console.log(`HEIGHT MODEL: widget=${height}, available=${budget.available}, four-account=${budget.estimated.toFixed(1)}, windowGap=${budget.windowGap.toFixed(2)}, accountGap=${budget.accountGap.toFixed(2)}`)
+  // Native intrinsic-height protection replaces the discredited theoretical height budget.
+  const largeContainer=largeTree.find(x=>x.type==='VStack'&&x.props.children?.[0]?.type?.name==='PeriodStats')
+  assert.ok(largeContainer);assert.equal(largeContainer.props.spacing,3)
+  assert.equal(JSON.stringify(largeContainer.props.modifiers.calls),JSON.stringify([
+    ['fixedSize',{horizontal:false,vertical:true}],['frame',{maxWidth:'infinity',maxHeight:'infinity',alignment:'topLeading'}]]))
+  const [stats,divider,accountList]=largeContainer.props.children
+  assert.equal(stats.props.contentWidth,330);assert.equal(stats.props.verticalGap,3)
+  const statsTree=expand(stats);assert.ok(!statsTree.some(x=>x.type==='GeometryReader'))
+  assert.equal(statsTree[0].props.fixedSize.vertical,true);assert.equal(statsTree[0].props.frame.height,undefined)
+  assert.equal(accountList.props.fixedSize.vertical,true);assert.equal(accountList.props.frame.maxHeight,undefined);assert.equal(accountList.props.spacing,2)
+  assert.equal(JSON.stringify(divider.props.modifiers.calls),JSON.stringify([['frame',{height:1}],['frame',{maxWidth:'infinity'}]]))
+  for(const block of accountList.props.children){
+    assert.equal(block.props.fixedSize.vertical,true);assert.equal(block.props.spacing,1);assert.equal(block.props.frame.maxHeight,undefined)
+    const title=block.props.children[1];assert.equal(title.props.fixedSize.vertical,true)
   }
-  scripting.Widget.displaySize={width:358,height:376}
-  const tight=largeHeightBudget(354,4,true);assert.equal(tight.fits,true);assert.equal(tight.fixed,313);assert.equal(tight.available,316);assert.equal(tight.estimated,314)
-  const roomy=largeHeightBudget(376,3,true);assert.equal(roomy.windowGap,3);assert.equal(roomy.accountGap,5)
+  for(const bar of largeTree.filter(x=>x.type==='RoundedRectangle')){
+    assert.equal(JSON.stringify(bar.props.modifiers.calls),JSON.stringify([['frame',{height:5}],['frame',{maxWidth:'infinity'}]]))
+  }
+  const sourceWidget=fs.readFileSync(path.join(root,'widget.tsx'),'utf8')
+  assert.ok(!sourceWidget.includes('largeHeightBudget'))
   for(const height of [132,134,142]){
-    const region=smallRegionLayout(height);assert.equal(region.fits,true);assert.ok(region.dividerY-66>=8);assert.ok(region.lowerY+52<=height)
+    const region=smallRegionLayout(height);assert.equal(region.fits,true);assert.ok(region.dividerY-66>=5);assert.ok(region.lowerY+52<=height)
   }
   assert.equal(smallRegionLayout(120).fits,false)
   const smallRegions=[]
@@ -409,14 +416,25 @@ async function main() {
       }
     }
   }
-  // Compare 1.7.11 baseline with only AccountTitle elided: quotas/statistics/dividers/footer are unchanged in every family.
+  // Compare actual 1.7.12 baseline: Medium unchanged, Small only shared 3pt divider/lower anchor shift.
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
-    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemMedium',''],['systemLarge','']]){
+    for(const [family,parameter] of [['systemMedium','']]){
       scripting.Widget.family=family;scripting.Widget.parameter=parameter;skipAccountTitles=true
       const current=expand(Root({data:singleData,stale:false,error:null})),previous=expand(baseline({data:singleData,stale:false,error:null}))
       skipAccountTitles=false
-      assert.equal(JSON.stringify(current),JSON.stringify(previous),family+parameter+' only AccountTitle changes')
+      assert.equal(JSON.stringify(current),JSON.stringify(previous),family+parameter+' unchanged 1.7.12 tree')
+    }
+    for(const parameter of ['1','1,2']){
+      scripting.Widget.family='systemSmall';scripting.Widget.parameter=parameter
+      const nowTree=expand(Root({data:singleData,stale:false,error:null})),oldTree=expand(baseline({data:singleData,stale:false,error:null}))
+      const unchanged=tree=>tree.filter(x=>x.type==='Text'||x.type==='SVG'||x.type==='RoundedRectangle')
+      assert.equal(JSON.stringify(unchanged(nowTree)),JSON.stringify(unchanged(oldTree)))
+      const region=tree=>tree.find(x=>x.type==='VStack'&&x.props.spacing===0&&x.props.frame?.height===134&&x.props.frame?.width===130)
+      const current=region(nowTree),previous=region(oldTree)
+      assert.ok(Math.abs(current.props.children[0].props.frame.height-(previous.props.children[0].props.frame.height-3))<1e-9)
+      assert.equal(current.props.children[2].props.padding.top,previous.props.children[2].props.padding.top)
+      assert.ok(Math.abs(current.props.children[2].props.frame.height-(previous.props.children[2].props.frame.height+3))<1e-9)
     }
     // Null/undefined: even the complete title layout is visually unchanged (ignore invisible null JSX slots).
     for(const resetCredits of [null,undefined]){
@@ -428,7 +446,7 @@ async function main() {
       const old=prevTree.find(x=>x.type==='HStack'&&x.props.children?.[0]?.type?.name==='ProviderIcon')
       assert.equal(JSON.stringify(current,normalize),JSON.stringify(expand(old),normalize))
     }
-    console.log('PASS: reset1/37/0/null/undefined/invalid across Small single/double, Medium 4 cells, Large 4 accounts; bottom + full-width + trailing Spacer + fixedSize; all other 1.7.11 family trees unchanged')
+    console.log('PASS: reset1/37/0/null/undefined/invalid across Small single/double, Medium 4 cells, Large 4 accounts; bottom + full-width + trailing Spacer + fixedSize; Medium 1.7.12 tree unchanged; Large intrinsic-height no reader/no mixed frame protection')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -515,7 +533,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.12')
+  assert.equal(api.VERSION,'1.7.13')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')

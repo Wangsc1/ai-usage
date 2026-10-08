@@ -1,4 +1,4 @@
-import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode } from "scripting"
+import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
 import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes } from "./api"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
@@ -92,13 +92,16 @@ function Lcd({ value, height }: { value: number | null; height: number }) {
 }
 
 // ---------- 分段进度条（剩余额度） ----------
-function SegBar({ remaining, count, height }: { remaining: number | null; count: number; height: number }) {
+function SegBar({ remaining, count, height, fixedHeight = false }: { remaining: number | null; count: number; height: number; fixedHeight?: boolean }) {
   const lit = remaining == null ? 0 : Math.round((Math.max(0, Math.min(100, remaining)) / 100) * count)
   const head = levelColor(remaining)
   const segs: VirtualNode[] = []
   for (let i = 0; i < count; i++) {
     const color = i < lit - 1 ? FG : i === lit - 1 ? head : SEG_OFF
-    segs.push(<RoundedRectangle fill={color} cornerRadius={height * 0.3} frame={{ maxWidth: "infinity", height }} />)
+    segs.push(fixedHeight
+      ? <RoundedRectangle fill={color} cornerRadius={height * 0.3}
+          modifiers={modifiers().frame({ height }).frame({ maxWidth: "infinity" })} />
+      : <RoundedRectangle fill={color} cornerRadius={height * 0.3} frame={{ maxWidth: "infinity", height }} />)
   }
   return <HStack spacing={height * 0.45}>{segs}</HStack>
 }
@@ -113,9 +116,11 @@ function largeSegmentLayout(width: number, widgetWidth: number) {
   return { count, target, segmentWidth: (width - (count - 1) * gap) / count }
 }
 function LargeSegBar({ remaining }: { remaining: number | null }) {
-  return <GeometryReader frame={{ height: 5 }}>
-    {proxy => <SegBar remaining={remaining} count={largeSegmentLayout(proxy.size.width, Widget.displaySize.width).count} height={5} />}
-  </GeometryReader>
+  // Root owns the only horizontal inset (14pt each side); Large's bar occupies that full content width.
+  const width = Widget.displaySize.width - 28
+  return <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}>
+    <SegBar remaining={remaining} count={largeSegmentLayout(width, Widget.displaySize.width).count} height={5} fixedHeight />
+  </VStack>
 }
 
 // ---------- 图标 / 名称 ----------
@@ -187,14 +192,12 @@ function statsWidthBudget(columns: StatColumn[], labelFont: number, valueFont: n
   const scale = Math.min(1, Math.max(1, width) / natural)
   return { columnWidths, natural, scale, fitted: natural * scale }
 }
-function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap }: {
-  columns: StatColumn[]; labelFont: number; valueFont: number; gap: number; verticalGap: number
+function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap, contentWidth }: {
+  columns: StatColumn[]; labelFont: number; valueFont: number; gap: number; verticalGap: number; contentWidth?: number
 }) {
   // Bound reader height to six text lines + the existing inter-period/label gaps, rather than filling the widget.
   const height = 4 * Math.ceil(labelFont * 1.2) + 2 * Math.ceil(valueFont * 1.2) + 3 * verticalGap + 2
-  return <GeometryReader frame={{ height }}>
-    {proxy => {
-      const width = proxy.size.width
+  const render = (width: number) => {
       const { scale } = statsWidthBudget(columns, labelFont, valueFont, gap, width)
       const cells: VirtualNode[] = []
       columns.forEach((c, i) => {
@@ -213,9 +216,13 @@ function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap }: {
           {period("本月", c.month)}
         </VStack>)
       })
-      return <HStack alignment="top" spacing={0} frame={{ width, alignment: "leading" as any }}>{cells}</HStack>
-    }}
-  </GeometryReader>
+      return <HStack alignment="top" spacing={0} frame={{ width, alignment: "leading" as any }}
+        fixedSize={contentWidth != null ? { horizontal: false, vertical: true } : undefined}>{cells}</HStack>
+  }
+  // Large: known full content width, natural content height. No greedy reader or estimated-height reservation.
+  if (contentWidth != null) return render(contentWidth)
+  // Small retains its existing bounded reader and statistics geometry.
+  return <GeometryReader frame={{ height }}>{proxy => render(proxy.size.width)}</GeometryReader>
 }
 
 // Same Parrot summary scope as Large, not per-account totals.
@@ -235,9 +242,9 @@ function SmallStats({ data }: { data: UsageData }) {
 }
 
 // ---------- 小号：上下两个账号，各自5 h在上、每周在下 ----------
-// Shared geometry: stats frame 66pt + at least 8pt breathing room; lower account budget 52pt + 4pt inset.
+// Shared single/double geometry, shifted 3pt up from 1.7.12; lower account retains its 4pt inset.
 function smallRegionLayout(height: number) {
-  const dividerY = Math.max(74, Math.min(height * 0.56, height - 57))
+  const dividerY = Math.max(74, Math.min(height * 0.56, height - 57)) - 3
   return { dividerY, lowerY: dividerY + 1 + 4, lowerHeight: height - dividerY - 1, fits: height >= 131 }
 }
 function Small({ data, stale }: { data: UsageData; stale: boolean }) {
@@ -324,7 +331,8 @@ function Medium({ data }: { data: UsageData }) {
 
 // ---------- 大号：顶部今日统计 + 从上到下四个账号 ----------
 function LargeQuota({ label, w, fmt }: Win) {
-  return <VStack alignment="leading" spacing={MEDIUM_SCALE.gap} frame={{ maxWidth: "infinity" }}>
+  return <VStack alignment="leading" spacing={MEDIUM_SCALE.gap}
+    modifiers={modifiers().fixedSize({ horizontal: false, vertical: true }).frame({ minHeight: 19, maxWidth: "infinity" })}>
     <HStack alignment="bottom" spacing={5} frame={{ maxWidth: "infinity" }}>
       <HStack spacing={1}>
         <Text font={9} foregroundStyle={SUB} frame={{ width: 20, alignment: "leading" as any }}>{label}</Text>
@@ -338,24 +346,10 @@ function LargeQuota({ label, w, fmt }: Win) {
   </VStack>
 }
 
-// Height budget in points, NOT native font measurement. Large stats frame: 85pt (verticalGap 3), budgeted at 87pt.
-// Two 5pt section gaps replace 6pt gaps; keep a 2pt model reserve rather than spending every point.
-// Root reserves 24pt vertical padding and 14pt footer; 12pt title estimated at 15pt line height.
-// Each two-line window: max(12pt LCD, 11pt 9pt text) + Medium's 2pt gap + 5pt bar = 19pt.
-function largeHeightBudget(widgetHeight: number, accounts: number, hasStats: boolean) {
-  const n = Math.min(4, accounts), available = widgetHeight - 24 - 14
-  const fixed = (hasStats ? 87 : 12) + 11 + n * (15 + 2 * 19) + Math.max(0, n - 1)
-  const reserve = 2
-  const flexible = 3 * (2 * n + Math.max(0, n - 1)) + 5 * Math.max(0, n - 1)
-  const factor = flexible > 0 ? Math.min(1, Math.max(0, (available - fixed - reserve) / flexible)) : 1
-  return { available, fixed, accountGap: 5 * factor, windowGap: 3 * factor,
-    estimated: fixed + flexible * factor, reserve, fits: available >= fixed + reserve }
-}
-
 function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const m = data.today
   const month = data.month
-  const heightBudget = largeHeightBudget(Widget.displaySize.height, data.accounts.length, !!(m && month))
+  const contentWidth = Widget.displaySize.width - 28 // Root's 14pt horizontal inset on each side.
   // Token缓存命中率：缓存读取占全部输入侧Token的比例，不包含输出。
   const cacheRate = (m: NonNullable<UsageData["today"]>) => {
     const total = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
@@ -363,16 +357,19 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   }
   const values = (m: NonNullable<UsageData["today"]>) => [fmtTokens(m.inputTokens), fmtTokens(m.outputTokens),
     fmtTokens(m.cacheReadTokens + m.cacheCreationTokens), cacheRate(m), fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
-  return <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    {m && month ? <PeriodStats labelFont={9} valueFont={12} gap={4} verticalGap={3}
+  return <VStack alignment="leading" spacing={3}
+    modifiers={modifiers().fixedSize({ horizontal: false, vertical: true })
+      .frame({ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" })}>
+    {m && month ? <PeriodStats labelFont={9} valueFont={12} gap={4} verticalGap={3} contentWidth={contentWidth}
       columns={["输入", "输出", "缓存", "缓存率", "Token", "估算花费"].map((label, i) => ({
         label, today: values(m)[i], month: values(month)[i],
       }))} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
-    <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
-    <VStack alignment="leading" spacing={heightBudget.accountGap} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={heightBudget.windowGap} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-        {i > 0 ? <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} /> : null}
-        <AccountTitle acc={acc} font={12} />
+    <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} />
+    <VStack alignment="leading" spacing={2} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
+      {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={1}
+        fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
+        {i > 0 ? <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} /> : null}
+        <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}><AccountTitle acc={acc} font={12} /></VStack>
         {windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} />)}
       </VStack>)}
     </VStack>
