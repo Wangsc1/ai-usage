@@ -362,7 +362,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
     modifiers={modifiers().fixedSize({ horizontal: false, vertical: true })
       .frame({ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" })}>
     {m && month ? <PeriodStats labelFont={9} valueFont={11} sizingValueFont={12} gap={4} verticalGap={3} contentWidth={contentWidth}
-      columns={["输入", "输出", "缓存", "缓存率", "Token", "估算花费"].map((label, i) => ({
+      columns={["输入", "输出", "缓存", "缓存率", "Token", "花费"].map((label, i) => ({
         label, today: values(m)[i], month: values(month)[i],
       }))} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
     <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} />

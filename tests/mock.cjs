@@ -202,7 +202,7 @@ async function main() {
   // Screenshot-sized examples, including longer month values. These are width-model checks, not native glyph measurements.
   const exampleToday=['4.4M','275.1K','80.7M','93.2%','85.4M','$31.3']
   const exampleMonth=['26.4M','1.3M','440M','91.1%','468M','$199.9']
-  const exampleLabels=['输入','输出','缓存','缓存率','Token','估算花费']
+  const exampleLabels=['输入','输出','缓存','缓存率','Token','花费']
   const exampleColumns=exampleLabels.map((label,i)=>({label,today:exampleToday[i],month:exampleMonth[i]}))
   for(const [indexes,lf,vf,gap,vg,widths] of [[[0,1,2,3,4,5],9,11,4,3,[330,300]],[[2,3,4,5],7,9,2,2,[130,120]]]){
     const cols=indexes.map(i=>({...exampleColumns[i],label:i===5&&indexes.length===4?'花费':exampleColumns[i].label}))
@@ -495,7 +495,7 @@ async function main() {
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
-  for(const row of labels){assert.deepEqual(Array.from(row.props.children,x=>x.props.children[0].props.children),['输入','输出','缓存','缓存率','Token','估算花费']);assert.equal(row.props.children[4].props.children[1].props.children,'370');assert.ok(row.props.children.every(x=>x.props.children.every(t=>t.props.lineLimit===1)))}
+  for(const row of labels){assert.deepEqual(Array.from(row.props.children,x=>x.props.children[0].props.children),['输入','输出','缓存','缓存率','Token','花费']);assert.equal(row.props.children[4].props.children[1].props.children,'370');assert.ok(row.props.children.every(x=>x.props.children.every(t=>t.props.lineLimit===1)))}
   // Exercise App sorting controls with persistent mock hook state, not only the data helper.
   const states=[];let hook=0
   scripting.useState=initial=>{const i=hook++;if(!(i in states))states[i]=initial;return [states[i],next=>states[i]=typeof next==='function'?next(states[i]):next]}
@@ -578,7 +578,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.14')
+  assert.equal(api.VERSION,'1.7.15')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
