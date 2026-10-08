@@ -273,10 +273,30 @@ async function main() {
   const double=expand(Root({data:singleData,stale:false,error:null}))
   assert.ok(!double.some(x=>x.type==='GeometryReader'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
   assert.equal(double.filter(x=>x==='Codex').length,2)
+  // Medium label and countdown share ONE Text fitting operation, including long day strings.
+  scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
+  for(const days of [5,15,365]){
+    const iso=new Date(now+(days*24*60+15*60+33)*60000).toISOString()
+    const longData={...singleData,accounts:singleData.accounts.map(a=>({...a,sevenDay:{...a.sevenDay,resetsAt:iso}}))}
+    const tree=expand(Root({data:longData,stale:false,error:null}))
+    const fitted=tree.filter(x=>x.type==='Text'&&x.props.styledText)
+    assert.equal(fitted.length,8)
+    for(const t of fitted){
+      assert.equal(t.props.font,9);assert.equal(t.props.styledText.font,9);assert.equal(t.props.minScaleFactor,0.5)
+      assert.equal(t.props.lineLimit,1)
+      const [label,time]=t.props.styledText.content
+      for(const span of [label,time]){assert.equal(span.font,undefined);assert.equal(span.minScaleFactor,undefined)}
+      assert.equal(time.monospacedDigit,true)
+      assert.equal(time.content,' · '+(label.content==='每周'?api.fmtResetDays(iso):api.fmtReset(longData.accounts[0].fiveHour.resetsAt)))
+      if(label.content==='每周')assert.equal(time.content,` · ${days}天 15:33`)
+    }
+    assert.ok(!tree.some(x=>x.type==='Text'&&x.props.minScaleFactor===0.8))
+  }
   // Optional direct comparison with a real pre-change widget (no fixture copied into project).
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
-    for(const family of ['systemSmall','systemMedium']){
+    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemLarge','']]){
+      scripting.Widget.parameter=parameter
       scripting.Widget.family=family
       const enabledData={...singleData,accounts:singleData.accounts.map(a=>({...a,enabled:true}))}
       const current=expand(Root({data:enabledData,stale:false,error:null}))
@@ -284,7 +304,12 @@ async function main() {
       const visualProps=(key,value)=>key==='muted'&&value===false?undefined:value // new opt-in metadata does not alter enabled visuals
       assert.equal(JSON.stringify(current,visualProps),JSON.stringify(previous,visualProps),family+' unchanged baseline layout tree')
     }
-    console.log('PASS: exact baseline layout tree comparison: Small two-account, Medium')
+    scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
+    const currentMedium=expand(Root({data:singleData,stale:false,error:null}))
+    const previousMedium=expand(baseline({data:singleData,stale:false,error:null}))
+    const quotaGeometry=tree=>tree.filter(x=>x.type==='SVG'||x.type==='RoundedRectangle'||(x.type==='Text'&&x.props.children==='%'))
+    assert.equal(JSON.stringify(quotaGeometry(currentMedium)),JSON.stringify(quotaGeometry(previousMedium)))
+    console.log('PASS: exact 1.7.7 baseline trees: Small single/double, Large; Medium LCD/percent/bar geometry unchanged; label+time share one 9pt Text and fitting factor, 5/15/365-day strings intact')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -352,7 +377,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.7')
+  assert.equal(api.VERSION,'1.7.8')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')

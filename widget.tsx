@@ -252,7 +252,19 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
 type Scale = { title: number; label: number; lcd: number; bar: number; segs: number; gap: number }
 const MEDIUM_SCALE: Scale = { title: 12, label: 9, lcd: 11, bar: 4, segs: 10, gap: 2 }
 
-function QuadWindow({ label, w, fmt, s }: Win & { s: Scale }) {
+function QuadWindow({ label, w, fmt, s, uniformTimeFont = false }: Win & { s: Scale; uniformTimeFont?: boolean }) {
+  if (uniformTimeFont) return <VStack alignment="leading" spacing={s.gap}>
+    <HStack alignment="bottom" spacing={2}>
+      {/* One native Text owns both spans, so any fitting scales label AND countdown together. */}
+      <Text font={s.label} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.5}
+        styledText={{ font: s.label, content: [{ content: label }, { content: ` · ${fmt(w.resetsAt)}`, monospacedDigit: true }] }} />
+      <Spacer />
+      <HStack spacing={0} fixedSize={{ horizontal: true, vertical: false }}>
+        <Lcd value={w.remainingPercent} height={s.lcd} />
+      </HStack>
+    </HStack>
+    <SegBar remaining={w.remainingPercent} count={s.segs} height={s.bar} />
+  </VStack>
   return <VStack alignment="leading" spacing={s.gap}>
     <HStack alignment="bottom" spacing={2}>
       {/* 标签固定宽度（约两个汉字），“5 h”与“每周”对齐，后面的倒计时也对齐 */}
@@ -267,16 +279,16 @@ function QuadWindow({ label, w, fmt, s }: Win & { s: Scale }) {
   </VStack>
 }
 
-function Quad({ acc, s }: { acc?: Account; s: Scale }) {
+function Quad({ acc, s, uniformTimeFont = false }: { acc?: Account; s: Scale; uniformTimeFont?: boolean }) {
   if (!acc) return <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}><Spacer /></VStack>
   return <VStack alignment="leading" spacing={s.gap + 1} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} />)}
+    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} uniformTimeFont={uniformTimeFont} />)}
   </VStack>
 }
 
 // 十字分隔线画在底层，竖线贯穿整个高度、横线贯穿整个宽度
-function QuadGrid({ accounts, s }: { accounts: Account[]; s: Scale }) {
+function QuadGrid({ accounts, s, uniformTimeFont = false }: { accounts: Account[]; s: Scale; uniformTimeFont?: boolean }) {
   const a = accounts.slice(0, 4)
   const pad = s.gap * 2 + 3
   const cell = (acc?: Account, top = false, left = false) =>
@@ -284,7 +296,7 @@ function QuadGrid({ accounts, s }: { accounts: Account[]; s: Scale }) {
       padding={{ top: top ? 0 : pad, bottom: top ? pad : 0, leading: left ? 0 : 10, trailing: left ? 10 : 0 }}
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
     >
-      <Quad acc={acc} s={s} />
+      <Quad acc={acc} s={s} uniformTimeFont={uniformTimeFont} />
     </VStack>
   return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
     <Rectangle fill={DIVIDER} frame={{ width: 1, maxHeight: "infinity" }} />
@@ -298,7 +310,7 @@ function QuadGrid({ accounts, s }: { accounts: Account[]; s: Scale }) {
 
 // ---------- 中号：四宫格，最多 4 个账号 ----------
 function Medium({ data }: { data: UsageData }) {
-  return <QuadGrid accounts={data.accounts} s={MEDIUM_SCALE} />
+  return <QuadGrid accounts={data.accounts} s={MEDIUM_SCALE} uniformTimeFont />
 }
 
 // ---------- 大号：顶部今日统计 + 从上到下四个账号 ----------
