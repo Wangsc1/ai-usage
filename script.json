@@ -1,0 +1,15 @@
+{
+  "name" : "AI 用量",
+  "icon" : "sparkles",
+  "color" : "systemPurple",
+  "version" : "1.0.0",
+  "entry" : "index.tsx",
+  "runInApp" : false,
+  "description" : "显示 Parrot 中转的 AI 用量：今日/本月花费、Token、订阅账号剩余额度",
+  "localizedNames" : { "zh" : "AI 用量", "en" : "AI Usage" },
+  "localizedDescriptions" : { "zh" : "显示 Parrot 中转的 AI 用量：今日/本月花费、Token、订阅账号剩余额度" },
+  "intentInputTypes" : [],
+  "contributors" : [],
+  "author" : { "name" : "Wangsc1", "homepage" : "https://github.com/Wangsc1" },
+  "remoteResource" : { "url" : "https://github.com/Wangsc1/ai-usage", "autoUpdateInterval" : null }
+}
