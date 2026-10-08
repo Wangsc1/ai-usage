@@ -108,7 +108,7 @@ function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
 
 type Win = { label: string; w: QuotaWindow }
 const windowsOf = (a: Account): Win[] => [
-  { label: "5小时", w: a.fiveHour },
+  { label: "5 h", w: a.fiveHour },
   { label: "每周", w: a.sevenDay },
 ]
 
@@ -128,7 +128,7 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
         <VStack alignment="leading" spacing={4}>
           <HStack alignment="bottom" spacing={0}>
             <VStack alignment="leading" spacing={1}>
-              <Text font={11} foregroundStyle={SUB}>{label}</Text>
+              <Text font={11} foregroundStyle={SUB} frame={{ width: 24, alignment: "leading" as any }}>{label}</Text>
               <Text font={11} monospacedDigit foregroundStyle={FG}>{fmtReset(w.resetsAt)}</Text>
             </VStack>
             <Spacer />
@@ -149,8 +149,10 @@ const LARGE_SCALE: Scale = { title: 15, label: 11, lcd: 17, bar: 7, segs: 10, ga
 function QuadWindow({ label, w, s }: Win & { s: Scale }) {
   return <VStack alignment="leading" spacing={s.gap}>
     <HStack alignment="bottom" spacing={2}>
+      {/* 标签固定宽度（约两个汉字），“5 h”与“每周”对齐，后面的倒计时也对齐 */}
+      <Text font={s.label} foregroundStyle={SUB} lineLimit={1} frame={{ width: s.label * 2.1, alignment: "leading" as any }}>{label}</Text>
       <Text font={s.label} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.8}>
-        {label} · {fmtReset(w.resetsAt)}
+        · {fmtReset(w.resetsAt)}
       </Text>
       <Spacer />
       <Lcd value={w.remainingPercent} height={s.lcd} />
