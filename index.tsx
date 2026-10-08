@@ -1,10 +1,11 @@
 import {
   Button, Form, LabeledContent, Navigation, NavigationStack, Picker, Script, Section,
-  SecureField, Text, TextField, Toggle, Widget, useState, useEffect,
+  SecureField, Text, TextField, Toggle, Widget, HStack, VStack, useState, useEffect,
 } from "scripting"
-import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getSelectedAccounts, saveSelectedAccounts, widgetAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS } from "./api"
+import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getSelectedAccounts, saveSelectedAccounts, widgetAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource } from "./api"
+import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.6.9"
+const VERSION = "1.7.0"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -41,7 +42,11 @@ async function updateFromGitHub(force: boolean): Promise<string | null> {
 }
 
 function SettingsView() {
-  const dismiss = Navigation.useDismiss()
+  const close = Navigation.useDismiss()
+  const [source, setSource] = useState<DataSource>(getSource())
+  const [device, setDevice] = useState<DeviceLogin | null>(null)
+  const [logins, setLogins] = useState(officialAccounts())
+  const dismiss = () => { if (device) cancelDeviceLogin(device); close() }
   const cur = getConfig()
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
   const [key, setKey] = useState("")
@@ -55,8 +60,61 @@ function SettingsView() {
   const [selected, setSelected] = useState<string[]>(getSelectedAccounts() ?? widgetAccounts(cachedAccounts()).map(a => a.id))
 
   useEffect(() => {
-    if (cur.managementKey) test()
+    if (getSource() === "official" || cur.managementKey) test()
   }, [])
+
+  useEffect(() => () => { if (device) cancelDeviceLogin(device) }, [device])
+
+  async function changeSource(value: string) {
+    if (device) cancelDeviceLogin(device)
+    setDevice(null)
+    saveSource(value as DataSource)
+    setSource(value as DataSource)
+    setAccounts(cachedAccounts())
+    setSelected(getSelectedAccounts() ?? widgetAccounts(cachedAccounts()).map(a => a.id))
+    setLines([])
+    await test()
+    await Widget.reloadAll()
+  }
+
+  async function addOfficial() {
+    setBusy(true)
+    try {
+      const d = await beginDeviceLogin()
+      setDevice(d)
+      setStatus("请打开官方授权页输入下方一次性代码；完成后返回点“检查授权”")
+    } catch (e: any) { setStatus(e.message) }
+    setBusy(false)
+  }
+
+  async function checkOfficial() {
+    if (!device) return
+    setBusy(true)
+    try {
+      const result = await checkDeviceLogin(device)
+      if (result === "pending") setStatus("等待授权：请完成官方页面操作后再次检查（15分钟内有效）")
+      else {
+        setDevice(null)
+        setLogins(officialAccounts())
+        await test()
+      }
+    } catch (e: any) {
+      cancelDeviceLogin(device)
+      setDevice(null)
+      setStatus(e.message)
+    }
+    setBusy(false)
+  }
+
+  async function moveAccount(id: string, offset: number) {
+    const next = [...accounts]
+    const i = next.findIndex(a => a.id === id), j = i + offset
+    if (i < 0 || j < 0 || j >= next.length) return
+    ;[next[i], next[j]] = [next[j], next[i]]
+    saveAccountOrder(next.map(a => a.id))
+    setAccounts(next)
+    await Widget.reloadAll()
+  }
 
   async function selectAccount(id: string, value: boolean) {
     if (value && selected.length >= 4) {
@@ -94,15 +152,17 @@ function SettingsView() {
       const r = await loadUsage()
       if (r.data) {
         setAccounts(r.data.accounts)
-        if (getSelectedAccounts() === null) setSelected(widgetAccounts(r.data.accounts).map(a => a.id))
+        setSelected(getSelectedAccounts() ?? widgetAccounts(r.data.accounts).map(a => a.id))
       }
       if (r.data && !r.stale) {
         const d = r.data
         setStatus("✅ 连接成功")
         setLines([
-          `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
-          `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
-          ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "Codex"} ${a.name.replace(/@.*$/, "")}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}`),
+          ...(d.today && d.month ? [
+            `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
+            `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
+          ] : ["官方额度接口未提供今日/本月Token及花费"]),
+          ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "Codex"} ${a.name.replace(/@.*$/, "")}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
         ])
         await Widget.reloadAll()
       } else {
@@ -134,24 +194,57 @@ function SettingsView() {
         cancellationAction: <Button title={"完成"} action={dismiss} />,
       }}
     >
-      <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
+      <Section header={<Text>数据来源</Text>} footer={<Text>切换不删除另一来源的配置、账号或选择。普通 API Key 不能查询 Parrot 管理接口。</Text>}>
+        <Picker title={"来源"} value={source} onChanged={changeSource} disabled={busy}>
+          <Text tag={"parrot"}>Parrot密钥</Text>
+          <Text tag={"official"}>OpenAI/Codex官方OAuth</Text>
+        </Picker>
+      </Section>
+
+      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>在官方页面登录你要添加的账号，可先退出浏览器的其他账号。Token仅存本机钥匙串；列表使用匿名编号，不展示邮箱。退出只移除此账号的本机登录。</Text>}>
+        {!device ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy} /> : <>
+          <Text>一次性代码：{device.code}</Text>
+          <Text>仅输入你自己在此脚本发起的代码，有效期15分钟。</Text>
+          <Button title={"打开官方授权页"} action={async () => { try { await Safari.present("https://auth.openai.com/codex/device") } catch { setStatus("无法打开官方授权页，请稍后重试") } }} disabled={busy} />
+          <Button title={"检查授权"} action={checkOfficial} disabled={busy} />
+          <Button title={"取消登录"} action={() => { cancelDeviceLogin(device); setDevice(null); setStatus("已取消登录") }} />
+        </>}
+        {logins.map(a => <Button title={`退出 ${a.name}`} disabled={busy || !!device} action={async () => {
+          try {
+            logoutOfficial(a.id)
+            setLogins(officialAccounts())
+            setAccounts(cachedAccounts())
+            setSelected(getSelectedAccounts() ?? widgetAccounts(cachedAccounts()).map(a => a.id))
+            await test()
+            await Widget.reloadAll()
+          } catch (e: any) { setStatus(e.message) }
+        }} />)}
+        <Button title={"刷新官方额度"} action={test} disabled={busy || !!device} />
+      </Section> : <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
         <SecureField title={"管理密钥"} value={key} onChanged={setKey} prompt={hasKey ? "已保存，留空沿用" : "managementKey"} />
         <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
         {hasKey ? <Button title={"测试连接"} action={test} disabled={busy} /> : null}
-      </Section>
+      </Section>}
 
       <Section header={<Text>状态</Text>}>
         <Text>{status}</Text>
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
-      <Section header={<Text>小组件账号（最多4个）</Text>} footer={<Text>含已停用账号。勾选顺序即四宫格顺序。也可长按桌面小组件→编辑→参数，填列表序号并用逗号分隔（如1,3,4），单独指定该组件的账号。</Text>}>
-        {accounts.map((a, i) => <Toggle
-          title={`${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}${a.enabled ? "" : "（已停用）"}`}
-          value={selected.includes(a.id)}
-          onChanged={(value: boolean) => selectAccount(a.id, value)}
-        />)}
+      <Section header={<Text>小组件账号（最多4个）</Text>} footer={<Text>含已停用账号。用上移/下移排序，勾选账号按此列表顺序显示。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。两种来源的排序独立保存。</Text>}>
+        {accounts.map((a, i) => <VStack alignment="leading" spacing={4}>
+          <Toggle
+            title={`${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}${a.enabled ? "" : "（已停用）"}`}
+            value={selected.includes(a.id)}
+            onChanged={(value: boolean) => selectAccount(a.id, value)}
+            disabled={busy}
+          />
+          <HStack spacing={12}>
+            <Button title={"上移"} buttonStyle="borderless" action={() => moveAccount(a.id, -1)} disabled={busy || i === 0} />
+            <Button title={"下移"} buttonStyle="borderless" action={() => moveAccount(a.id, 1)} disabled={busy || i === accounts.length - 1} />
+          </HStack>
+        </VStack>)}
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>
 
@@ -178,9 +271,9 @@ function SettingsView() {
         {updateMsg ? <Text>{updateMsg}</Text> : null}
       </Section>
 
-      <Section>
+      {source === "parrot" ? <Section>
         <Button
-          title={"清除配置"}
+          title={"清除Parrot配置"}
           action={async () => {
             clearConfig()
             setHasKey(false)
@@ -192,7 +285,7 @@ function SettingsView() {
             await Widget.reloadAll()
           }}
         />
-      </Section>
+      </Section> : null}
     </Form>
   </NavigationStack>
 }

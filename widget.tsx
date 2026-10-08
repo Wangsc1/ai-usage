@@ -228,9 +228,11 @@ function Medium({ data }: { data: UsageData }) {
 // ---------- 大号：顶部今日统计 + 从上到下四个账号 ----------
 function LargeQuota({ label, w, fmt }: Win) {
   return <HStack spacing={5}>
-    <Text font={9} foregroundStyle={SUB} frame={{ width: 20, alignment: "leading" as any }}>{label}</Text>
-    <Text font={9} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.8}
-      frame={{ width: 65, alignment: "leading" as any }}>· {fmt(w.resetsAt)}</Text>
+    <HStack spacing={1}>
+      <Text font={9} foregroundStyle={SUB} frame={{ width: 20, alignment: "leading" as any }}>{label}</Text>
+      <Text font={9} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.8}
+        frame={{ width: 65, alignment: "leading" as any }}>· {fmt(w.resetsAt)}</Text>
+    </HStack>
     <SegBar remaining={w.remainingPercent} count={20} height={5} />
     <Lcd value={w.remainingPercent} height={12} />
   </HStack>
@@ -240,31 +242,35 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const m = data.today
   const month = data.month
   // Token缓存命中率：缓存读取占全部输入侧Token的比例，不包含输出。
-  const cacheRate = (m: UsageData["today"]) => {
+  const cacheRate = (m: NonNullable<UsageData["today"]>) => {
     const total = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
     return total > 0 ? (m.cacheReadTokens / total * 100).toFixed(1) + "%" : "--"
   }
   const stat = (label: string, value: string) => <VStack alignment="leading" spacing={1} frame={{ maxWidth: "infinity" }}>
-    <Text font={9} foregroundStyle={SUB}>{label}</Text>
+    <Text font={9} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.7}>{label}</Text>
     <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
   </VStack>
   return <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    {m && month ? <>
     <Text font={9} foregroundStyle={SUB}>今日</Text>
-    <HStack spacing={6}>
+    <HStack spacing={4}>
       {stat("输入", fmtTokens(m.inputTokens))}
       {stat("输出", fmtTokens(m.outputTokens))}
       {stat("缓存", fmtTokens(m.cacheReadTokens + m.cacheCreationTokens))}
       {stat("缓存率", cacheRate(m))}
+      {stat("Token", fmtTokens(m.totalTokens))}
       {stat("估算花费", fmtUsd(m.costUsd))}
     </HStack>
     <Text font={9} foregroundStyle={SUB}>本月</Text>
-    <HStack spacing={6}>
+    <HStack spacing={4}>
       {stat("输入", fmtTokens(month.inputTokens))}
       {stat("输出", fmtTokens(month.outputTokens))}
       {stat("缓存", fmtTokens(month.cacheReadTokens + month.cacheCreationTokens))}
       {stat("缓存率", cacheRate(month))}
+      {stat("Token", fmtTokens(month.totalTokens))}
       {stat("估算花费", fmtUsd(month.costUsd))}
     </HStack>
+    </> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
     <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
       {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>

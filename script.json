@@ -2,10 +2,10 @@
   "name": "AI Usage",
   "icon": "gauge.with.dots.needle.67percent",
   "color": "rgba(126, 217, 87,1)",
-  "version": "1.6.9",
+  "version": "1.7.0",
   "entry": "index.tsx",
   "runInApp": false,
-  "description": "Parrot AI usage widget: 5-hour and weekly quota of subscription accounts.",
+  "description": "AI usage widget: Parrot management key or independent OpenAI/Codex OAuth quota.",
   "localizedNames": {
     "zh": "AI 用量",
     "en": "",
@@ -18,7 +18,7 @@
     "ru": ""
   },
   "localizedDescriptions": {
-    "zh": "显示 Parrot 订阅账号的 5 小时与每周剩余额度",
+    "zh": "通过 Parrot 管理密钥或独立 OpenAI/Codex OAuth 显示 5 小时与每周剩余额度",
     "en": "",
     "ja": "",
     "de": "",
