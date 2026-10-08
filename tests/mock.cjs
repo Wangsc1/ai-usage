@@ -18,7 +18,8 @@ function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
   let code = fs.readFileSync(name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
-  if (name === 'widget.tsx' || name === 'baseline-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
+  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget }')
+  if (name === 'baseline-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
@@ -129,8 +130,9 @@ async function main() {
   assert.ok(!api.widgetAccounts(official.officialCached().accounts).some(a=>a.id===first.id))
   assert.equal(kc.get('parrot_management_key'),'mock-management'); api.saveSource('parrot'); assert.equal(storage.get('ai_usage_selected_accounts_v1')[0],'parrot-account')
   // JSX tree simulation verifies official stats not rendered as zero and unchanged family geometry.
-  const {Root}=load('widget.tsx')
-  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(n.type(n.props));return [n,...expand(n.props?.children)] }
+  const {Root,PeriodStats,statsWidthBudget}=load('widget.tsx')
+  let proposedStatsWidth=null
+  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(n.type(n.props));if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame.height}}))];return [n,...expand(n.props?.children)] }
   const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:i!==0,available:true,...mapped}))
   const data={today:null,month:null,accounts,fetchedAt:now,todayByFamily:{},monthByFamily:{}}
   for (const family of ['systemSmall','systemMedium','systemLarge']) {
@@ -161,32 +163,62 @@ async function main() {
   }
   result=await api.loadUsage(); assert.equal(result.stale,false);assert.equal(result.data.today.totalTokens,370)
   const parrotTree=expand(Root({data:result.data,stale:false,error:null}))
-  function checkStatsGrid(tree,count,labelFont,valueFont,gap,verticalGap){
-    const grids=tree.filter(x=>x.type==='Grid');assert.equal(grids.length,1)
-    const grid=grids[0];assert.equal(grid.props.alignment,'leading');assert.equal(grid.props.horizontalSpacing,0);assert.equal(grid.props.verticalSpacing,verticalGap)
-    assert.equal(grid.props.frame.alignment,'leading');assert.equal(grid.props.frame.maxWidth,'infinity')
-    const rows=Array.from(grid.props.children);assert.equal(rows.length,4)
-    for(const index of [0,2]){
-      const header=rows[index].props.children;assert.equal(header.props.gridCellColumns,count*2-1)
-      assert.equal(header.props.gridCellUnsizedAxes,'horizontal');assert.equal(header.props.gridCellAnchor,'topLeading')
-    }
-    assert.equal(rows[0].props.children.props.children,'今日');assert.equal(rows[2].props.children.props.children,'本月')
-    const statRows=[rows[1],rows[3]]
-    for(const row of statRows){
-      const cells=Array.from(row.props.children);assert.equal(cells.length,count*2-1);assert.equal(row.type,'GridRow')
-      assert.equal(cells[0].type,'VStack');assert.equal(cells.at(-1).type,'VStack') // no outside Spacer or blank edge columns
-      for(let i=0;i<cells.length;i++){
-        const cell=cells[i]
-        if(i%2){assert.equal(cell.type,'Spacer');assert.equal(cell.props.frame.minWidth,gap);assert.equal(cell.props.frame.maxWidth,'infinity');assert.equal(cell.props.frame.minHeight,1);assert.equal(cell.props.frame.maxHeight,1)}
-        else{assert.equal(cell.type,'VStack');assert.equal(cell.props.alignment,'leading');assert.equal(cell.props.gridColumnAlignment,'leading');assert.equal(cell.props.spacing,1);assert.equal(cell.props.frame,undefined);assert.equal(cell.props.children[0].props.font,labelFont);assert.equal(cell.props.children[1].props.font,valueFont)}
+  function checkStatsLayout(tree,count,labelFont,valueFont,gap,verticalGap){
+    const readers=tree.filter(x=>x.type==='GeometryReader');assert.equal(readers.length,1)
+    assert.equal(readers[0].props.frame.height,4*Math.ceil(labelFont*1.2)+2*Math.ceil(valueFont*1.2)+3*verticalGap+2)
+    assert.ok(!tree.some(x=>x.type==='Grid'||x.type==='GridRow'))
+    const row=tree.find(x=>x.type==='HStack'&&x.props.spacing===0&&x.props.children?.length===count*2-1)
+    assert.ok(row);assert.equal(row.props.frame.alignment,'leading');assert.equal(row.props.alignment,'top')
+    const cells=Array.from(row.props.children);assert.equal(cells[0].type,'VStack');assert.equal(cells.at(-1).type,'VStack')
+    const columns=cells.filter(x=>x.type==='VStack')
+    const scale=columns[0].props.children[0].props.children[0].props.font/labelFont
+    assert.ok(scale>0&&scale<=1)
+    for(let i=0;i<cells.length;i++){
+      const cell=cells[i]
+      if(i%2){assert.equal(cell.type,'Spacer');assert.ok(Math.abs(cell.props.frame.minWidth-gap*scale)<1e-9);assert.equal(cell.props.frame.maxWidth,'infinity')}
+      else {
+        assert.equal(cell.props.alignment,'leading');assert.equal(cell.props.spacing,verticalGap)
+        assert.equal(cell.props.fixedSize.horizontal,true);assert.equal(cell.props.fixedSize.vertical,true)
+        assert.equal(cell.props.frame,undefined);assert.equal(cell.props.children.length,2)
+        for(let p=0;p<2;p++){
+          const group=cell.props.children[p];assert.equal(group.props.alignment,'leading');assert.equal(group.props.spacing,verticalGap)
+          const [heading,stat]=group.props.children
+          assert.equal(heading.props.children,p?'本月':'今日');assert.equal(heading.props.opacity,i===0?1:0)
+          assert.equal(stat.props.alignment,'leading');assert.equal(stat.props.spacing,1)
+          const texts=[heading,...stat.props.children]
+          for(const t of texts){assert.equal(t.props.fixedSize.horizontal,true);assert.equal(t.props.fixedSize.vertical,true);assert.equal(t.props.lineLimit,1);assert.equal(t.props.minScaleFactor,undefined)}
+          assert.ok(Math.abs(heading.props.font-labelFont*scale)<1e-9);assert.ok(Math.abs(stat.props.children[0].props.font-labelFont*scale)<1e-9)
+          assert.ok(Math.abs(stat.props.children[1].props.font-valueFont*scale)<1e-9)
+        }
       }
     }
-    return statRows.map(row=>({props:{children:Array.from(row.props.children).filter(x=>x.type==='VStack')}}))
+    return [0,1].map(p=>({props:{children:columns.map(col=>col.props.children[p].props.children[1])}}))
   }
-  const labels=checkStatsGrid(parrotTree,6,9,12,4,6)
-  // Deliberately different string widths share native intrinsic columns in a SINGLE Grid.
+  // Screenshot-sized examples, including longer month values. These are width-model checks, not native glyph measurements.
+  const exampleToday=['4.4M','275.1K','80.7M','93.2%','85.4M','$31.3']
+  const exampleMonth=['26.4M','1.3M','440M','91.1%','468M','$199.9']
+  const exampleLabels=['输入','输出','缓存','缓存率','Token','估算花费']
+  const exampleColumns=exampleLabels.map((label,i)=>({label,today:exampleToday[i],month:exampleMonth[i]}))
+  for(const [indexes,lf,vf,gap,vg,widths] of [[[0,1,2,3,4,5],9,12,4,6,[330,300]],[[2,3,4,5],7,9,2,2,[130,120]]]){
+    const cols=indexes.map(i=>({...exampleColumns[i],label:i===5&&indexes.length===4?'花费':exampleColumns[i].label}))
+    for(const width of widths){
+      const budget=statsWidthBudget(cols,lf,vf,gap,width)
+      assert.ok(budget.fitted<=width+1e-9);assert.ok(budget.scale>0.7&&budget.scale<=1)
+      const rescaled=statsWidthBudget(cols,lf*budget.scale,vf*budget.scale,gap*budget.scale,width)
+      assert.ok(rescaled.natural<=width+1e-9)
+      proposedStatsWidth=width
+      const tree=expand(PeriodStats({columns:cols,labelFont:lf,valueFont:vf,gap,verticalGap:vg}))
+      const rows=checkStatsLayout(tree,cols.length,lf,vf,gap,vg)
+      for(let p=0;p<2;p++)assert.deepEqual(Array.from(rows[p].props.children,x=>x.props.children[1].props.children),cols.map(c=>c[p?'month':'today']))
+      assert.ok(!tree.some(x=>typeof x==='string'&&(x.includes('...')||x.includes('…'))))
+      console.log(`MODEL: ${cols.length} columns, width=${width}, budget=${budget.natural.toFixed(2)}, shared scale=${budget.scale.toFixed(3)}, fitted=${budget.fitted.toFixed(2)}`)
+    }
+  }
+  proposedStatsWidth=null
+  const labels=checkStatsLayout(parrotTree,6,9,12,4,6)
+  // Each uncompressed column owns both periods; a shared factor fits the measured container width.
   const varied={...result.data,month:{...result.data.month,inputTokens:987654321,outputTokens:1,cacheReadTokens:70000000,costUsd:1234.56,totalTokens:1057654322}}
-  const variedRows=checkStatsGrid(expand(Root({data:varied,stale:false,error:null})),6,9,12,4,6)
+  const variedRows=checkStatsLayout(expand(Root({data:varied,stale:false,error:null})),6,9,12,4,6)
   assert.notEqual(variedRows[0].props.children[0].props.children[1].props.children,variedRows[1].props.children[0].props.children[1].props.children)
   for(const family of ['systemSmall','systemMedium','systemLarge']) {
     scripting.Widget.family=family
@@ -228,7 +260,7 @@ async function main() {
   scripting.Widget.parameter='1'
   const singleData={...result.data,accounts,month:varied.month}
   const single=expand(Root({data:singleData,stale:false,error:null}))
-  const smallRows=checkStatsGrid(single,4,7,9,2,2)
+  const smallRows=checkStatsLayout(single,4,7,9,2,2)
   for(const row of smallRows)assert.deepEqual(Array.from(row.props.children,x=>x.props.children[0].props.children),['缓存','缓存率','Token','花费'])
   assert.deepEqual(Array.from(smallRows[0].props.children,x=>x.props.children[1].props.children),['70','17.6%','370','$0.1'])
   assert.equal(smallRows[1].props.children[3].props.children[1].props.children,'$1234.6')
@@ -236,10 +268,10 @@ async function main() {
   assert.equal(singleTexts.filter(x=>x==='Codex').length,1);assert.ok(singleTexts.includes('5 h'));assert.ok(singleTexts.includes('每周'))
   assert.ok(single.some(x=>x.type==='Image'&&x.props.systemName==='arrow.triangle.2.circlepath'))
   const missing=expand(Root({data:{...singleData,today:null,month:null},stale:false,error:null}))
-  assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='Grid'));assert.ok(!missing.some(x=>x==='$0.0'))
+  assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='GeometryReader'));assert.ok(!missing.some(x=>x==='$0.0'))
   scripting.Widget.parameter='1,2'
   const double=expand(Root({data:singleData,stale:false,error:null}))
-  assert.ok(!double.some(x=>x.type==='Grid'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
+  assert.ok(!double.some(x=>x.type==='GeometryReader'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
   assert.equal(double.filter(x=>x==='Codex').length,2)
   // Optional direct comparison with a real pre-change widget (no fixture copied into project).
   if(process.env.BASELINE_WIDGET_PATH){
@@ -274,7 +306,7 @@ async function main() {
   assert.ok(ui.some(x=>typeof x==='string'&&x==='1. Codex · 匿名0'))
   assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('已停用')))
   const appDisabled=ui.find(x=>x.type==='Text'&&x.props.children==='1. Codex · 匿名0')
-  assert.equal(JSON.stringify(appDisabled.props.foregroundStyle),JSON.stringify({light:'#5E6068',dark:'#8E8E93'}))
+  assert.equal(appDisabled.props.foregroundStyle,undefined)
   const appEnabled=ui.find(x=>x.type==='Text'&&x.props.children==='2. Codex · 匿名1')
   assert.equal(appEnabled.props.foregroundStyle,undefined)
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
@@ -316,16 +348,16 @@ async function main() {
     const a=statusAccounts[i]
     const appRow=statusUI.find(x=>x.type==='Text'&&x.props.children===`${i+1}. ${a.provider==='claude'?'Claude':'Codex'} · ${a.name}`)
     assert.ok(appRow)
-    assert.equal(JSON.stringify(appRow.props.foregroundStyle),a.enabled?undefined:JSON.stringify(gray))
+    assert.equal(appRow.props.foregroundStyle,undefined) // App never inherits widget disabled foreground
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.6')
+  assert.equal(api.VERSION,'1.7.7')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared intrinsic 6-column Grid/leading alignment/no outer blank cells/equal internal flexible Spacers; dual-arrow refresh icon in 3 families; Small one-account 4 stats/shared intrinsic Grid/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 families/App, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 widget families, App foreground always normal, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

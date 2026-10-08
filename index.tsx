@@ -5,7 +5,7 @@ import {
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.6"
+const VERSION = "1.7.7"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -247,7 +247,7 @@ function SettingsView() {
           }}
           onDrop={accountDrop(a.id)}
         >
-          <Text foregroundStyle={a.enabled ? undefined : { light: "#5E6068", dark: "#8E8E93" }}>{`${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`}</Text>
+          <Text>{`${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`}</Text>
         </VStack>)}
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>

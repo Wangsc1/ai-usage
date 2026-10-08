@@ -1,4 +1,4 @@
-import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, Grid, GridRow, Widget, VirtualNode } from "scripting"
+import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode } from "scripting"
 import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes } from "./api"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
@@ -153,34 +153,50 @@ const windowsOf = (a: Account): Win[] => [
   { label: "每周", w: a.sevenDay, fmt: fmtResetDays },
 ]
 
-// One Grid shares intrinsic statistic-column widths across BOTH periods.
-// Only the internal separator columns expand; there are no outer spacers or padded final cells.
+// Each intrinsic column owns BOTH periods: no Grid flexible-column compression or spanning headings.
 type StatColumn = { label: string; today: string; month: string }
-function PeriodStats({ columns, labelFont, valueFont, minScale, gap, verticalGap }: {
-  columns: StatColumn[]; labelFont: number; valueFont: number; minScale: number; gap: number; verticalGap: number
+// Conservative SF text-width budget, NOT native text measurement. Fixed-size text is the no-ellipsis guard.
+function statTextBudget(text: string, font: number): number {
+  let em = 0
+  for (const ch of text) em += /[0-9]/.test(ch) ? 0.7 : ch === "." ? 0.4 : ch === "$" ? 0.8 : /[MW%]/.test(ch) ? 1 : /[\u0000-\u007f]/.test(ch) ? 0.85 : 1
+  return (em + 0.25) * font // reserve scales with the single shared font factor
+}
+function statsWidthBudget(columns: StatColumn[], labelFont: number, valueFont: number, gap: number, width: number) {
+  const columnWidths = columns.map(c => Math.max(statTextBudget(c.label, labelFont), statTextBudget(c.today, valueFont),
+    statTextBudget(c.month, valueFont), statTextBudget("今日", labelFont)))
+  const natural = columnWidths.reduce((sum, w) => sum + w, 0) + gap * (columns.length - 1)
+  const scale = Math.min(1, Math.max(1, width) / natural)
+  return { columnWidths, natural, scale, fitted: natural * scale }
+}
+function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap }: {
+  columns: StatColumn[]; labelFont: number; valueFont: number; gap: number; verticalGap: number
 }) {
-  const row = (period: "today" | "month") => {
-    const cells: VirtualNode[] = []
-    columns.forEach((c, i) => {
-      if (i > 0) cells.push(<Spacer frame={{ minWidth: gap, maxWidth: "infinity", minHeight: 1, maxHeight: 1 }} />)
-      cells.push(<VStack alignment="leading" spacing={1} gridColumnAlignment="leading">
-        <Text font={labelFont} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.7}>{c.label}</Text>
-        <Text font={valueFont} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={minScale}>{c[period]}</Text>
-      </VStack>)
-    })
-    return <GridRow alignment="top">{cells}</GridRow>
-  }
-  const heading = (name: string) => <GridRow>
-    <Text font={labelFont} foregroundStyle={SUB} gridCellColumns={columns.length * 2 - 1}
-      gridCellUnsizedAxes="horizontal" gridCellAnchor="topLeading">{name}</Text>
-  </GridRow>
-  return <Grid alignment="leading" horizontalSpacing={0} verticalSpacing={verticalGap}
-    frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-    {heading("今日")}
-    {row("today")}
-    {heading("本月")}
-    {row("month")}
-  </Grid>
+  // Bound reader height to six text lines + the existing inter-period/label gaps, rather than filling the widget.
+  const height = 4 * Math.ceil(labelFont * 1.2) + 2 * Math.ceil(valueFont * 1.2) + 3 * verticalGap + 2
+  return <GeometryReader frame={{ height }}>
+    {proxy => {
+      const width = proxy.size.width
+      const { scale } = statsWidthBudget(columns, labelFont, valueFont, gap, width)
+      const cells: VirtualNode[] = []
+      columns.forEach((c, i) => {
+        if (i > 0) cells.push(<Spacer frame={{ minWidth: gap * scale, maxWidth: "infinity" }} />)
+        const period = (heading: string, value: string) => <VStack alignment="leading" spacing={verticalGap}>
+          <Text font={labelFont * scale} foregroundStyle={SUB} opacity={i === 0 ? 1 : 0}
+            fixedSize={{ horizontal: true, vertical: true }} lineLimit={1}>{heading}</Text>
+          <VStack alignment="leading" spacing={1}>
+            <Text font={labelFont * scale} foregroundStyle={SUB} fixedSize={{ horizontal: true, vertical: true }} lineLimit={1}>{c.label}</Text>
+            <Text font={valueFont * scale} fontWeight="semibold" monospacedDigit foregroundStyle={FG}
+              fixedSize={{ horizontal: true, vertical: true }} lineLimit={1}>{value}</Text>
+          </VStack>
+        </VStack>
+        cells.push(<VStack alignment="leading" spacing={verticalGap} fixedSize={{ horizontal: true, vertical: true }}>
+          {period("今日", c.today)}
+          {period("本月", c.month)}
+        </VStack>)
+      })
+      return <HStack alignment="top" spacing={0} frame={{ width, alignment: "leading" as any }}>{cells}</HStack>
+    }}
+  </GeometryReader>
 }
 
 // Same Parrot summary scope as Large, not per-account totals.
@@ -195,7 +211,7 @@ function SmallStats({ data }: { data: UsageData }) {
       fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
   }
   const t = values(today), m = values(month)
-  return <PeriodStats labelFont={7} valueFont={9} minScale={0.65} gap={2} verticalGap={2}
+  return <PeriodStats labelFont={7} valueFont={9} gap={2} verticalGap={2}
     columns={["缓存", "缓存率", "Token", "花费"].map((label, i) => ({ label, today: t[i], month: m[i] }))} />
 }
 
@@ -309,7 +325,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const values = (m: NonNullable<UsageData["today"]>) => [fmtTokens(m.inputTokens), fmtTokens(m.outputTokens),
     fmtTokens(m.cacheReadTokens + m.cacheCreationTokens), cacheRate(m), fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
   return <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    {m && month ? <PeriodStats labelFont={9} valueFont={12} minScale={0.7} gap={4} verticalGap={6}
+    {m && month ? <PeriodStats labelFont={9} valueFont={12} gap={4} verticalGap={6}
       columns={["输入", "输出", "缓存", "缓存率", "Token", "估算花费"].map((label, i) => ({
         label, today: values(m)[i], month: values(month)[i],
       }))} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
