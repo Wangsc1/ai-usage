@@ -4,6 +4,42 @@ import {
 } from "scripting"
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct } from "./api"
 
+const VERSION = "1.3.0"
+const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
+// script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
+const FILES = ["api.ts", "widget.tsx", "index.tsx"]
+
+function newer(a: string, b: string) {
+  const pa = a.split(".").map(Number), pb = b.split(".").map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d) return d > 0
+  }
+  return false
+}
+
+// 从 GitHub 拉取最新文件覆盖当前脚本目录；返回新版本号，已是最新返回 null
+async function updateFromGitHub(force: boolean): Promise<string | null> {
+  const bust = `?t=${Date.now()}`
+  const meta = await fetch(RAW + "script.json" + bust, { timeout: 20 })
+  if (meta.status !== 200) throw new Error(`获取版本信息失败（HTTP ${meta.status}）`)
+  const remote = String((await meta.json())?.version ?? "")
+  if (!force && !newer(remote, VERSION)) return null
+  // 先全部下载成功再写入，避免半更新
+  const bodies: string[] = []
+  for (const f of FILES) {
+    const r = await fetch(RAW + f + bust, { timeout: 20 })
+    if (r.status !== 200) throw new Error(`下载 ${f} 失败（HTTP ${r.status}）`)
+    const t = await r.text()
+    if (!t.trim()) throw new Error(`${f} 内容为空`)
+    bodies.push(t)
+  }
+  for (let i = 0; i < FILES.length; i++) {
+    await FileManager.writeAsString(Script.directory + "/" + FILES[i], bodies[i])
+  }
+  return remote
+}
+
 function SettingsView() {
   const dismiss = Navigation.useDismiss()
   const cur = getConfig()
@@ -13,6 +49,24 @@ function SettingsView() {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState(hasKey ? "已配置，可点“测试连接”" : "未配置：填写后点“保存并测试”")
   const [lines, setLines] = useState<string[]>([])
+  const [updateMsg, setUpdateMsg] = useState("")
+
+  async function checkUpdate(force: boolean) {
+    setBusy(true)
+    setUpdateMsg("检查中…")
+    try {
+      const v = await updateFromGitHub(force)
+      if (v) {
+        setUpdateMsg(`✅ 已更新到 ${v}，点“完成”退出后重新运行生效`)
+        await Widget.reloadAll()
+      } else {
+        setUpdateMsg(`已是最新版本 ${VERSION}`)
+      }
+    } catch (e: any) {
+      setUpdateMsg("❌ " + String(e?.message ?? e))
+    }
+    setBusy(false)
+  }
 
   async function test() {
     setBusy(true)
@@ -26,7 +80,7 @@ function SettingsView() {
         setLines([
           `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
           `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
-          ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "GPT"} ${a.name.replace(/@.*$/, "")}：5小时余 ${fmtPct(a.fiveHour.remainingPercent)}`),
+          ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "Codex"} ${a.name.replace(/@.*$/, "")}：5小时余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}`),
         ])
         await Widget.reloadAll()
       } else {
@@ -76,8 +130,14 @@ function SettingsView() {
         <Button title={"大"} action={() => Widget.preview({ family: "systemLarge" })} />
       </Section>
 
+      <Section header={<Text>更新</Text>} footer={<Text>从 GitHub 拉取最新版本覆盖当前脚本，配置和密钥保留。</Text>}>
+        <LabeledContent title={"当前版本"} value={VERSION} />
+        <Button title={"检查更新"} action={() => checkUpdate(false)} disabled={busy} />
+        <Button title={"强制重新下载"} action={() => checkUpdate(true)} disabled={busy} />
+        {updateMsg ? <Text>{updateMsg}</Text> : null}
+      </Section>
+
       <Section>
-        <LabeledContent title={"版本"} value={"1.2.0"} />
         <Button
           title={"清除配置"}
           action={async () => {
