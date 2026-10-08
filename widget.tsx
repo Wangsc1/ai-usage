@@ -231,36 +231,34 @@ function SmallStats({ data }: { data: UsageData }) {
 }
 
 // ---------- 小号：上下两个账号，各自5 h在上、每周在下 ----------
+// Shared geometry: stats frame 66pt + at least 8pt breathing room; lower account budget 52pt + 4pt inset.
+function smallRegionLayout(height: number) {
+  const dividerY = Math.max(74, Math.min(height * 0.56, height - 57))
+  return { dividerY, lowerY: dividerY + 1 + 4, lowerHeight: height - dividerY - 1, fits: height >= 131 }
+}
 function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
-  const accounts = data.accounts.slice(0, 2)
-  // Only the final one-account selection gets stats. The two-account path below is unchanged.
-  if (data.accounts.length === 1) return <VStack alignment="leading" spacing={4}
-    frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    <SmallStats data={data} />
-    <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
-    <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      <VStack alignment="leading" spacing={3}>
-        <AccountTitle acc={accounts[0]} font={s.title} />
-        {windowsOf(accounts[0]).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
-      </VStack>
-    </VStack>
+  const accounts = data.accounts.slice(0, 2), single = accounts.length === 1
+  const account = (acc: Account) => <VStack alignment="leading" spacing={3}>
+    <AccountTitle acc={acc} font={s.title} />
+    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
-  // 分隔线独立铺在几何中心，不放进下方账号的内容堆栈。
-  return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    {accounts.length > 1 ? <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} /> : null}
-    <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      {accounts.map((acc, i) => <VStack
-        padding={{ top: i > 0 ? 4 : 0, bottom: i === 0 && accounts.length > 1 ? 4 : 0 }}
-        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      >
-        <VStack alignment="leading" spacing={3}>
-          <AccountTitle acc={acc} font={s.title} />
-          {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
+  return <GeometryReader>
+    {proxy => {
+      const region = smallRegionLayout(proxy.size.height)
+      return <VStack alignment="leading" spacing={0} frame={{ width: proxy.size.width, height: proxy.size.height }}>
+        <VStack alignment="leading" spacing={0}
+          frame={{ height: region.dividerY, maxWidth: "infinity", alignment: "topLeading" as any }}>
+          {single ? <SmallStats data={data} /> : account(accounts[0])}
         </VStack>
-      </VStack>)}
-    </VStack>
-  </ZStack>
+        <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
+        <VStack alignment="leading" spacing={0} padding={{ top: 4 }}
+          frame={{ height: region.lowerHeight, maxWidth: "infinity", alignment: "topLeading" as any }}>
+          {account(single ? accounts[0] : accounts[1])}
+        </VStack>
+      </VStack>
+    }}
+  </GeometryReader>
 }
 
 // ---------- 四宫格：每格一个账号，5小时在上、每周在下 ----------
@@ -322,20 +320,38 @@ function Medium({ data }: { data: UsageData }) {
 
 // ---------- 大号：顶部今日统计 + 从上到下四个账号 ----------
 function LargeQuota({ label, w, fmt }: Win) {
-  return <HStack spacing={5}>
-    <HStack spacing={1}>
-      <Text font={9} foregroundStyle={SUB} frame={{ width: 20, alignment: "leading" as any }}>{label}</Text>
-      <Text font={9} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.8}
-        frame={{ width: 65, alignment: "leading" as any }}>· {fmt(w.resetsAt)}</Text>
+  return <VStack alignment="leading" spacing={MEDIUM_SCALE.gap} frame={{ maxWidth: "infinity" }}>
+    <HStack alignment="bottom" spacing={5} frame={{ maxWidth: "infinity" }}>
+      <HStack spacing={1}>
+        <Text font={9} foregroundStyle={SUB} frame={{ width: 20, alignment: "leading" as any }}>{label}</Text>
+        <Text font={9} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.8}
+          frame={{ width: 65, alignment: "leading" as any }}>· {fmt(w.resetsAt)}</Text>
+      </HStack>
+      <Spacer />
+      <Lcd value={w.remainingPercent} height={12} />
     </HStack>
     <LargeSegBar remaining={w.remainingPercent} />
-    <Lcd value={w.remainingPercent} height={12} />
-  </HStack>
+  </VStack>
+}
+
+// Height budget in points, NOT native font measurement. Large stats frame: 85pt (verticalGap 3), budgeted at 87pt.
+// Two 5pt section gaps replace 6pt gaps; keep a 2pt model reserve rather than spending every point.
+// Root reserves 24pt vertical padding and 14pt footer; 12pt title estimated at 15pt line height.
+// Each two-line window: max(12pt LCD, 11pt 9pt text) + Medium's 2pt gap + 5pt bar = 19pt.
+function largeHeightBudget(widgetHeight: number, accounts: number, hasStats: boolean) {
+  const n = Math.min(4, accounts), available = widgetHeight - 24 - 14
+  const fixed = (hasStats ? 87 : 12) + 11 + n * (15 + 2 * 19) + Math.max(0, n - 1)
+  const reserve = 2
+  const flexible = 3 * (2 * n + Math.max(0, n - 1)) + 5 * Math.max(0, n - 1)
+  const factor = flexible > 0 ? Math.min(1, Math.max(0, (available - fixed - reserve) / flexible)) : 1
+  return { available, fixed, accountGap: 5 * factor, windowGap: 3 * factor,
+    estimated: fixed + flexible * factor, reserve, fits: available >= fixed + reserve }
 }
 
 function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const m = data.today
   const month = data.month
+  const heightBudget = largeHeightBudget(Widget.displaySize.height, data.accounts.length, !!(m && month))
   // Token缓存命中率：缓存读取占全部输入侧Token的比例，不包含输出。
   const cacheRate = (m: NonNullable<UsageData["today"]>) => {
     const total = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
@@ -343,14 +359,14 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   }
   const values = (m: NonNullable<UsageData["today"]>) => [fmtTokens(m.inputTokens), fmtTokens(m.outputTokens),
     fmtTokens(m.cacheReadTokens + m.cacheCreationTokens), cacheRate(m), fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
-  return <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    {m && month ? <PeriodStats labelFont={9} valueFont={12} gap={4} verticalGap={6}
+  return <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    {m && month ? <PeriodStats labelFont={9} valueFont={12} gap={4} verticalGap={3}
       columns={["输入", "输出", "缓存", "缓存率", "Token", "估算花费"].map((label, i) => ({
         label, today: values(m)[i], month: values(month)[i],
       }))} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
-    <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    <VStack alignment="leading" spacing={heightBudget.accountGap} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={heightBudget.windowGap} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
         {i > 0 ? <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} /> : null}
         <AccountTitle acc={acc} font={12} />
         {windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} />)}

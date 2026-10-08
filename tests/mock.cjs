@@ -18,7 +18,7 @@ function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
   let code = fs.readFileSync(name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
-  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd }')
+  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, largeHeightBudget, smallRegionLayout }')
   if (name === 'baseline-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
@@ -130,11 +130,11 @@ async function main() {
   assert.ok(!api.widgetAccounts(official.officialCached().accounts).some(a=>a.id===first.id))
   assert.equal(kc.get('parrot_management_key'),'mock-management'); api.saveSource('parrot'); assert.equal(storage.get('ai_usage_selected_accounts_v1')[0],'parrot-account')
   // JSX tree simulation verifies official stats not rendered as zero and unchanged family geometry.
-  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd}=load('widget.tsx')
+  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd,largeHeightBudget,smallRegionLayout}=load('widget.tsx')
   scripting.Widget.displaySize={width:358,height:376}
   let normalizeLargeBar=false
   let proposedStatsWidth=null
-  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame.height===5?180:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame.height}}))];return [n,...expand(n.props?.children)] }
+  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame?.height===5?330:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame?.height??134}}))];return [n,...expand(n.props?.children)] }
   const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:i!==0,available:true,...mapped}))
   const data={today:null,month:null,accounts,fetchedAt:now,todayByFamily:{},monthByFamily:{}}
   for (const family of ['systemSmall','systemMedium','systemLarge']) {
@@ -166,7 +166,7 @@ async function main() {
   result=await api.loadUsage(); assert.equal(result.stale,false);assert.equal(result.data.today.totalTokens,370)
   const parrotTree=expand(Root({data:result.data,stale:false,error:null}))
   function checkStatsLayout(tree,count,labelFont,valueFont,gap,verticalGap){
-    const readers=tree.filter(x=>x.type==='GeometryReader'&&x.props.frame.height!==5);assert.equal(readers.length,1)
+    const readers=tree.filter(x=>x.type==='GeometryReader'&&x.props.frame?.height!==5&&x.props.frame?.height!=null);assert.equal(readers.length,1)
     assert.equal(readers[0].props.frame.height,4*Math.ceil(labelFont*1.2)+2*Math.ceil(valueFont*1.2)+3*verticalGap+2)
     assert.ok(!tree.some(x=>x.type==='Grid'||x.type==='GridRow'))
     const row=tree.find(x=>x.type==='HStack'&&x.props.spacing===0&&x.props.children?.length===count*2-1)
@@ -201,7 +201,7 @@ async function main() {
   const exampleMonth=['26.4M','1.3M','440M','91.1%','468M','$199.9']
   const exampleLabels=['输入','输出','缓存','缓存率','Token','估算花费']
   const exampleColumns=exampleLabels.map((label,i)=>({label,today:exampleToday[i],month:exampleMonth[i]}))
-  for(const [indexes,lf,vf,gap,vg,widths] of [[[0,1,2,3,4,5],9,12,4,6,[330,300]],[[2,3,4,5],7,9,2,2,[130,120]]]){
+  for(const [indexes,lf,vf,gap,vg,widths] of [[[0,1,2,3,4,5],9,12,4,3,[330,300]],[[2,3,4,5],7,9,2,2,[130,120]]]){
     const cols=indexes.map(i=>({...exampleColumns[i],label:i===5&&indexes.length===4?'花费':exampleColumns[i].label}))
     for(const width of widths){
       const budget=statsWidthBudget(cols,lf,vf,gap,width)
@@ -217,10 +217,10 @@ async function main() {
     }
   }
   proposedStatsWidth=null
-  const labels=checkStatsLayout(parrotTree,6,9,12,4,6)
+  const labels=checkStatsLayout(parrotTree,6,9,12,4,3)
   // Each uncompressed column owns both periods; a shared factor fits the measured container width.
   const varied={...result.data,month:{...result.data.month,inputTokens:987654321,outputTokens:1,cacheReadTokens:70000000,costUsd:1234.56,totalTokens:1057654322}}
-  const variedRows=checkStatsLayout(expand(Root({data:varied,stale:false,error:null})),6,9,12,4,6)
+  const variedRows=checkStatsLayout(expand(Root({data:varied,stale:false,error:null})),6,9,12,4,3)
   assert.notEqual(variedRows[0].props.children[0].props.children[1].props.children,variedRows[1].props.children[0].props.children[1].props.children)
   for(const family of ['systemSmall','systemMedium','systemLarge']) {
     scripting.Widget.family=family
@@ -270,10 +270,10 @@ async function main() {
   assert.equal(singleTexts.filter(x=>x==='Codex').length,1);assert.ok(singleTexts.includes('5 h'));assert.ok(singleTexts.includes('每周'))
   assert.ok(single.some(x=>x.type==='Image'&&x.props.systemName==='arrow.triangle.2.circlepath'))
   const missing=expand(Root({data:{...singleData,today:null,month:null},stale:false,error:null}))
-  assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='GeometryReader'));assert.ok(!missing.some(x=>x==='$0.0'))
+  assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='GeometryReader'&&x.props.frame?.height!=null));assert.ok(!missing.some(x=>x==='$0.0'))
   scripting.Widget.parameter='1,2'
   const double=expand(Root({data:singleData,stale:false,error:null}))
-  assert.ok(!double.some(x=>x.type==='GeometryReader'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
+  assert.ok(!double.some(x=>x.type==='GeometryReader'&&x.props.frame?.height!=null));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
   assert.equal(double.filter(x=>x==='Codex').length,2)
   // Small double (baseline), Small single and Medium: identical 8pt label/time, fixed label width, no per-text scaling.
   function quotaHeaders(tree){return tree.filter(x=>x.type==='HStack'&&x.props.alignment==='bottom'&&x.props.spacing===2&&x.props.children?.[1]?.props?.monospacedDigit)}
@@ -326,11 +326,11 @@ async function main() {
   assert.equal(largeReaders.length,8)
   const largeBarRows=largeTree.filter(x=>x.type==='HStack'&&x.props.spacing===2.25)
   assert.equal(largeBarRows.length,8)
-  for(const row of largeBarRows)assert.equal(row.props.children.length,largeSegmentLayout(180,358).count)
-  for(const [widgetWidth,barWidth] of [[320,145],[358,180],[390,210]]){
+  for(const row of largeBarRows)assert.equal(row.props.children.length,largeSegmentLayout(330,358).count)
+  for(const [widgetWidth,barWidth] of [[320,292],[358,330],[390,362]]){
     const layout=largeSegmentLayout(barWidth,widgetWidth)
     assert.ok(Math.abs(layout.segmentWidth-layout.target)<1)
-    assert.ok(layout.count<20);assert.ok(layout.count>=1)
+    assert.ok(layout.count>=20);assert.ok(layout.count>=1)
     assert.ok(Math.abs(layout.segmentWidth*layout.count+(layout.count-1)*2.25-barWidth)<1e-9)
     console.log(`MODEL: widget=${widgetWidth}, large bar=${barWidth}, target segment=${layout.target.toFixed(2)}, count=${layout.count}, actual segment=${layout.segmentWidth.toFixed(2)}`)
     for(const remaining of [null,0,21,60,100]){
@@ -344,47 +344,63 @@ async function main() {
       for(let i=0;i<cells.length;i++)assert.equal(JSON.stringify(cells[i].props.fill),JSON.stringify(i<lit-1?{light:'#1C1C1E',dark:'#FFFFFF'}:i===lit-1?head:{light:'rgba(0, 0, 0, 0.13)',dark:'rgba(255, 255, 255, 0.14)'}))
     }
   }
-  // Optional direct comparison with a real pre-change widget (no fixture copied into project).
+  const largeWindows=largeTree.filter(x=>x.type==='VStack'&&x.props.children?.[1]?.type?.name==='LargeSegBar')
+  assert.equal(largeWindows.length,8)
+  for(const window of largeWindows){
+    assert.equal(window.props.alignment,'leading');assert.equal(window.props.spacing,mediumRowGap)
+    assert.equal(window.props.frame.maxWidth,'infinity')
+    const top=window.props.children[0];assert.equal(top.type,'HStack');assert.equal(top.props.alignment,'bottom');assert.equal(top.props.frame.maxWidth,'infinity')
+    const [texts,spacer,lcd]=top.props.children;assert.equal(spacer.type,'Spacer');assert.equal(lcd.type.name,'Lcd');assert.equal(lcd.props.height,12)
+    assert.equal(texts.props.children[0].props.font,9);assert.equal(texts.props.children[1].props.font,9)
+  }
+  for(const height of [354,376,382,400]){
+    const budget=largeHeightBudget(height,4,true);assert.equal(budget.fits,true);assert.ok(budget.estimated+budget.reserve<=budget.available+1e-9);assert.equal(budget.reserve,2)
+    assert.ok(budget.windowGap<=3);assert.ok(budget.accountGap<=5)
+    scripting.Widget.displaySize={width:358,height};scripting.Widget.family='systemLarge';scripting.Widget.parameter=''
+    const actual=expand(Root({data:singleData,stale:false,error:null}))
+    assert.equal(actual.filter(x=>x.type==='GeometryReader'&&x.props.frame?.height===85).length,1)
+    assert.equal(actual.filter(x=>x.type==='VStack'&&x.props.children?.[1]?.type?.name==='LargeSegBar').length,8)
+    const blocks=actual.filter(x=>x.type==='VStack'&&x.props.children?.[1]?.type?.name==='AccountTitle')
+    assert.ok(blocks.length>0);assert.ok(blocks.every(x=>x.props.spacing===budget.windowGap))
+    console.log(`HEIGHT MODEL: widget=${height}, available=${budget.available}, four-account=${budget.estimated.toFixed(1)}, windowGap=${budget.windowGap.toFixed(2)}, accountGap=${budget.accountGap.toFixed(2)}`)
+  }
+  scripting.Widget.displaySize={width:358,height:376}
+  const tight=largeHeightBudget(354,4,true);assert.equal(tight.fits,true);assert.equal(tight.fixed,313);assert.equal(tight.available,316);assert.equal(tight.estimated,314)
+  const roomy=largeHeightBudget(376,3,true);assert.equal(roomy.windowGap,3);assert.equal(roomy.accountGap,5)
+  for(const height of [132,134,142]){
+    const region=smallRegionLayout(height);assert.equal(region.fits,true);assert.ok(region.dividerY-66>=8);assert.ok(region.lowerY+52<=height)
+  }
+  assert.equal(smallRegionLayout(120).fits,false)
+  const smallRegions=[]
+  for(const parameter of ['1','1,2']){
+    scripting.Widget.family='systemSmall';scripting.Widget.parameter=parameter
+    const tree=expand(Root({data:singleData,stale:false,error:null}))
+    const shared=tree.find(x=>x.type==='VStack'&&x.props.spacing===0&&x.props.frame?.width===130&&x.props.frame?.height===134)
+    assert.ok(shared);const [upper,divider,lower]=shared.props.children
+    assert.equal(divider.type,'Rectangle');assert.equal(divider.props.frame.height,1);assert.equal(lower.props.padding.top,4)
+    assert.equal(upper.props.frame.alignment,'topLeading');assert.equal(lower.props.frame.alignment,'topLeading')
+    smallRegions.push([upper.props.frame.height,upper.props.frame.height+1+lower.props.padding.top,lower.props.frame.height])
+  }
+  assert.equal(JSON.stringify(smallRegions[0]),JSON.stringify(smallRegions[1]))
+  // Direct 1.7.10 baseline comparison: Medium exactly unchanged. Small geometry is the explicit new scope.
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
-    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemMedium',''],['systemLarge','']]){
-      scripting.Widget.parameter=parameter
-      scripting.Widget.family=family
-      const enabledData={...singleData,accounts:singleData.accounts.map(a=>({...a,enabled:true}))}
-      normalizeLargeBar=true
-      const current=expand(Root({data:enabledData,stale:false,error:null}))
-      normalizeLargeBar=false
-      const previous=expand(baseline({data:enabledData,stale:false,error:null}))
-      const quotaHeader=value=>{
-        if(family==='systemLarge'||value?.type!=='HStack'||value.props.alignment!=='bottom'||value.props.spacing!==2)return null
-        const flat=expand(value),lcd=flat.find(x=>x.type==='SVG')
-        return lcd?{quotaHeader:true,lcd:lcd.props.frame,svg:lcd.props.code,pct:flat.find(x=>x.type==='Text'&&x.props.children==='%')?.props}:null
-      }
-      const visualProps=(key,value)=>{
-        if(key==='rowToBarGap'||key==='fixedLcd'||key==='uniformTimeFont')return undefined
-        const qh=quotaHeader(value);if(qh)return qh
-        if(value?.type?.name==='LargeSegBar')return {type:SegBar,props:{remaining:value.props.remaining,count:20,height:5}}
-        return value
-      }
-      const expectedProps=(key,value)=>{
-        if(key==='rowToBarGap'||key==='fixedLcd'||key==='uniformTimeFont')return undefined
-        const qh=quotaHeader(value);if(qh)return qh
-        if(family==='systemSmall'&&value?.type==='VStack'&&value.props.children?.[1]?.type?.name==='SegBar')return {...value,props:{...value.props,spacing:mediumRowGap}}
-        return value
-      }
-      // Small/Medium quota label/time Texts (and their flattened strings) are the only authorized text change; checked above.
-      const isQuotaText=x=>family!=='systemLarge'&&(typeof x==='string'||(x?.type==='Text'&&(x.props.styledText||x.props.frame?.width===x.props.font*2.1||(x.props.monospacedDigit&&Array.from([].concat(x.props.children))[0]==='· '))))
-      const strip=tree=>tree.filter(x=>!isQuotaText(x))
-      const cj=JSON.stringify(strip(current),visualProps),pj=JSON.stringify(strip(previous),expectedProps)
-      if(cj!==pj){let i=0;while(cj[i]===pj[i])i++;console.error(family,parameter,'CUR',cj.slice(i-300,i+200),'\nPREV',pj.slice(i-300,i+200))}
-      assert.ok(cj===pj,family+' only authorized gap/large bar/quota text differs from 1.7.8 baseline')
-    }
     scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
-    const currentMedium=expand(Root({data:singleData,stale:false,error:null}))
-    const previousMedium=expand(baseline({data:singleData,stale:false,error:null}))
-    const quotaGeometry=tree=>tree.filter(x=>x.type==='SVG'||x.type==='RoundedRectangle'||(x.type==='Text'&&x.props.children==='%'))
-    assert.equal(JSON.stringify(quotaGeometry(currentMedium)),JSON.stringify(quotaGeometry(previousMedium)))
-    console.log('PASS: 1.7.8 baseline: Small single/double row-to-bar gap 1→2; Small/Medium only quota label/time text unified at 8pt; Large only adaptive segments differ; LCD/percent/bars/titles/stats unchanged')
+    assert.equal(JSON.stringify(expand(Root({data:singleData,stale:false,error:null}))),JSON.stringify(expand(baseline({data:singleData,stale:false,error:null}))))
+    for(const parameter of ['1','1,2']){
+      scripting.Widget.family='systemSmall';scripting.Widget.parameter=parameter
+      const nowTree=expand(Root({data:singleData,stale:false,error:null})),oldTree=expand(baseline({data:singleData,stale:false,error:null}))
+      const geometry=tree=>tree.filter(x=>x.type==='SVG'||x.type==='RoundedRectangle'||(x.type==='Text'&&(x.props.children==='%'||x.props.font===8||x.props.fontWeight==='semibold')))
+      assert.equal(JSON.stringify(geometry(nowTree)),JSON.stringify(geometry(oldTree)))
+    }
+    scripting.Widget.family='systemLarge';scripting.Widget.parameter=''
+    const current=expand(Root({data:singleData,stale:false,error:null})),previous=expand(baseline({data:singleData,stale:false,error:null}))
+    const unchangedText=tree=>tree.filter(x=>x.type==='Text'||x.type==='SVG')
+    assert.equal(JSON.stringify(unchangedText(current)),JSON.stringify(unchangedText(previous)))
+    const accountBlocks=current.filter(x=>x.type==='VStack'&&x.props.children?.[1]?.type?.name==='AccountTitle')
+    const budget=largeHeightBudget(376,4,true)
+    assert.ok(accountBlocks.length>0);assert.ok(accountBlocks.every(x=>x.props.spacing===budget.windowGap))
+    console.log('PASS: 1.7.10 baseline: Medium exact tree; Small stats/quota/title text + LCD/segments unchanged; Large all Text/SVG unchanged; only shared region geometry/large two-row+gap changes')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -471,7 +487,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.10')
+  assert.equal(api.VERSION,'1.7.11')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
