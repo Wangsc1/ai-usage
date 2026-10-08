@@ -140,8 +140,8 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
 
 function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   return <HStack spacing={3}>
-    <Image systemName={stale ? "wifi.slash" : "arrow.clockwise"} font={10} foregroundStyle={stale ? ORANGE : SUB} />
-    <Text font={12} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
+    <Image systemName={stale ? "wifi.slash" : "arrow.clockwise"} font={8} foregroundStyle={stale ? ORANGE : SUB} />
+    <Text font={9} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
   </HStack>
 }
 
@@ -169,7 +169,6 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
         </VStack>
       </VStack>)}
     </VStack>
-    {stale ? <VStack><Spacer /><Text font={8} foregroundStyle={ORANGE}>离线 · {fmtTime(data.fetchedAt)}</Text></VStack> : null}
   </ZStack>
 }
 
@@ -252,7 +251,6 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
       </HStack>
       <Text font={9} foregroundStyle={SUB}>今日</Text>
       <Spacer />
-      <RefreshTime data={data} stale={stale} />
     </HStack>
     <HStack spacing={6}>
       {stat("输入", fmtTokens(m.inputTokens))}
@@ -299,7 +297,11 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
     widgetBackground={BG}
   >
-    {body}
+    <ZStack padding={{ bottom: data ? 14 : 0 }} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>{body}</ZStack>
+    {data ? <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      <Spacer />
+      <HStack><Spacer /><RefreshTime data={data} stale={stale} /></HStack>
+    </VStack> : null}
   </ZStack>
 }
 
