@@ -18,7 +18,7 @@ function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
   let code = fs.readFileSync(name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
-  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget }')
+  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd }')
   if (name === 'baseline-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
@@ -130,9 +130,11 @@ async function main() {
   assert.ok(!api.widgetAccounts(official.officialCached().accounts).some(a=>a.id===first.id))
   assert.equal(kc.get('parrot_management_key'),'mock-management'); api.saveSource('parrot'); assert.equal(storage.get('ai_usage_selected_accounts_v1')[0],'parrot-account')
   // JSX tree simulation verifies official stats not rendered as zero and unchanged family geometry.
-  const {Root,PeriodStats,statsWidthBudget}=load('widget.tsx')
+  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd}=load('widget.tsx')
+  scripting.Widget.displaySize={width:358,height:376}
+  let normalizeLargeBar=false
   let proposedStatsWidth=null
-  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(n.type(n.props));if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame.height}}))];return [n,...expand(n.props?.children)] }
+  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame.height===5?180:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame.height}}))];return [n,...expand(n.props?.children)] }
   const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:i!==0,available:true,...mapped}))
   const data={today:null,month:null,accounts,fetchedAt:now,todayByFamily:{},monthByFamily:{}}
   for (const family of ['systemSmall','systemMedium','systemLarge']) {
@@ -164,7 +166,7 @@ async function main() {
   result=await api.loadUsage(); assert.equal(result.stale,false);assert.equal(result.data.today.totalTokens,370)
   const parrotTree=expand(Root({data:result.data,stale:false,error:null}))
   function checkStatsLayout(tree,count,labelFont,valueFont,gap,verticalGap){
-    const readers=tree.filter(x=>x.type==='GeometryReader');assert.equal(readers.length,1)
+    const readers=tree.filter(x=>x.type==='GeometryReader'&&x.props.frame.height!==5);assert.equal(readers.length,1)
     assert.equal(readers[0].props.frame.height,4*Math.ceil(labelFont*1.2)+2*Math.ceil(valueFont*1.2)+3*verticalGap+2)
     assert.ok(!tree.some(x=>x.type==='Grid'||x.type==='GridRow'))
     const row=tree.find(x=>x.type==='HStack'&&x.props.spacing===0&&x.props.children?.length===count*2-1)
@@ -292,24 +294,80 @@ async function main() {
     }
     assert.ok(!tree.some(x=>x.type==='Text'&&x.props.minScaleFactor===0.8))
   }
+  function quotaRows(tree){return tree.filter(x=>x.type==='VStack'&&x.props.children?.[0]?.type==='HStack'&&x.props.children?.[1]?.type?.name==='SegBar')}
+  scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
+  const mediumRowGap=quotaRows(expand(Root({data:singleData,stale:false,error:null})))[0].props.spacing
+  assert.equal(mediumRowGap,2)
+  for(const parameter of ['1','1,2']){
+    scripting.Widget.family='systemSmall';scripting.Widget.parameter=parameter
+    const rows=quotaRows(expand(Root({data:singleData,stale:false,error:null})));assert.equal(rows.length,parameter==='1'?2:4)
+    for(const row of rows){
+      assert.equal(row.props.spacing,mediumRowGap);assert.equal(row.props.children[0].props.alignment,'bottom')
+      const lcd=row.props.children[0].props.children.at(-1);assert.equal(lcd.type.name,'Lcd')
+      const lcdTree=expand(lcd);assert.equal(lcdTree[0].props.alignment,'bottom')
+      assert.equal(lcdTree.find(x=>x.type==='SVG').props.frame.height,lcd.props.height)
+    }
+  }
+  // Lit bottom segment reaches viewBox y=18: the LCD has no bottom padding or baseline modifier.
+  for(const height of [10,11]){
+    const svg=expand(Lcd({value:88,height})).find(x=>x.type==='SVG')
+    const rects=Array.from(svg.props.code.light.matchAll(/<rect x="[^"]+" y="([^"]+)" width="[^"]+" height="([^"]+)"/g))
+    assert.equal(Math.max(...rects.map(r=>Number(r[1])+Number(r[2]))),18)
+    assert.equal(svg.props.frame.height,height)
+  }
+  scripting.Widget.family='systemLarge';scripting.Widget.parameter=''
+  const largeTree=expand(Root({data:singleData,stale:false,error:null}))
+  const largeReaders=largeTree.filter(x=>x.type==='GeometryReader'&&x.props.frame.height===5)
+  assert.equal(largeReaders.length,8)
+  const largeBarRows=largeTree.filter(x=>x.type==='HStack'&&x.props.spacing===2.25)
+  assert.equal(largeBarRows.length,8)
+  for(const row of largeBarRows)assert.equal(row.props.children.length,largeSegmentLayout(180,358).count)
+  for(const [widgetWidth,barWidth] of [[320,145],[358,180],[390,210]]){
+    const layout=largeSegmentLayout(barWidth,widgetWidth)
+    assert.ok(Math.abs(layout.segmentWidth-layout.target)<1)
+    assert.ok(layout.count<20);assert.ok(layout.count>=1)
+    assert.ok(Math.abs(layout.segmentWidth*layout.count+(layout.count-1)*2.25-barWidth)<1e-9)
+    console.log(`MODEL: widget=${widgetWidth}, large bar=${barWidth}, target segment=${layout.target.toFixed(2)}, count=${layout.count}, actual segment=${layout.segmentWidth.toFixed(2)}`)
+    for(const remaining of [null,0,21,60,100]){
+      const tree=expand(SegBar({remaining,count:layout.count,height:5}))
+      assert.equal(tree.filter(x=>x.type==='RoundedRectangle').length,layout.count)
+      assert.equal(tree[0].props.spacing,2.25)
+      const cells=tree.filter(x=>x.type==='RoundedRectangle')
+      assert.ok(cells.every(x=>x.props.frame.height===5))
+      const lit=remaining==null?0:Math.round(remaining/100*layout.count)
+      const head=remaining<=20?{light:'#D93025',dark:'#FF453A'}:remaining<=60?{light:'#D9770B',dark:'#FF9F0A'}:{light:'#2E9E4F',dark:'#7ED957'}
+      for(let i=0;i<cells.length;i++)assert.equal(JSON.stringify(cells[i].props.fill),JSON.stringify(i<lit-1?{light:'#1C1C1E',dark:'#FFFFFF'}:i===lit-1?head:{light:'rgba(0, 0, 0, 0.13)',dark:'rgba(255, 255, 255, 0.14)'}))
+    }
+  }
   // Optional direct comparison with a real pre-change widget (no fixture copied into project).
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
-    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemLarge','']]){
+    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemMedium',''],['systemLarge','']]){
       scripting.Widget.parameter=parameter
       scripting.Widget.family=family
       const enabledData={...singleData,accounts:singleData.accounts.map(a=>({...a,enabled:true}))}
+      normalizeLargeBar=true
       const current=expand(Root({data:enabledData,stale:false,error:null}))
+      normalizeLargeBar=false
       const previous=expand(baseline({data:enabledData,stale:false,error:null}))
-      const visualProps=(key,value)=>key==='muted'&&value===false?undefined:value // new opt-in metadata does not alter enabled visuals
-      assert.equal(JSON.stringify(current,visualProps),JSON.stringify(previous,visualProps),family+' unchanged baseline layout tree')
+      const visualProps=(key,value)=>{
+        if(key==='rowToBarGap')return undefined
+        if(value?.type?.name==='LargeSegBar')return {type:SegBar,props:{remaining:value.props.remaining,count:20,height:5}}
+        return value
+      }
+      const expectedProps=(key,value)=>{
+        if(key==='rowToBarGap')return undefined
+        if(family==='systemSmall'&&value?.type==='VStack'&&value.props.children?.[1]?.type?.name==='SegBar')return {...value,props:{...value.props,spacing:mediumRowGap}}
+        return value
+      }
+      assert.equal(JSON.stringify(current,visualProps),JSON.stringify(previous,expectedProps),family+' only authorized gap/large bar differs from 1.7.8 baseline')
     }
     scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
     const currentMedium=expand(Root({data:singleData,stale:false,error:null}))
     const previousMedium=expand(baseline({data:singleData,stale:false,error:null}))
     const quotaGeometry=tree=>tree.filter(x=>x.type==='SVG'||x.type==='RoundedRectangle'||(x.type==='Text'&&x.props.children==='%'))
     assert.equal(JSON.stringify(quotaGeometry(currentMedium)),JSON.stringify(quotaGeometry(previousMedium)))
-    console.log('PASS: exact 1.7.7 baseline trees: Small single/double, Large; Medium LCD/percent/bar geometry unchanged; label+time share one 9pt Text and fitting factor, 5/15/365-day strings intact')
+    console.log('PASS: 1.7.8 baseline: Small single/double only row-to-bar gap 1→2; Medium exact tree unchanged; Large only adaptive segments differ; LCD/percent/bar thickness unchanged')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -377,7 +435,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.8')
+  assert.equal(api.VERSION,'1.7.9')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
