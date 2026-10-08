@@ -1,5 +1,5 @@
 import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, Widget, VirtualNode } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, tightest } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, widgetAccounts } from "./api"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
 type DC = { light: string; dark: string }
@@ -67,6 +67,7 @@ function lcdSvg(value: number | null, on: string, off: string): string {
     for (const k of Object.keys(SEG)) {
       const [x, y, w, h] = SEG[k]
       const lit = segs.includes(k)
+      if (!lit) continue // 只画点亮笔画，去掉暗色底影
       rects += `<rect x="${(ox + x).toFixed(1)}" y="${y}" width="${w}" height="${h}" rx="0.9" fill="${lit ? on : off}"/>`
     }
   }
@@ -133,7 +134,7 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
     {acc.resetCredits != null
       ? <Text font={font - 3} monospacedDigit foregroundStyle={acc.resetCredits > 0 ? GREEN : SUB} lineLimit={1}>重置:{acc.resetCredits}</Text>
       : null}
-    {acc.available ? null : <Text font={font - 3} foregroundStyle={RED}>不可用</Text>}
+    {!acc.enabled ? <Text font={font - 3} foregroundStyle={SUB}>已停用</Text> : acc.available ? null : <Text font={font - 3} foregroundStyle={RED}>不可用</Text>}
   </HStack>
 }
 
@@ -261,11 +262,13 @@ function Message({ text }: { text: string }) {
 function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; error: string | null }) {
   let body: VirtualNode
   if (!data) body = <Message text={error ?? "无数据"} />
-  else if (data.accounts.length === 0) body = <Message text="没有已启用的订阅账号" />
+  else if (data.accounts.length === 0) body = <Message text="没有订阅账号" />
   else {
-    const sorted = { ...data, accounts: [...data.accounts].sort((x, y) => tightest(x) - tightest(y)) }
+    const selected = widgetAccounts(data.accounts, Widget.parameter ?? "")
+    const sorted = { ...data, accounts: selected }
     const f = Widget.family
-    if (f === "systemSmall") body = <Small data={sorted} stale={stale} />
+    if (!selected.length) body = <Message text="请在脚本设置页选择账号，或在小组件参数填写账号名" />
+    else if (f === "systemSmall") body = <Small data={sorted} stale={stale} />
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />
   }

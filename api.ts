@@ -24,6 +24,8 @@ export type QuotaWindow = {
 }
 
 export type Account = {
+  id: string
+  enabled: boolean
   provider: string // "claude" | "openai" | ...
   name: string
   available: boolean
@@ -42,6 +44,25 @@ export type UsageData = {
 }
 
 export type LoadResult = { data: UsageData | null; stale: boolean; error: string | null }
+
+const KEY_SELECTION = "ai_usage_selected_accounts_v1"
+export function getSelectedAccounts(): string[] | null {
+  return Storage.get<string[]>(KEY_SELECTION)
+}
+export function saveSelectedAccounts(ids: string[]) {
+  Storage.set(KEY_SELECTION, ids.slice(0, 4))
+}
+export function cachedAccounts(): Account[] {
+  return Storage.get<UsageData>(KEY_CACHE)?.accounts ?? []
+}
+export function widgetAccounts(accounts: Account[], parameter = ""): Account[] {
+  // 小组件参数可填账号邮箱前缀，用逗号分隔；为空时使用设置页勾选结果。
+  const names = parameter.split(/[,，]/).map(x => x.trim()).filter(Boolean)
+  if (names.length) return names.map(n => accounts.find(a => a.id === n || a.name === n || a.name.replace(/@.*$/, "") === n)).filter(Boolean).slice(0, 4) as Account[]
+  const ids = getSelectedAccounts()
+  if (ids !== null) return ids.map(id => accounts.find(a => a.id === id)).filter(Boolean).slice(0, 4) as Account[]
+  return accounts.filter(a => a.enabled).sort((x, y) => tightest(x) - tightest(y)).slice(0, 4)
+}
 
 // ---------- 配置 ----------
 export function getConfig() {
@@ -63,6 +84,7 @@ export function clearConfig() {
   Keychain.remove(KEY_SESSION)
   Storage.remove(KEY_CACHE)
   Storage.remove(KEY_CREDITS)
+  Storage.remove(KEY_SELECTION)
 }
 
 // ---------- 请求 ----------
@@ -141,13 +163,20 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
     apiGet(baseUrl, "/stats/summary?period=month", cred),
     apiGet(baseUrl, "/oauth/accounts?pageSize=50", cred),
   ])
-  const enabled = (accList?.items ?? []).filter((a: any) => a.enabled)
+  const all = [...(accList?.items ?? [])]
+  for (let page = 2, pageLength = all.length; pageLength === 50; page++) {
+    const next = await apiGet(baseUrl, `/oauth/accounts?pageSize=50&page=${page}`, cred)
+    all.push(...(next?.items ?? []))
+    pageLength = next?.items?.length ?? 0
+  }
   const accounts: Account[] = await Promise.all(
-    enabled.map(async (a: any) => {
+    all.map(async (a: any) => {
       const d = await apiGet(baseUrl, `/oauth/accounts/${encodeURIComponent(a.accountId)}`, cred)
       // 重置卡：Parrot 管理接口暂未提供只读字段；若日后账号详情返回 resetCreditCount 则自动显示
       const rc = d?.resetCreditCount ?? d?.openai?.resetCreditCount
       return {
+        id: a.accountId,
+        enabled: !!a.enabled,
         resetCredits: typeof rc === "number" ? rc : null,
         provider: a.provider,
         name: String(a.displayName ?? a.identity ?? a.accountId),

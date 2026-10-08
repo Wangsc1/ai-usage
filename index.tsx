@@ -1,10 +1,10 @@
 import {
   Button, Form, LabeledContent, Navigation, NavigationStack, Script, Section,
-  SecureField, Text, TextField, Widget, useState,
+  SecureField, Text, TextField, Toggle, Widget, useState, useEffect,
 } from "scripting"
-import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct } from "./api"
+import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getSelectedAccounts, saveSelectedAccounts, widgetAccounts } from "./api"
 
-const VERSION = "1.4.0"
+const VERSION = "1.5.0"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -50,6 +50,23 @@ function SettingsView() {
   const [status, setStatus] = useState(hasKey ? "已配置，可点“测试连接”" : "未配置：填写后点“保存并测试”")
   const [lines, setLines] = useState<string[]>([])
   const [updateMsg, setUpdateMsg] = useState("")
+  const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
+  const [selected, setSelected] = useState<string[]>(getSelectedAccounts() ?? widgetAccounts(cachedAccounts()).map(a => a.id))
+
+  useEffect(() => {
+    if (cur.managementKey) test()
+  }, [])
+
+  async function selectAccount(id: string, value: boolean) {
+    if (value && selected.length >= 4) {
+      setStatus("最多选择4个账号，请先取消一个")
+      return
+    }
+    const next = value ? [...selected, id] : selected.filter(x => x !== id)
+    setSelected(next)
+    saveSelectedAccounts(next)
+    await Widget.reloadAll()
+  }
 
   async function checkUpdate(force: boolean) {
     setBusy(true)
@@ -74,6 +91,10 @@ function SettingsView() {
     setLines([])
     try {
       const r = await loadUsage()
+      if (r.data) {
+        setAccounts(r.data.accounts)
+        if (getSelectedAccounts() === null) setSelected(widgetAccounts(r.data.accounts).map(a => a.id))
+      }
       if (r.data && !r.stale) {
         const d = r.data
         setStatus("✅ 连接成功")
@@ -124,6 +145,15 @@ function SettingsView() {
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
+      <Section header={<Text>小组件账号（最多4个）</Text>} footer={<Text>含已停用账号。勾选顺序即四宫格顺序。也可长按桌面小组件→编辑→参数，填账号名并用逗号分隔，单独指定该组件的账号。</Text>}>
+        {accounts.map(a => <Toggle
+          title={`${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}${a.enabled ? "" : "（已停用）"}`}
+          value={selected.includes(a.id)}
+          onChanged={(value: boolean) => selectAccount(a.id, value)}
+        />)}
+        {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
+      </Section>
+
       <Section header={<Text>预览小组件</Text>}>
         <Button title={"小"} action={() => Widget.preview({ family: "systemSmall" })} />
         <Button title={"中"} action={() => Widget.preview({ family: "systemMedium" })} />
@@ -144,6 +174,8 @@ function SettingsView() {
             clearConfig()
             setHasKey(false)
             setLines([])
+            setAccounts([])
+            setSelected([])
             setStatus("已清除配置")
             await Widget.reloadAll()
           }}
