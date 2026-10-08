@@ -5,17 +5,17 @@ import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmt
 type DC = { light: string; dark: string }
 const C = (light: string, dark: string): DC => ({ light, dark })
 
-// 渐变背景：深色为蓝灰→底部蓝绿；浅色为暖灰→雾蓝→粉灰，取自参考壁纸
+// 渐变背景：浅色参考用户车载组件，顶部浅冰蓝→底部近白；深色保持蓝灰→蓝绿
 const BG = {
   light: {
     gradient: [
-      { color: "#D6D3CE", location: 0 },
-      { color: "#C9CED6", location: 0.45 },
-      { color: "#D3C7CB", location: 0.75 },
-      { color: "#A9B3C4", location: 1 },
+      { color: "#D8ECF7", location: 0 },
+      { color: "#E5F2F9", location: 0.38 },
+      { color: "#F5FBFC", location: 0.8 },
+      { color: "#FAFDFE", location: 1 },
     ],
-    startPoint: { x: 0.15, y: 0 },
-    endPoint: { x: 0.85, y: 1 },
+    startPoint: { x: 0.5, y: 0 },
+    endPoint: { x: 0.5, y: 1 },
   },
   dark: {
     gradient: [
