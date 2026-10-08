@@ -4,7 +4,7 @@ import {
 } from "scripting"
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getSelectedAccounts, saveSelectedAccounts, widgetAccounts } from "./api"
 
-const VERSION = "1.5.1"
+const VERSION = "1.5.2"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -145,9 +145,9 @@ function SettingsView() {
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
-      <Section header={<Text>小组件账号（最多4个）</Text>} footer={<Text>含已停用账号。勾选顺序即四宫格顺序。也可长按桌面小组件→编辑→参数，填账号名并用逗号分隔，单独指定该组件的账号。</Text>}>
-        {accounts.map(a => <Toggle
-          title={`${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}${a.enabled ? "" : "（已停用）"}`}
+      <Section header={<Text>小组件账号（最多4个）</Text>} footer={<Text>含已停用账号。勾选顺序即四宫格顺序。也可长按桌面小组件→编辑→参数，填列表序号并用逗号分隔（如1,3,4），单独指定该组件的账号。</Text>}>
+        {accounts.map((a, i) => <Toggle
+          title={`${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}${a.enabled ? "" : "（已停用）"}`}
           value={selected.includes(a.id)}
           onChanged={(value: boolean) => selectAccount(a.id, value)}
         />)}

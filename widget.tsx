@@ -267,7 +267,7 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     const selected = widgetAccounts(data.accounts, Widget.parameter ?? "")
     const sorted = { ...data, accounts: selected }
     const f = Widget.family
-    if (!selected.length) body = <Message text="请在脚本设置页选择账号，或在小组件参数填写账号名" />
+    if (!selected.length) body = <Message text="请在脚本设置页选择账号，或在小组件参数填写账号序号" />
     else if (f === "systemSmall") body = <Small data={sorted} stale={stale} />
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />

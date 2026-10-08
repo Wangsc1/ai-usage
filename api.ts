@@ -56,9 +56,18 @@ export function cachedAccounts(): Account[] {
   return Storage.get<UsageData>(KEY_CACHE)?.accounts ?? []
 }
 export function widgetAccounts(accounts: Account[], parameter = ""): Account[] {
-  // 小组件参数可填账号邮箱前缀，用逗号分隔；为空时使用设置页勾选结果。
-  const names = parameter.split(/[,，]/).map(x => x.trim()).filter(Boolean)
-  if (names.length) return names.map(n => accounts.find(a => a.id === n || a.name === n || a.name.replace(/@.*$/, "") === n)).filter(Boolean).slice(0, 4) as Account[]
+  // 参数序号与 App 账号列表从上到下一致，1 起算；支持英文/中文逗号或空格。
+  const numbers = parameter.split(/[,，\s]+/).filter(Boolean)
+  if (numbers.length) {
+    const picked: Account[] = []
+    for (const n of numbers) {
+      if (!/^[1-9]\d*$/.test(n)) continue
+      const acc = accounts[Number(n) - 1]
+      if (acc && !picked.some(a => a.id === acc.id)) picked.push(acc)
+      if (picked.length === 4) break
+    }
+    return picked
+  }
   const ids = getSelectedAccounts()
   if (ids !== null) return ids.map(id => accounts.find(a => a.id === id)).filter(Boolean).slice(0, 4) as Account[]
   return accounts.filter(a => a.enabled).sort((x, y) => tightest(x) - tightest(y)).slice(0, 4)
