@@ -1,70 +1,101 @@
-import { Dialog, Script, Widget } from "scripting"
-import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens } from "./api"
+import {
+  Button, Form, LabeledContent, Navigation, NavigationStack, Script, Section,
+  SecureField, Text, TextField, Widget, useState,
+} from "scripting"
+import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct } from "./api"
 
-async function setup(): Promise<boolean> {
+function SettingsView() {
+  const dismiss = Navigation.useDismiss()
   const cur = getConfig()
-  const baseUrl = await Dialog.prompt({
-    title: "Parrot 地址",
-    message: "管理接口所在的根地址，不带路径",
-    defaultValue: cur.baseUrl ?? "https://pr.jjbb.me",
-    placeholder: "https://pr.jjbb.me",
-    keyboardType: "URL",
-  })
-  if (!baseUrl) return false
-  const key = await Dialog.prompt({
-    title: "管理密钥",
-    message: "Parrot 的 managementKey，只存储在本机钥匙串",
-    obscureText: true,
-    placeholder: cur.managementKey ? "留空沿用已保存的密钥" : "managementKey",
-  })
-  const finalKey = key || cur.managementKey
-  if (!finalKey) {
-    await Dialog.alert({ title: "未保存", message: "管理密钥不能为空" })
-    return false
-  }
-  saveConfig(baseUrl, finalKey)
-  return true
-}
+  const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "https://pr.jjbb.me")
+  const [key, setKey] = useState("")
+  const [hasKey, setHasKey] = useState(!!cur.managementKey)
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState(hasKey ? "已配置，可点“测试连接”" : "未配置：填写后点“保存并测试”")
+  const [lines, setLines] = useState<string[]>([])
 
-async function testConnection() {
-  const r = await loadUsage()
-  if (r.data && !r.stale) {
-    await Dialog.alert({
-      title: "连接成功",
-      message: `今日 ${fmtUsd(r.data.today.costUsd)} · ${fmtTokens(r.data.today.totalTokens)} tokens\n本月 ${fmtUsd(r.data.month.costUsd)}\n账号 ${r.data.accounts.length} 个`,
-    })
-    await Widget.reloadAll()
-  } else {
-    await Dialog.alert({ title: "连接失败", message: r.error ?? "未知错误" })
-  }
-}
-
-async function main() {
-  const configured = !!getConfig().managementKey
-  if (!configured) {
-    if (await setup()) await testConnection()
-    Script.exit()
-    return
-  }
-  const actions = ["预览 小", "预览 中", "预览 大", "测试连接并刷新小组件", "修改配置", "清除配置"]
-  const i = await Dialog.actionSheet({
-    title: "AI 用量小组件",
-    actions: actions.map((label, idx) => ({ label, destructive: idx === 5 })),
-  })
-  switch (i) {
-    case 0: await Widget.preview({ family: "systemSmall" }); break
-    case 1: await Widget.preview({ family: "systemMedium" }); break
-    case 2: await Widget.preview({ family: "systemLarge" }); break
-    case 3: await testConnection(); break
-    case 4: if (await setup()) await testConnection(); break
-    case 5:
-      if (await Dialog.confirm({ title: "清除配置", message: "将删除保存的地址、密钥和缓存" })) {
-        clearConfig()
+  async function test() {
+    setBusy(true)
+    setStatus("连接中…")
+    setLines([])
+    try {
+      const r = await loadUsage()
+      if (r.data && !r.stale) {
+        const d = r.data
+        setStatus("✅ 连接成功")
+        setLines([
+          `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
+          `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
+          ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "GPT"} ${a.name.replace(/@.*$/, "")}：5小时余 ${fmtPct(a.fiveHour.remainingPercent)}`),
+        ])
         await Widget.reloadAll()
+      } else {
+        setStatus("❌ " + (r.error ?? "未知错误"))
       }
-      break
+    } catch (e: any) {
+      setStatus("❌ " + String(e?.message ?? e))
+    }
+    setBusy(false)
   }
+
+  async function save() {
+    const finalKey = key.trim() || cur.managementKey || ""
+    if (!baseUrl.trim() || !finalKey) {
+      setStatus("❌ 地址和管理密钥都不能为空")
+      return
+    }
+    saveConfig(baseUrl, finalKey)
+    setKey("")
+    setHasKey(true)
+    await test()
+  }
+
+  return <NavigationStack>
+    <Form
+      navigationTitle={"AI 用量"}
+      navigationBarTitleDisplayMode={"inline"}
+      toolbar={{
+        cancellationAction: <Button title={"完成"} action={dismiss} />,
+      }}
+    >
+      <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
+        <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"https://pr.jjbb.me"} />
+        <SecureField title={"管理密钥"} value={key} onChanged={setKey} prompt={hasKey ? "已保存，留空沿用" : "managementKey"} />
+        <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
+        {hasKey ? <Button title={"测试连接"} action={test} disabled={busy} /> : null}
+      </Section>
+
+      <Section header={<Text>状态</Text>}>
+        <Text>{status}</Text>
+        {lines.map(l => <Text font={13}>{l}</Text>)}
+      </Section>
+
+      <Section header={<Text>预览小组件</Text>}>
+        <Button title={"小"} action={() => Widget.preview({ family: "systemSmall" })} />
+        <Button title={"中"} action={() => Widget.preview({ family: "systemMedium" })} />
+        <Button title={"大"} action={() => Widget.preview({ family: "systemLarge" })} />
+      </Section>
+
+      <Section>
+        <LabeledContent title={"版本"} value={"1.0.1"} />
+        <Button
+          title={"清除配置"}
+          action={async () => {
+            clearConfig()
+            setHasKey(false)
+            setLines([])
+            setStatus("已清除配置")
+            await Widget.reloadAll()
+          }}
+        />
+      </Section>
+    </Form>
+  </NavigationStack>
+}
+
+async function run() {
+  await Navigation.present({ element: <SettingsView /> })
   Script.exit()
 }
 
-main()
+run()
