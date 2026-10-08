@@ -1,5 +1,5 @@
 import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, Widget, VirtualNode } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtTime, tightest } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, tightest } from "./api"
 
 // ---------- 配色 ----------
 const BG = "#1C1C1E"
@@ -106,10 +106,10 @@ function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   </HStack>
 }
 
-type Win = { label: string; w: QuotaWindow }
+type Win = { label: string; w: QuotaWindow; fmt: (iso: string | null) => string }
 const windowsOf = (a: Account): Win[] => [
-  { label: "5 h", w: a.fiveHour },
-  { label: "每周", w: a.sevenDay },
+  { label: "5 h", w: a.fiveHour, fmt: fmtReset },
+  { label: "每周", w: a.sevenDay, fmt: fmtResetDays },
 ]
 
 // ---------- 小号：最紧张的账号，5 小时 + 每周 ----------
@@ -124,12 +124,12 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
     </HStack>
     <Spacer />
     <VStack alignment="leading" spacing={9}>
-      {windowsOf(acc).map(({ label, w }) =>
+      {windowsOf(acc).map(({ label, w, fmt }) =>
         <VStack alignment="leading" spacing={4}>
           <HStack alignment="bottom" spacing={0}>
             <VStack alignment="leading" spacing={1}>
               <Text font={11} foregroundStyle={SUB} frame={{ width: 24, alignment: "leading" as any }}>{label}</Text>
-              <Text font={11} monospacedDigit foregroundStyle={FG}>{fmtReset(w.resetsAt)}</Text>
+              <Text font={11} monospacedDigit foregroundStyle={FG}>{fmt(w.resetsAt)}</Text>
             </VStack>
             <Spacer />
             <Lcd value={w.remainingPercent} height={22} />
@@ -146,13 +146,13 @@ type Scale = { title: number; label: number; lcd: number; bar: number; segs: num
 const MEDIUM_SCALE: Scale = { title: 12, label: 9, lcd: 11, bar: 4, segs: 10, gap: 2 }
 const LARGE_SCALE: Scale = { title: 15, label: 11, lcd: 17, bar: 7, segs: 10, gap: 5 }
 
-function QuadWindow({ label, w, s }: Win & { s: Scale }) {
+function QuadWindow({ label, w, fmt, s }: Win & { s: Scale }) {
   return <VStack alignment="leading" spacing={s.gap}>
     <HStack alignment="bottom" spacing={2}>
       {/* 标签固定宽度（约两个汉字），“5 h”与“每周”对齐，后面的倒计时也对齐 */}
       <Text font={s.label} foregroundStyle={SUB} lineLimit={1} frame={{ width: s.label * 2.1, alignment: "leading" as any }}>{label}</Text>
       <Text font={s.label} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.8}>
-        · {fmtReset(w.resetsAt)}
+        · {fmt(w.resetsAt)}
       </Text>
       <Spacer />
       <Lcd value={w.remainingPercent} height={s.lcd} />
@@ -165,7 +165,7 @@ function Quad({ acc, s }: { acc?: Account; s: Scale }) {
   if (!acc) return <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}><Spacer /></VStack>
   return <VStack alignment="leading" spacing={s.gap + 1} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} s={s} />)}
+    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} />)}
   </VStack>
 }
 

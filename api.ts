@@ -219,6 +219,15 @@ export function fmtPct(v: number | null): string {
   return v == null ? "--" : Math.round(v) + "%"
 }
 
+// 每周额度倒计时：满 1 天显示“N天”，不足 1 天按 HH:MM
+export function fmtResetDays(iso: string | null): string {
+  if (!iso) return "--"
+  const ms = new Date(iso).getTime() - Date.now()
+  if (!(ms > 0)) return "--"
+  const d = Math.floor(ms / 86400000)
+  return d >= 1 ? `${d}天` : fmtReset(iso)
+}
+
 // 重置倒计时：01:36 / 3d 04:48；未知或已过期显示 --:--
 export function fmtReset(iso: string | null): string {
   if (!iso) return "--:--"
