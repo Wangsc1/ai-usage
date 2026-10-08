@@ -155,14 +155,22 @@ const windowsOf = (a: Account): Win[] => [
 function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
   const accounts = data.accounts.slice(0, 2)
-  return <VStack alignment="leading" spacing={4} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    {accounts.map((acc, i) => <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-      {i > 0 ? <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} /> : null}
-      <AccountTitle acc={acc} font={s.title} />
-      {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} />)}
-    </VStack>)}
-    {stale ? <Text font={8} foregroundStyle={ORANGE}>离线 · {fmtTime(data.fetchedAt)}</Text> : null}
-  </VStack>
+  // 分隔线独立铺在几何中心，不放进下方账号的内容堆栈。
+  return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    {accounts.length > 1 ? <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} /> : null}
+    <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      {accounts.map((acc, i) => <VStack
+        padding={{ top: i > 0 ? 4 : 0, bottom: i === 0 && accounts.length > 1 ? 4 : 0 }}
+        frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      >
+        <VStack alignment="leading" spacing={3}>
+          <AccountTitle acc={acc} font={s.title} />
+          {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} />)}
+        </VStack>
+      </VStack>)}
+    </VStack>
+    {stale ? <VStack><Spacer /><Text font={8} foregroundStyle={ORANGE}>离线 · {fmtTime(data.fetchedAt)}</Text></VStack> : null}
+  </ZStack>
 }
 
 // ---------- 四宫格：每格一个账号，5小时在上、每周在下 ----------
