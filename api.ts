@@ -29,6 +29,7 @@ export type Account = {
   available: boolean
   fiveHour: QuotaWindow
   sevenDay: QuotaWindow
+  resetCredits: number | null // 重置卡数量（仅 OpenAI）
 }
 
 export type UsageData = {
@@ -61,6 +62,7 @@ export function clearConfig() {
   Keychain.remove(KEY_MGMT)
   Keychain.remove(KEY_SESSION)
   Storage.remove(KEY_CACHE)
+  Storage.remove(KEY_CREDITS)
 }
 
 // ---------- 请求 ----------
@@ -97,6 +99,8 @@ async function apiGet(baseUrl: string, path: string, cred: string): Promise<any>
   }
   return body.data
 }
+
+const KEY_CREDITS = "ai_usage_reset_credits_v1"
 
 // ---------- 解析 ----------
 function toMetric(m: any): Metric {
@@ -141,7 +145,10 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
   const accounts: Account[] = await Promise.all(
     enabled.map(async (a: any) => {
       const d = await apiGet(baseUrl, `/oauth/accounts/${encodeURIComponent(a.accountId)}`, cred)
+      // 重置卡：Parrot 管理接口暂未提供只读字段；若日后账号详情返回 resetCreditCount 则自动显示
+      const rc = d?.resetCreditCount ?? d?.openai?.resetCreditCount
       return {
+        resetCredits: typeof rc === "number" ? rc : null,
         provider: a.provider,
         name: String(a.displayName ?? a.identity ?? a.accountId),
         available: !!a.available,

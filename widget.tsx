@@ -92,6 +92,9 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
     <ProviderIcon provider={acc.provider} size={font + 1} />
     <Text font={font} fontWeight="semibold" foregroundStyle={FG} lineLimit={1}>{providerName(acc.provider)}</Text>
     <Text font={font - 3} foregroundStyle={SUB} lineLimit={1}>{shortName(acc)}</Text>
+    {acc.resetCredits != null
+      ? <Text font={font - 3} monospacedDigit foregroundStyle={acc.resetCredits > 0 ? "#7ED957" : SUB} lineLimit={1}>重置:{acc.resetCredits}</Text>
+      : null}
     {acc.available ? null : <Text font={font - 3} foregroundStyle="#FF453A">不可用</Text>}
   </HStack>
 }
@@ -164,18 +167,25 @@ function Quad({ acc, s }: { acc?: Account; s: Scale }) {
   </VStack>
 }
 
+// 十字分隔线画在底层，竖线贯穿整个高度、横线贯穿整个宽度
 function QuadGrid({ accounts, s }: { accounts: Account[]; s: Scale }) {
   const a = accounts.slice(0, 4)
-  const vline = <Rectangle fill={DIVIDER} frame={{ width: 1, maxHeight: "infinity" }} />
-  return <VStack spacing={s.gap * 2 + 2}>
-    <HStack alignment="top" spacing={10}>
-      <Quad acc={a[0]} s={s} />{vline}<Quad acc={a[1]} s={s} />
-    </HStack>
+  const pad = s.gap * 2 + 3
+  const cell = (acc?: Account, top = false, left = false) =>
+    <VStack
+      padding={{ top: top ? 0 : pad, bottom: top ? pad : 0, leading: left ? 0 : 10, trailing: left ? 10 : 0 }}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+    >
+      <Quad acc={acc} s={s} />
+    </VStack>
+  return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    <Rectangle fill={DIVIDER} frame={{ width: 1, maxHeight: "infinity" }} />
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
-    <HStack alignment="top" spacing={10}>
-      <Quad acc={a[2]} s={s} />{vline}<Quad acc={a[3]} s={s} />
-    </HStack>
-  </VStack>
+    <VStack spacing={0}>
+      <HStack spacing={0}>{cell(a[0], true, true)}{cell(a[1], true, false)}</HStack>
+      <HStack spacing={0}>{cell(a[2], false, true)}{cell(a[3], false, false)}</HStack>
+    </VStack>
+  </ZStack>
 }
 
 // ---------- 中号：四宫格，最多 4 个账号 ----------
