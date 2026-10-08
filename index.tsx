@@ -1,11 +1,12 @@
 import {
-  Button, Form, LabeledContent, Navigation, NavigationStack, Picker, Script, Section,
+  Button, Form, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
+  ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.9"
+const VERSION = "1.7.10"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -39,6 +40,52 @@ async function updateFromGitHub(force: boolean): Promise<string | null> {
     await FileManager.writeAsString(Script.directory + "/" + FILES[i], bodies[i])
   }
   return remote
+}
+
+const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
+
+// Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
+function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (next: Account[]) => void }) {
+  const data = useObservable<Account[]>(() => cachedAccounts())
+  const active = useObservable<Account | null>(null)
+  const onMove = (indices: number[], newOffset: number) => {
+    // A page opened for one source must never write after the app switched source.
+    if (getSource() !== source) return
+    const current = data.value
+    if (!indices.length || indices.some(i => i < 0 || i >= current.length)) return
+    // Standard implementation from views/reorderable_foreach documentation.
+    const movingItems = indices.map(index => current[index])
+    const newValue = current.filter((_, index) => !indices.includes(index))
+    newValue.splice(Math.max(0, Math.min(newOffset, newValue.length)), 0, ...movingItems)
+    if (newValue.every((a, i) => a.id === current[i].id)) return
+    data.setValue(newValue)
+    saveAccountOrder(newValue.map(a => a.id), source)
+    onSaved(newValue)
+    void Widget.reloadAll()
+  }
+  return <ScrollView navigationTitle={"账号排序"} navigationBarTitleDisplayMode={"inline"}>
+    <VStack alignment="leading" spacing={10} padding>
+      <Text font={13} foregroundStyle={"secondaryLabel"}>长按账号卡片拖到新位置，松手即保存。小号默认显示前2个、中大号前4个；数字参数按此序号。</Text>
+      {data.value.length ? <LazyVGrid columns={[{ size: { type: "flexible" } }]} spacing={8}>
+        <ReorderableForEach
+          active={active}
+          data={data.value}
+          builder={(a, i) => <VStack
+            key={a.id}
+            modifiers={modifiers()
+              .frame({ maxWidth: "infinity", alignment: "leading" as any })
+              .padding({ horizontal: 14, vertical: 12 })
+              .background(<RoundedRectangle cornerRadius={12}
+                fill={active.value?.id === a.id ? "tertiarySystemFill" : "secondarySystemGroupedBackground"} />)
+              .contentShape({ kind: "dragPreview", shape: { type: "rect", cornerRadius: 12 } })}
+          >
+            <Text>{accountLabel(a, i)}</Text>
+          </VStack>}
+          onMove={onMove}
+        />
+      </LazyVGrid> : <Text>连接成功后显示账号列表</Text>}
+    </VStack>
+  </ScrollView>
 }
 
 function SettingsView() {
@@ -102,38 +149,6 @@ function SettingsView() {
       setStatus(e.message)
     }
     setBusy(false)
-  }
-
-  const [dragSession] = useState(`${Date.now()}-${Math.random()}`)
-
-  function accountDrop(targetId: string) {
-    return {
-      types: ["public.plain-text"] as UTType[],
-      validateDrop: () => !busy && getSource() === source,
-      dropUpdated: () => !busy && getSource() === source ? "move" as const : "forbidden" as const,
-      performDrop: (info: DropInfo): boolean => {
-        if (busy || getSource() !== source) return false
-        const providers = info.itemProviders(["public.plain-text"])
-        if (providers.length !== 1) return false
-        // Scripting requires loading to START inside performDrop's safety scope.
-        const loading = providers[0].loadText()
-        void loading.then(async text => {
-          if (getSource() !== source || !text) return
-          let payload: any
-          try { payload = JSON.parse(text) } catch { return }
-          if (payload.session !== dragSession || payload.source !== source) return
-          const next = cachedAccounts()
-          const i = next.findIndex(a => a.id === payload.id), j = next.findIndex(a => a.id === targetId)
-          if (i < 0 || j < 0 || i === j) return
-          const [moving] = next.splice(i, 1)
-          next.splice(j, 0, moving) // upward: before target; downward: after target
-          saveAccountOrder(next.map(a => a.id), source)
-          setAccounts(next)
-          await Widget.reloadAll()
-        }).catch(() => setStatus("拖动排序失败，请重试"))
-        return true
-      },
-    }
   }
 
   async function checkUpdate(force: boolean) {
@@ -239,16 +254,11 @@ function SettingsView() {
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
-      <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。长按账号行的文字区域，拖到目标账号行后松手排序（向上放在目标前，向下放在目标后），默认按此列表顺序显示，小号前2个、中大号前4个，不按启用状态过滤。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。两种来源的排序独立保存。</Text>}>
-        {accounts.map((a, i) => <VStack key={a.id} alignment="leading" spacing={4}
-          onDrag={busy ? undefined : {
-            data: () => ItemProvider.fromText(JSON.stringify({ session: dragSession, source, id: a.id })),
-            preview: <Text>移动账号 {i + 1}</Text>,
-          }}
-          onDrop={accountDrop(a.id)}
-        >
-          <Text>{`${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`}</Text>
-        </VStack>)}
+      <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。点“账号排序”进入单独页面，长按账号卡片拖动排序，松手即保存。默认按此列表顺序显示，小号前2个、中大号前4个，不按启用状态过滤。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。两种来源的排序独立保存。</Text>}>
+        {accounts.map((a, i) => <Text key={a.id}>{accountLabel(a, i)}</Text>)}
+        {accounts.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} onSaved={setAccounts} />}>
+          <Text>账号排序</Text>
+        </NavigationLink> : null}
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>
 

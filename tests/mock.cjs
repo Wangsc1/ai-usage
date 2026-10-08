@@ -7,7 +7,7 @@ const kc = new Map(), storage = new Map(), storageWrites = []
 class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])) } static now() { return now } }
 const modules = {}
 const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { return o[k] || k } })
-const jsx = (type, props) => ({type, props})
+const jsx = (type, props, key) => key === undefined ? ({type, props}) : ({type, props, key})
 const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise,
   Keychain: { get(k) { reads.push(k); return kc.get(k) ?? null }, set(k,v) { kc.set(k,v); return true }, remove(k) { kc.delete(k); return true } },
   Storage: { get(k) { return storage.has(k) ? JSON.parse(JSON.stringify(storage.get(k))) : null }, set(k,v) { storageWrites.push(k); storage.set(k,JSON.parse(JSON.stringify(v))) }, remove(k) { storage.delete(k) } },
@@ -134,7 +134,7 @@ async function main() {
   scripting.Widget.displaySize={width:358,height:376}
   let normalizeLargeBar=false
   let proposedStatsWidth=null
-  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame.height===5?180:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame.height}}))];return [n,...expand(n.props?.children)] }
+  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame.height===5?180:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame.height}}))];return [n,...expand(n.props?.children)] }
   const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:i!==0,available:true,...mapped}))
   const data={today:null,month:null,accounts,fetchedAt:now,todayByFamily:{},monthByFamily:{}}
   for (const family of ['systemSmall','systemMedium','systemLarge']) {
@@ -275,24 +275,29 @@ async function main() {
   const double=expand(Root({data:singleData,stale:false,error:null}))
   assert.ok(!double.some(x=>x.type==='GeometryReader'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
   assert.equal(double.filter(x=>x==='Codex').length,2)
-  // Medium label and countdown share ONE Text fitting operation, including long day strings.
-  scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
+  // Small double (baseline), Small single and Medium: identical 8pt label/time, fixed label width, no per-text scaling.
+  function quotaHeaders(tree){return tree.filter(x=>x.type==='HStack'&&x.props.alignment==='bottom'&&x.props.spacing===2&&x.props.children?.[1]?.props?.monospacedDigit)}
+  const headerStyle=h=>{const [label,time]=h.props.children;return JSON.stringify([label.props.font,label.props.frame,label.props.foregroundStyle,label.props.lineLimit,label.props.minScaleFactor,time.props.font,time.props.monospacedDigit,time.props.foregroundStyle,time.props.lineLimit,time.props.minScaleFactor,time.props.frame])}
+  let baselineStyle=null
   for(const days of [5,15,365]){
     const iso=new Date(now+(days*24*60+15*60+33)*60000).toISOString()
     const longData={...singleData,accounts:singleData.accounts.map(a=>({...a,sevenDay:{...a.sevenDay,resetsAt:iso}}))}
-    const tree=expand(Root({data:longData,stale:false,error:null}))
-    const fitted=tree.filter(x=>x.type==='Text'&&x.props.styledText)
-    assert.equal(fitted.length,8)
-    for(const t of fitted){
-      assert.equal(t.props.font,9);assert.equal(t.props.styledText.font,9);assert.equal(t.props.minScaleFactor,0.5)
-      assert.equal(t.props.lineLimit,1)
-      const [label,time]=t.props.styledText.content
-      for(const span of [label,time]){assert.equal(span.font,undefined);assert.equal(span.minScaleFactor,undefined)}
-      assert.equal(time.monospacedDigit,true)
-      assert.equal(time.content,' · '+(label.content==='每周'?api.fmtResetDays(iso):api.fmtReset(longData.accounts[0].fiveHour.resetsAt)))
-      if(label.content==='每周')assert.equal(time.content,` · ${days}天 15:33`)
+    for(const [family,parameter,count] of [['systemSmall','1,2',4],['systemSmall','1',2],['systemMedium','',8]]){
+      scripting.Widget.family=family;scripting.Widget.parameter=parameter
+      const tree=expand(Root({data:longData,stale:false,error:null}))
+      assert.ok(!tree.some(x=>x.type==='Text'&&x.props.styledText))
+      const headers=quotaHeaders(tree);assert.equal(headers.length,count)
+      for(const h of headers){
+        const [label,time]=h.props.children
+        assert.equal(label.props.font,8);assert.equal(time.props.font,8);assert.equal(label.props.frame.width,8*2.1)
+        assert.equal(label.props.minScaleFactor,undefined);assert.equal(time.props.minScaleFactor,undefined)
+        assert.equal(time.props.monospacedDigit,true)
+        baselineStyle??=headerStyle(h);assert.equal(headerStyle(h),baselineStyle,family+parameter)
+        const text=Array.from(time.props.children).join('')
+        if(label.props.children==='每周')assert.equal(text,`· ${days}天 15:33`)
+        else assert.equal(text,'· '+api.fmtReset(longData.accounts[0].fiveHour.resetsAt))
+      }
     }
-    assert.ok(!tree.some(x=>x.type==='Text'&&x.props.minScaleFactor===0.8))
   }
   function quotaRows(tree){return tree.filter(x=>x.type==='VStack'&&x.props.children?.[0]?.type==='HStack'&&x.props.children?.[1]?.type?.name==='SegBar')}
   scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
@@ -350,24 +355,36 @@ async function main() {
       const current=expand(Root({data:enabledData,stale:false,error:null}))
       normalizeLargeBar=false
       const previous=expand(baseline({data:enabledData,stale:false,error:null}))
+      const quotaHeader=value=>{
+        if(family==='systemLarge'||value?.type!=='HStack'||value.props.alignment!=='bottom'||value.props.spacing!==2)return null
+        const flat=expand(value),lcd=flat.find(x=>x.type==='SVG')
+        return lcd?{quotaHeader:true,lcd:lcd.props.frame,svg:lcd.props.code,pct:flat.find(x=>x.type==='Text'&&x.props.children==='%')?.props}:null
+      }
       const visualProps=(key,value)=>{
-        if(key==='rowToBarGap')return undefined
+        if(key==='rowToBarGap'||key==='fixedLcd'||key==='uniformTimeFont')return undefined
+        const qh=quotaHeader(value);if(qh)return qh
         if(value?.type?.name==='LargeSegBar')return {type:SegBar,props:{remaining:value.props.remaining,count:20,height:5}}
         return value
       }
       const expectedProps=(key,value)=>{
-        if(key==='rowToBarGap')return undefined
+        if(key==='rowToBarGap'||key==='fixedLcd'||key==='uniformTimeFont')return undefined
+        const qh=quotaHeader(value);if(qh)return qh
         if(family==='systemSmall'&&value?.type==='VStack'&&value.props.children?.[1]?.type?.name==='SegBar')return {...value,props:{...value.props,spacing:mediumRowGap}}
         return value
       }
-      assert.equal(JSON.stringify(current,visualProps),JSON.stringify(previous,expectedProps),family+' only authorized gap/large bar differs from 1.7.8 baseline')
+      // Small/Medium quota label/time Texts (and their flattened strings) are the only authorized text change; checked above.
+      const isQuotaText=x=>family!=='systemLarge'&&(typeof x==='string'||(x?.type==='Text'&&(x.props.styledText||x.props.frame?.width===x.props.font*2.1||(x.props.monospacedDigit&&Array.from([].concat(x.props.children))[0]==='· '))))
+      const strip=tree=>tree.filter(x=>!isQuotaText(x))
+      const cj=JSON.stringify(strip(current),visualProps),pj=JSON.stringify(strip(previous),expectedProps)
+      if(cj!==pj){let i=0;while(cj[i]===pj[i])i++;console.error(family,parameter,'CUR',cj.slice(i-300,i+200),'\nPREV',pj.slice(i-300,i+200))}
+      assert.ok(cj===pj,family+' only authorized gap/large bar/quota text differs from 1.7.8 baseline')
     }
     scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
     const currentMedium=expand(Root({data:singleData,stale:false,error:null}))
     const previousMedium=expand(baseline({data:singleData,stale:false,error:null}))
     const quotaGeometry=tree=>tree.filter(x=>x.type==='SVG'||x.type==='RoundedRectangle'||(x.type==='Text'&&x.props.children==='%'))
     assert.equal(JSON.stringify(quotaGeometry(currentMedium)),JSON.stringify(quotaGeometry(previousMedium)))
-    console.log('PASS: 1.7.8 baseline: Small single/double only row-to-bar gap 1→2; Medium exact tree unchanged; Large only adaptive segments differ; LCD/percent/bar thickness unchanged')
+    console.log('PASS: 1.7.8 baseline: Small single/double row-to-bar gap 1→2; Small/Medium only quota label/time text unified at 8pt; Large only adaptive segments differ; LCD/percent/bars/titles/stats unchanged')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -393,36 +410,55 @@ async function main() {
   const appEnabled=ui.find(x=>x.type==='Text'&&x.props.children==='2. Codex · 匿名1')
   assert.equal(appEnabled.props.foregroundStyle,undefined)
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
-  context.ItemProvider={fromText:text=>({loadText:async()=>text})}
-  const rows=()=>render().filter(x=>x.props?.onDrag)
-  let dragRows=rows(); const provider=dragRows[0].props.onDrag.data()
-  const before=JSON.stringify(storage.get('ai_usage_parrot_order_v1'))
-  assert.equal(dragRows[2].props.onDrop.dropUpdated(),'move')
-  assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),before) // cancelled drag: no writes
-  async function drop(row,p) {
-    let inScope=false,started=false
-    const info={itemProviders:types=>{assert.equal(inScope,true);assert.equal(types[0],'public.plain-text');return [{loadText:()=>{assert.equal(inScope,true);started=true;return p.loadText()}}]}}
-    inScope=true;assert.equal(row.props.onDrop.performDrop(info),true);inScope=false
-    assert.equal(started,true);await new Promise(r=>setImmediate(r))
-  }
-  await drop(dragRows[2],provider)
-  assert.deepEqual(Array.from(api.cachedAccounts(),a=>a.id),['p1','p2','p0','p3'])
-  assert.ok(render().some(x=>typeof x==='string'&&x.startsWith('3. Codex · 匿名0')))
+  // Read-only Form list + NavigationLink to a separate ScrollView page using ReorderableForEach (no List/Form drag).
+  const indexSource=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
+  for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','EditButton','ForEach count','onMove={busy'])assert.ok(!indexSource.includes(old),old)
+  assert.ok(!ui.some(x=>x.type==='ForEach'||x.type==='EditButton'||x?.props?.onDrag||x?.props?.onDrop))
+  assert.equal(render().find(x=>x.type==='Form').props.toolbar.confirmationAction,undefined)
+  // Minimal documented-shape mocks: Observable{value,setValue}, chainable modifiers() recorder.
+  let obsStore=[],obsIndex=0
+  scripting.useObservable=init=>{const i=obsIndex++;if(!(i in obsStore)){const o={value:typeof init==='function'?init():init,setValue(v){o.value=v}};obsStore[i]=o}return obsStore[i]}
+  scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;return v=>{calls.push([k,v]);return m}}});return m}
+  const ids=()=>Array.from(api.cachedAccounts(),a=>a.id)
+  const link=()=>render().find(x=>x.type==='NavigationLink')
+  assert.ok(link());assert.equal(link().props.children.props.children,'账号排序')
+  const openPage=()=>{obsStore=[];obsIndex=0;const d=link().props.destination;assert.equal(d.props.source,'parrot');return d}
+  const pageTree=d=>{obsIndex=0;return expand(d.type(d.props))}
+  let dest=openPage(),page=pageTree(dest)
+  const scroll=page.find(x=>x.type==='ScrollView');assert.equal(scroll.props.navigationTitle,'账号排序')
+  assert.ok(page.some(x=>x.type==='LazyVGrid'&&x.props.columns.length===1))
+  assert.ok(!page.some(x=>x.type==='List'||x.type==='Form'))
+  let reorder=page.find(x=>x.type==='ReorderableForEach')
+  assert.equal(typeof reorder.props.onMove,'function');assert.equal(reorder.props.active.value,null)
+  assert.deepEqual(Array.from(reorder.props.data,a=>a.id),['p0','p1','p2','p3'])
+  const card=reorder.props.builder(reorder.props.data[0],0)
+  assert.equal(card.key,'p0');assert.equal(card.props.children.props.children,'1. Codex · 匿名0')
+  const cardMods=card.props.modifiers.calls
+  assert.equal(JSON.stringify(cardMods.find(c=>c[0]==='contentShape')[1]),JSON.stringify({kind:'dragPreview',shape:{type:'rect',cornerRadius:12}}))
+  assert.equal(cardMods.find(c=>c[0]==='background')[1].props.cornerRadius,12)
+  assert.equal(cardMods.find(c=>c[0]==='background')[1].props.fill,'secondarySystemGroupedBackground')
+  reorder.props.active.setValue(reorder.props.data[0])
+  assert.equal(reorder.props.builder(reorder.props.data[0],0).props.modifiers.calls.find(c=>c[0]==='background')[1].props.fill,'tertiarySystemFill')
+  reorder.props.active.setValue(null)
+  // Documented standard: remove moving items, then insert at newOffset in the remaining array.
+  const move=(from,to)=>{page=pageTree(dest);reorder=page.find(x=>x.type==='ReorderableForEach');reorder.props.onMove(from,to);page=pageTree(dest);reorder=page.find(x=>x.type==='ReorderableForEach')}
+  move([0],2) // down
+  assert.deepEqual(ids(),['p1','p2','p0','p3']);assert.deepEqual(Array.from(reorder.props.data,a=>a.id),ids())
+  assert.equal(reorder.props.builder(reorder.props.data[2],2).props.children.props.children,'3. Codex · 匿名0')
+  assert.ok(render().some(x=>typeof x==='string'&&x==='3. Codex · 匿名0')) // Form summary updated via onSaved
   assert.deepEqual(Array.from(api.widgetAccounts(accounts),a=>a.id),['p1','p2','p0','p3'])
   assert.deepEqual(Array.from(api.widgetAccounts(accounts,'3,1'),a=>a.id),['p0','p1'])
-  dragRows=rows();await drop(dragRows[0],dragRows[3].props.onDrag.data()) // upward
-  assert.deepEqual(Array.from(api.cachedAccounts(),a=>a.id),['p3','p1','p2','p0'])
+  move([3],0) // up
+  assert.deepEqual(ids(),['p3','p1','p2','p0'])
+  move([0,2],2) // multiple items to end of remaining array
+  assert.deepEqual(ids(),['p1','p0','p3','p2'])
+  move([1],3) // to end
+  assert.deepEqual(ids(),['p1','p3','p2','p0'])
   const order=JSON.stringify(storage.get('ai_usage_parrot_order_v1'))
-  dragRows=rows();await drop(dragRows[0],dragRows[0].props.onDrag.data());assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)
-  await drop(dragRows[0],{loadText:async()=>'{"session":"external","id":"p0","source":"parrot"}'});assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)
-  await drop(dragRows[0],{loadText:async()=>'{broken'});assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)
-  let resolveDrag
-  const delayed={loadText:()=>new Promise(r=>resolveDrag=r)}
-  assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>[delayed]}),true)
-  api.saveSource('official');resolveDrag(await dragRows[3].props.onDrag.data().loadText());await new Promise(r=>setImmediate(r))
-  assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)
-  assert.equal(dragRows[0].props.onDrop.validateDrop(),false);assert.equal(dragRows[0].props.onDrop.dropUpdated(),'forbidden')
-  assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>{throw Error('must not load')}}),false)
+  for(const [from,to] of [[[1],1],[[],0],[[9],0]]){move(from,to);assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)}
+  const officialOrder=JSON.stringify(storage.get('ai_usage_official_order_v1'))
+  api.saveSource('official');move([0],3) // stale Parrot page after source switch writes nothing
+  assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order);assert.equal(JSON.stringify(storage.get('ai_usage_official_order_v1')),officialOrder)
   api.saveSource('parrot')
   storage.set('ai_usage_cache_v1',{...data,accounts:statusAccounts});api.saveAccountOrder(statusAccounts.map(a=>a.id))
   states.length=0
@@ -435,12 +471,12 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.9')
+  assert.equal(api.VERSION,'1.7.10')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 widget families, App foreground always normal, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 widget families, App foreground always normal, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
