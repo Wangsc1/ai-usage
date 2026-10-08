@@ -27,7 +27,7 @@ https://scripting.fun/import_scripts?urls=["https%3A%2F%2Fgithub.com%2FWangsc1%2
 导入后：
 
 1. 运行脚本，在打开的设置页填写：
-   - Parrot 地址，例如 `https://pr.jjbb.me`
+   - 你自己的 Parrot 地址（脚本不预置任何服务器地址）
    - 管理密钥（Parrot 配置里的 `managementKey`）
 2. 点“保存并测试”，显示“✅ 连接成功”后，在桌面添加 Scripting 小组件，长按 → 编辑小组件 → 选择该脚本。
 

@@ -4,7 +4,7 @@ import {
 } from "scripting"
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getSelectedAccounts, saveSelectedAccounts, widgetAccounts } from "./api"
 
-const VERSION = "1.5.2"
+const VERSION = "1.5.3"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -43,7 +43,7 @@ async function updateFromGitHub(force: boolean): Promise<string | null> {
 function SettingsView() {
   const dismiss = Navigation.useDismiss()
   const cur = getConfig()
-  const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "https://pr.jjbb.me")
+  const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
   const [key, setKey] = useState("")
   const [hasKey, setHasKey] = useState(!!cur.managementKey)
   const [busy, setBusy] = useState(false)
@@ -134,7 +134,7 @@ function SettingsView() {
       }}
     >
       <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
-        <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"https://pr.jjbb.me"} />
+        <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
         <SecureField title={"管理密钥"} value={key} onChanged={setKey} prompt={hasKey ? "已保存，留空沿用" : "managementKey"} />
         <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
         {hasKey ? <Button title={"测试连接"} action={test} disabled={busy} /> : null}
