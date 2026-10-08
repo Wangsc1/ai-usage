@@ -212,14 +212,23 @@ export function fmtPct(v: number | null): string {
   return v == null ? "--" : Math.round(v) + "%"
 }
 
+// 重置倒计时：01:36 / 3d 04:48；未知或已过期显示 --:--
 export function fmtReset(iso: string | null): string {
-  if (!iso) return ""
+  if (!iso) return "--:--"
   const ms = new Date(iso).getTime() - Date.now()
-  if (!(ms > 0)) return "已重置"
-  const h = Math.floor(ms / 3600000)
-  const m = Math.floor((ms % 3600000) / 60000)
-  if (h >= 24) return `${Math.floor(h / 24)}天${h % 24}时`
-  return h > 0 ? `${h}时${m}分` : `${m}分`
+  if (!(ms > 0)) return "--:--"
+  const totalMin = Math.floor(ms / 60000)
+  const d = Math.floor(totalMin / 1440)
+  const h = Math.floor((totalMin % 1440) / 60)
+  const m = totalMin % 60
+  const p = (x: number) => String(x).padStart(2, "0")
+  return d > 0 ? `${d}d ${p(h)}:${p(m)}` : `${p(h)}:${p(m)}`
+}
+
+// 账号最紧张的剩余百分比（无数据视为 101，排在最后）
+export function tightest(acc: Account): number {
+  const v = [acc.fiveHour.remainingPercent, acc.sevenDay.remainingPercent].filter(x => x != null) as number[]
+  return v.length ? Math.min(...v) : 101
 }
 
 export function fmtTime(ts: number): string {

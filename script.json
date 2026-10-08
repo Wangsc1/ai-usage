@@ -2,7 +2,7 @@
   "name" : "AI 用量",
   "icon" : "sparkles",
   "color" : "systemPurple",
-  "version" : "1.0.1",
+  "version" : "1.1.0",
   "entry" : "index.tsx",
   "runInApp" : false,
   "description" : "显示 Parrot 中转的 AI 用量：今日/本月花费、Token、订阅账号剩余额度",
