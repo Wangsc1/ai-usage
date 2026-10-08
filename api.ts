@@ -1,6 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
+export const VERSION = "1.7.1"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -293,7 +294,10 @@ export function fmtTokens(n: number): string {
 }
 
 export function fmtUsd(n: number): string {
-  return "$" + n.toFixed(1)
+  // Nonnegative costs: correct binary floating-point ties, then round (not truncate).
+  const scaled = n * 10
+  const rounded = Math.round(scaled + Number.EPSILON * Math.max(1, Math.abs(scaled))) / 10
+  return "$" + rounded.toFixed(1)
 }
 
 export function fmtPct(v: number | null): string {

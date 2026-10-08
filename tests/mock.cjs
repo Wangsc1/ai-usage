@@ -164,14 +164,44 @@ async function main() {
   const render=()=>{hook=0;return expand(SettingsView())}
   let ui=render();let toggles=ui.filter(x=>x.type==='Toggle')
   assert.ok(toggles[0].props.title.startsWith('1.'));assert.equal(toggles[0].props.value,true)
-  assert.equal(ui.find(x=>x.type==='Button'&&x.props.title==='上移').props.disabled,true)
-  await ui.find(x=>x.type==='Button'&&x.props.title==='下移').props.action()
-  ui=render();toggles=ui.filter(x=>x.type==='Toggle');assert.ok(toggles[0].props.title.includes('匿名1'));assert.ok(toggles[1].props.title.startsWith('2.'));assert.ok(toggles[1].props.title.includes('匿名0'))
-  assert.equal(api.widgetAccounts(accounts)[0].id,accounts[0].id)
+  assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
+  context.ItemProvider={fromText:text=>({loadText:async()=>text})}
+  const rows=()=>render().filter(x=>x.props?.onDrag)
+  let dragRows=rows(); const provider=dragRows[0].props.onDrag.data()
+  const before=JSON.stringify(storage.get('ai_usage_parrot_order_v1'))
+  assert.equal(dragRows[2].props.onDrop.dropUpdated(),'move')
+  assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),before) // cancelled drag: no writes
+  async function drop(row,p) {
+    let inScope=false,started=false
+    const info={itemProviders:types=>{assert.equal(inScope,true);assert.equal(types[0],'public.plain-text');return [{loadText:()=>{assert.equal(inScope,true);started=true;return p.loadText()}}]}}
+    inScope=true;assert.equal(row.props.onDrop.performDrop(info),true);inScope=false
+    assert.equal(started,true);await new Promise(r=>setImmediate(r))
+  }
+  await drop(dragRows[2],provider)
+  assert.deepEqual(Array.from(api.cachedAccounts(),a=>a.id),['p1','p2','p0','p3'])
+  toggles=render().filter(x=>x.type==='Toggle');assert.ok(toggles[2].props.title.startsWith('3.'));assert.ok(toggles[2].props.title.includes('匿名0'))
+  assert.deepEqual(Array.from(api.widgetAccounts(accounts),a=>a.id),['p0','p3'])
+  assert.deepEqual(Array.from(api.widgetAccounts(accounts,'3,1'),a=>a.id),['p0','p1'])
+  dragRows=rows();await drop(dragRows[0],dragRows[3].props.onDrag.data()) // upward
+  assert.deepEqual(Array.from(api.cachedAccounts(),a=>a.id),['p3','p1','p2','p0'])
+  const order=JSON.stringify(storage.get('ai_usage_parrot_order_v1'))
+  dragRows=rows();await drop(dragRows[0],dragRows[0].props.onDrag.data());assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)
+  await drop(dragRows[0],{loadText:async()=>'{"session":"external","id":"p0","source":"parrot"}'});assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)
+  await drop(dragRows[0],{loadText:async()=>'{broken'});assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)
+  let resolveDrag
+  const delayed={loadText:()=>new Promise(r=>resolveDrag=r)}
+  assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>[delayed]}),true)
+  api.saveSource('official');resolveDrag(await dragRows[3].props.onDrag.data().loadText());await new Promise(r=>setImmediate(r))
+  assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order)
+  assert.equal(dragRows[0].props.onDrop.validateDrop(),false);assert.equal(dragRows[0].props.onDrop.dropUpdated(),'forbidden')
+  assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>{throw Error('must not load')}}),false)
+  api.saveSource('parrot')
+  for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
+  assert.equal(api.VERSION,'1.7.1')
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/selection/parameters/pruning; large label gap/six stat columns; Parrot grant/total; App move controls')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/selection/parameters/pruning; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
