@@ -1,4 +1,4 @@
-import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, LazyVGrid, Widget, VirtualNode } from "scripting"
+import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, Grid, GridRow, Widget, VirtualNode } from "scripting"
 import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes } from "./api"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
@@ -151,38 +151,50 @@ const windowsOf = (a: Account): Win[] => [
   { label: "每周", w: a.sevenDay, fmt: fmtResetDays },
 ]
 
-// Small single-account stats use the same Parrot summary scope as Large, not per-account totals.
-const SMALL_STAT_COLUMNS = Array.from({ length: 4 }, () => ({
-  size: { type: "flexible" as const, min: 0, max: "infinity" as const },
-  spacing: 2,
-  alignment: "leading" as const,
-}))
+// One Grid shares intrinsic statistic-column widths across BOTH periods.
+// Only the internal separator columns expand; there are no outer spacers or padded final cells.
+type StatColumn = { label: string; today: string; month: string }
+function PeriodStats({ columns, labelFont, valueFont, minScale, gap, verticalGap }: {
+  columns: StatColumn[]; labelFont: number; valueFont: number; minScale: number; gap: number; verticalGap: number
+}) {
+  const row = (period: "today" | "month") => {
+    const cells: VirtualNode[] = []
+    columns.forEach((c, i) => {
+      if (i > 0) cells.push(<Spacer frame={{ minWidth: gap, maxWidth: "infinity", minHeight: 1, maxHeight: 1 }} />)
+      cells.push(<VStack alignment="leading" spacing={1} gridColumnAlignment="leading">
+        <Text font={labelFont} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.7}>{c.label}</Text>
+        <Text font={valueFont} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={minScale}>{c[period]}</Text>
+      </VStack>)
+    })
+    return <GridRow alignment="top">{cells}</GridRow>
+  }
+  const heading = (name: string) => <GridRow>
+    <Text font={labelFont} foregroundStyle={SUB} gridCellColumns={columns.length * 2 - 1}
+      gridCellUnsizedAxes="horizontal" gridCellAnchor="topLeading">{name}</Text>
+  </GridRow>
+  return <Grid alignment="leading" horizontalSpacing={0} verticalSpacing={verticalGap}
+    frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+    {heading("今日")}
+    {row("today")}
+    {heading("本月")}
+    {row("month")}
+  </Grid>
+}
+
+// Same Parrot summary scope as Large, not per-account totals.
 
 function SmallStats({ data }: { data: UsageData }) {
   const today = data.today, month = data.month
   if (!today || !month) return <Text font={7} foregroundStyle={SUB} lineLimit={2}>今日/本月统计未提供</Text>
-  const stat = (label: string, value: string) => <VStack alignment="leading" spacing={1}
-    frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-    <Text font={7} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.7}>{label}</Text>
-    <Text font={9} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.65}>{value}</Text>
-  </VStack>
-  const row = (m: NonNullable<UsageData["today"]>) => {
+  const values = (m: NonNullable<UsageData["today"]>) => {
     const inputSide = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
-    const rate = inputSide > 0 ? (m.cacheReadTokens / inputSide * 100).toFixed(1) + "%" : "--"
-    return <LazyVGrid columns={SMALL_STAT_COLUMNS} alignment="leading" spacing={0}
-      frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-      {stat("缓存", fmtTokens(m.cacheReadTokens + m.cacheCreationTokens))}
-      {stat("缓存率", rate)}
-      {stat("Token", fmtTokens(m.totalTokens))}
-      {stat("花费", fmtUsd(m.costUsd))}
-    </LazyVGrid>
+    return [fmtTokens(m.cacheReadTokens + m.cacheCreationTokens),
+      inputSide > 0 ? (m.cacheReadTokens / inputSide * 100).toFixed(1) + "%" : "--",
+      fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
   }
-  return <VStack alignment="leading" spacing={2}>
-    <Text font={7} foregroundStyle={SUB}>今日</Text>
-    {row(today)}
-    <Text font={7} foregroundStyle={SUB}>本月</Text>
-    {row(month)}
-  </VStack>
+  const t = values(today), m = values(month)
+  return <PeriodStats labelFont={7} valueFont={9} minScale={0.65} gap={2} verticalGap={2}
+    columns={["缓存", "缓存率", "Token", "花费"].map((label, i) => ({ label, today: t[i], month: m[i] }))} />
 }
 
 // ---------- 小号：上下两个账号，各自5 h在上、每周在下 ----------
@@ -284,13 +296,6 @@ function LargeQuota({ label, w, fmt }: Win) {
   </HStack>
 }
 
-// Both periods share six equal flexible tracks, independent of text intrinsic width.
-const STAT_COLUMNS = Array.from({ length: 6 }, () => ({
-  size: { type: "flexible" as const, min: 0, max: "infinity" as const },
-  spacing: 4,
-  alignment: "leading" as const,
-}))
-
 function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const m = data.today
   const month = data.month
@@ -299,31 +304,13 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
     const total = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
     return total > 0 ? (m.cacheReadTokens / total * 100).toFixed(1) + "%" : "--"
   }
-  const stat = (label: string, value: string) => <VStack alignment="leading" spacing={1} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-    <Text font={9} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.7}>{label}</Text>
-    <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
-  </VStack>
+  const values = (m: NonNullable<UsageData["today"]>) => [fmtTokens(m.inputTokens), fmtTokens(m.outputTokens),
+    fmtTokens(m.cacheReadTokens + m.cacheCreationTokens), cacheRate(m), fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
   return <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    {m && month ? <>
-    <Text font={9} foregroundStyle={SUB}>今日</Text>
-    <LazyVGrid columns={STAT_COLUMNS} alignment="leading" spacing={0} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-      {stat("输入", fmtTokens(m.inputTokens))}
-      {stat("输出", fmtTokens(m.outputTokens))}
-      {stat("缓存", fmtTokens(m.cacheReadTokens + m.cacheCreationTokens))}
-      {stat("缓存率", cacheRate(m))}
-      {stat("Token", fmtTokens(m.totalTokens))}
-      {stat("估算花费", fmtUsd(m.costUsd))}
-    </LazyVGrid>
-    <Text font={9} foregroundStyle={SUB}>本月</Text>
-    <LazyVGrid columns={STAT_COLUMNS} alignment="leading" spacing={0} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-      {stat("输入", fmtTokens(month.inputTokens))}
-      {stat("输出", fmtTokens(month.outputTokens))}
-      {stat("缓存", fmtTokens(month.cacheReadTokens + month.cacheCreationTokens))}
-      {stat("缓存率", cacheRate(month))}
-      {stat("Token", fmtTokens(month.totalTokens))}
-      {stat("估算花费", fmtUsd(month.costUsd))}
-    </LazyVGrid>
-    </> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
+    {m && month ? <PeriodStats labelFont={9} valueFont={12} minScale={0.7} gap={4} verticalGap={6}
+      columns={["输入", "输出", "缓存", "缓存率", "Token", "估算花费"].map((label, i) => ({
+        label, today: values(m)[i], month: values(month)[i],
+      }))} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
     <VStack alignment="leading" spacing={5} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
       {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>

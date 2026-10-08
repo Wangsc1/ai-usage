@@ -161,19 +161,32 @@ async function main() {
   }
   result=await api.loadUsage(); assert.equal(result.stale,false);assert.equal(result.data.today.totalTokens,370)
   const parrotTree=expand(Root({data:result.data,stale:false,error:null}))
-  const labels=parrotTree.filter(x=>x.type==='LazyVGrid' && Array.isArray(x.props.children) && x.props.children.length===6)
-  assert.equal(labels.length,2)
-  assert.equal(labels[0].props.columns,labels[1].props.columns) // exact shared definition, not independent content sizing
-  for(const row of labels) {
-    assert.equal(row.props.alignment,'leading');assert.equal(row.props.frame.alignment,'leading')
-    assert.equal(row.props.columns.length,6)
-    for(const col of row.props.columns){assert.equal(col.size.type,'flexible');assert.equal(col.size.min,0);assert.equal(col.size.max,'infinity');assert.equal(col.spacing,4);assert.equal(col.alignment,'leading')}
-    for(const cell of row.props.children){assert.equal(cell.props.alignment,'leading');assert.equal(cell.props.frame.alignment,'leading');assert.equal(cell.props.spacing,1);assert.equal(cell.props.children[0].props.font,9);assert.equal(cell.props.children[1].props.font,12)}
+  function checkStatsGrid(tree,count,labelFont,valueFont,gap,verticalGap){
+    const grids=tree.filter(x=>x.type==='Grid');assert.equal(grids.length,1)
+    const grid=grids[0];assert.equal(grid.props.alignment,'leading');assert.equal(grid.props.horizontalSpacing,0);assert.equal(grid.props.verticalSpacing,verticalGap)
+    assert.equal(grid.props.frame.alignment,'leading');assert.equal(grid.props.frame.maxWidth,'infinity')
+    const rows=Array.from(grid.props.children);assert.equal(rows.length,4)
+    for(const index of [0,2]){
+      const header=rows[index].props.children;assert.equal(header.props.gridCellColumns,count*2-1)
+      assert.equal(header.props.gridCellUnsizedAxes,'horizontal');assert.equal(header.props.gridCellAnchor,'topLeading')
+    }
+    assert.equal(rows[0].props.children.props.children,'今日');assert.equal(rows[2].props.children.props.children,'本月')
+    const statRows=[rows[1],rows[3]]
+    for(const row of statRows){
+      const cells=Array.from(row.props.children);assert.equal(cells.length,count*2-1);assert.equal(row.type,'GridRow')
+      assert.equal(cells[0].type,'VStack');assert.equal(cells.at(-1).type,'VStack') // no outside Spacer or blank edge columns
+      for(let i=0;i<cells.length;i++){
+        const cell=cells[i]
+        if(i%2){assert.equal(cell.type,'Spacer');assert.equal(cell.props.frame.minWidth,gap);assert.equal(cell.props.frame.maxWidth,'infinity');assert.equal(cell.props.frame.minHeight,1);assert.equal(cell.props.frame.maxHeight,1)}
+        else{assert.equal(cell.type,'VStack');assert.equal(cell.props.alignment,'leading');assert.equal(cell.props.gridColumnAlignment,'leading');assert.equal(cell.props.spacing,1);assert.equal(cell.props.frame,undefined);assert.equal(cell.props.children[0].props.font,labelFont);assert.equal(cell.props.children[1].props.font,valueFont)}
+      }
+    }
+    return statRows.map(row=>({props:{children:Array.from(row.props.children).filter(x=>x.type==='VStack')}}))
   }
-  // Deliberately different string widths must not alter shared column tracks.
+  const labels=checkStatsGrid(parrotTree,6,9,12,4,6)
+  // Deliberately different string widths share native intrinsic columns in a SINGLE Grid.
   const varied={...result.data,month:{...result.data.month,inputTokens:987654321,outputTokens:1,cacheReadTokens:70000000,costUsd:1234.56,totalTokens:1057654322}}
-  const variedRows=expand(Root({data:varied,stale:false,error:null})).filter(x=>x.type==='LazyVGrid')
-  assert.equal(variedRows[0].props.columns,variedRows[1].props.columns)
+  const variedRows=checkStatsGrid(expand(Root({data:varied,stale:false,error:null})),6,9,12,4,6)
   assert.notEqual(variedRows[0].props.children[0].props.children[1].props.children,variedRows[1].props.children[0].props.children[1].props.children)
   for(const family of ['systemSmall','systemMedium','systemLarge']) {
     scripting.Widget.family=family
@@ -188,35 +201,29 @@ async function main() {
   scripting.Widget.parameter='1'
   const singleData={...result.data,accounts,month:varied.month}
   const single=expand(Root({data:singleData,stale:false,error:null}))
-  const smallRows=single.filter(x=>x.type==='LazyVGrid')
-  assert.equal(smallRows.length,2);assert.equal(smallRows[0].props.columns,smallRows[1].props.columns)
-  for(const row of smallRows){
-    assert.equal(row.props.columns.length,4);assert.equal(row.props.alignment,'leading')
-    assert.deepEqual(Array.from(row.props.children,x=>x.props.children[0].props.children),['缓存','缓存率','Token','花费'])
-    for(const col of row.props.columns){assert.equal(col.size.type,'flexible');assert.equal(col.size.min,0);assert.equal(col.spacing,2);assert.equal(col.alignment,'leading')}
-    for(const cell of row.props.children){assert.equal(cell.props.frame.alignment,'leading');assert.equal(cell.props.children[0].props.font,7);assert.equal(cell.props.children[1].props.font,9)}
-  }
+  const smallRows=checkStatsGrid(single,4,7,9,2,2)
+  for(const row of smallRows)assert.deepEqual(Array.from(row.props.children,x=>x.props.children[0].props.children),['缓存','缓存率','Token','花费'])
   assert.deepEqual(Array.from(smallRows[0].props.children,x=>x.props.children[1].props.children),['70','17.6%','370','$0.1'])
   assert.equal(smallRows[1].props.children[3].props.children[1].props.children,'$1234.6')
   const singleTexts=single.filter(x=>typeof x==='string')
   assert.equal(singleTexts.filter(x=>x==='Codex').length,1);assert.ok(singleTexts.includes('5 h'));assert.ok(singleTexts.includes('每周'))
   assert.ok(single.some(x=>x.type==='Image'&&x.props.systemName==='arrow.triangle.2.circlepath'))
   const missing=expand(Root({data:{...singleData,today:null,month:null},stale:false,error:null}))
-  assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='LazyVGrid'));assert.ok(!missing.some(x=>x==='$0.0'))
+  assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='Grid'));assert.ok(!missing.some(x=>x==='$0.0'))
   scripting.Widget.parameter='1,2'
   const double=expand(Root({data:singleData,stale:false,error:null}))
-  assert.ok(!double.some(x=>x.type==='LazyVGrid'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
+  assert.ok(!double.some(x=>x.type==='Grid'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
   assert.equal(double.filter(x=>x==='Codex').length,2)
   // Optional direct comparison with a real pre-change widget (no fixture copied into project).
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
-    for(const family of ['systemSmall','systemMedium','systemLarge']){
+    for(const family of ['systemSmall','systemMedium']){
       scripting.Widget.family=family
       const current=expand(Root({data:singleData,stale:false,error:null}))
       const previous=expand(baseline({data:singleData,stale:false,error:null}))
       assert.equal(JSON.stringify(current),JSON.stringify(previous),family+' unchanged baseline layout tree')
     }
-    console.log('PASS: exact baseline layout tree comparison: Small two-account, Medium, Large')
+    console.log('PASS: exact baseline layout tree comparison: Small two-account, Medium')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -269,12 +276,12 @@ async function main() {
   assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>{throw Error('must not load')}}),false)
   api.saveSource('parrot')
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.4')
+  assert.equal(api.VERSION,'1.7.5')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared 6 equal grid columns/leading alignment; dual-arrow refresh icon in 3 families; Small one-account 4 stats/shared columns/summary scope; Small two-account no stats; official missing')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared intrinsic 6-column Grid/leading alignment/no outer blank cells/equal internal flexible Spacers; dual-arrow refresh icon in 3 families; Small one-account 4 stats/shared intrinsic Grid/equal internal Spacers/summary scope; Small two-account no stats; official missing')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
