@@ -151,32 +151,17 @@ const windowsOf = (a: Account): Win[] => [
   { label: "每周", w: a.sevenDay, fmt: fmtResetDays },
 ]
 
-// ---------- 小号：最紧张的账号，5 小时 + 每周 ----------
+// ---------- 小号：上下两个账号，各自5 h在上、每周在下 ----------
 function Small({ data, stale }: { data: UsageData; stale: boolean }) {
-  const acc = data.accounts[0]
-  return <VStack alignment="leading" spacing={0}>
-    <HStack spacing={4}>
-      <ProviderIcon provider={acc.provider} size={13} />
-      <Text font={12} foregroundStyle={SUB} lineLimit={1}>{providerName(acc.provider)}</Text>
-      <Spacer />
-      <RefreshTime data={data} stale={stale} />
-    </HStack>
-    <Spacer />
-    <VStack alignment="leading" spacing={9}>
-      {windowsOf(acc).map(({ label, w, fmt }) =>
-        <VStack alignment="leading" spacing={4}>
-          <HStack alignment="bottom" spacing={0}>
-            <VStack alignment="leading" spacing={1}>
-              <Text font={11} foregroundStyle={SUB} frame={{ width: 24, alignment: "leading" as any }}>{label}</Text>
-              <Text font={11} monospacedDigit foregroundStyle={FG}>{fmt(w.resetsAt)}</Text>
-            </VStack>
-            <Spacer />
-            <Lcd value={w.remainingPercent} height={22} />
-          </HStack>
-          <SegBar remaining={w.remainingPercent} count={12} height={8} />
-        </VStack>
-      )}
-    </VStack>
+  const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
+  const accounts = data.accounts.slice(0, 2)
+  return <VStack alignment="leading" spacing={4} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    {accounts.map((acc, i) => <VStack alignment="leading" spacing={3} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      {i > 0 ? <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} /> : null}
+      <AccountTitle acc={acc} font={s.title} />
+      {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} />)}
+    </VStack>)}
+    {stale ? <Text font={8} foregroundStyle={ORANGE}>离线 · {fmtTime(data.fetchedAt)}</Text> : null}
   </VStack>
 }
 
