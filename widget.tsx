@@ -1,19 +1,50 @@
 import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, Widget, VirtualNode } from "scripting"
 import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, tightest } from "./api"
 
-// ---------- 配色 ----------
-const BG = "#1C1C1E"
-const FG = "#FFFFFF"
-const SUB = "#8E8E93"
-const GHOST = "#2E2E31"
-const SEG_OFF = "#3A3A3C"
-const DIVIDER = "#2C2C2E"
+// ---------- 配色（浅色 / 深色自动切换） ----------
+type DC = { light: string; dark: string }
+const C = (light: string, dark: string): DC => ({ light, dark })
 
-function levelColor(remaining: number | null): string {
+// 渐变背景：深色为蓝灰→底部蓝绿；浅色为暖灰→雾蓝→粉灰，取自参考壁纸
+const BG = {
+  light: {
+    gradient: [
+      { color: "#D6D3CE", location: 0 },
+      { color: "#C9CED6", location: 0.45 },
+      { color: "#D3C7CB", location: 0.75 },
+      { color: "#A9B3C4", location: 1 },
+    ],
+    startPoint: { x: 0.15, y: 0 },
+    endPoint: { x: 0.85, y: 1 },
+  },
+  dark: {
+    gradient: [
+      { color: "#25282F", location: 0 },
+      { color: "#232731", location: 0.45 },
+      { color: "#28303F", location: 0.75 },
+      { color: "#335A76", location: 1 },
+    ],
+    startPoint: { x: 0.3, y: 0 },
+    endPoint: { x: 0.7, y: 1 },
+  },
+} as any
+
+const FG = C("#1C1C1E", "#FFFFFF")
+const SUB = C("#5E6068", "#8E8E93")
+const SEG_OFF = C("rgba(0, 0, 0, 0.13)", "rgba(255, 255, 255, 0.14)")
+const DIVIDER = C("rgba(0, 0, 0, 0.12)", "rgba(255, 255, 255, 0.10)")
+const GREEN = C("#2E9E4F", "#7ED957")
+const ORANGE = C("#D9770B", "#FF9F0A")
+const RED = C("#D93025", "#FF453A")
+// SVG 里只能写具体颜色，按模式各生成一份
+const LCD_ON = C("#1C1C1E", "#FFFFFF")
+const LCD_OFF = C("#B9BCC3", "#363A44")
+
+function levelColor(remaining: number | null): DC {
   if (remaining == null) return SUB
-  if (remaining <= 15) return "#FF453A"
-  if (remaining <= 40) return "#FF9F0A"
-  return "#7ED957"
+  if (remaining <= 15) return RED
+  if (remaining <= 40) return ORANGE
+  return GREEN
 }
 
 // ---------- 七段数码管数字 ----------
@@ -26,17 +57,17 @@ const DIGIT: Record<string, string> = {
   "5": "afgcd", "6": "afgedc", "7": "abc", "8": "abcdefg", "9": "abcdfg", "-": "g", " ": "",
 }
 
-function lcdSvg(value: number | null): string {
+function lcdSvg(value: number | null, on: string, off: string): string {
   const s = value == null ? " --" : String(Math.max(0, Math.min(100, Math.round(value)))).padStart(3, " ")
   const W = 10, GAP = 3.2, H = 18
   let rects = ""
   for (let i = 0; i < 3; i++) {
     const ox = i * (W + GAP)
-    const on = DIGIT[s[i]] ?? ""
+    const segs = DIGIT[s[i]] ?? ""
     for (const k of Object.keys(SEG)) {
       const [x, y, w, h] = SEG[k]
-      const lit = on.includes(k)
-      rects += `<rect x="${(ox + x).toFixed(1)}" y="${y}" width="${w}" height="${h}" rx="0.9" fill="${lit ? FG : GHOST}"/>`
+      const lit = segs.includes(k)
+      rects += `<rect x="${(ox + x).toFixed(1)}" y="${y}" width="${w}" height="${h}" rx="0.9" fill="${lit ? on : off}"/>`
     }
   }
   const vw = 3 * W + 2 * GAP
@@ -47,7 +78,14 @@ function lcdSvg(value: number | null): string {
 function Lcd({ value, height }: { value: number | null; height: number }) {
   const width = height * (36.4 / 18)
   return <HStack alignment="bottom" spacing={2}>
-    <SVG code={lcdSvg(value)} resizable frame={{ width, height }} />
+    <SVG
+      code={{
+        light: lcdSvg(value, LCD_ON.light, LCD_OFF.light),
+        dark: lcdSvg(value, LCD_ON.dark, LCD_OFF.dark),
+      }}
+      resizable
+      frame={{ width, height }}
+    />
     <Text font={Math.max(9, height * 0.42)} fontWeight="bold" foregroundStyle={levelColor(value)}>%</Text>
   </HStack>
 }
@@ -71,7 +109,7 @@ const OPENAI_PATH = "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0
 const iconSvg = (path: string, color: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24"><path fill="${color}" d="${path}"/></svg>`
 const CLAUDE_SVG = iconSvg(CLAUDE_PATH, "#D97757")
-const OPENAI_SVG = iconSvg(OPENAI_PATH, "#FFFFFF")
+const OPENAI_SVG = { light: iconSvg(OPENAI_PATH, "#1C1C1E"), dark: iconSvg(OPENAI_PATH, "#FFFFFF") }
 
 function ProviderIcon({ provider, size }: { provider: string; size: number }) {
   if (provider === "claude") return <SVG code={CLAUDE_SVG} resizable frame={{ width: size, height: size }} />
@@ -93,15 +131,15 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
     <Text font={font} fontWeight="semibold" foregroundStyle={FG} lineLimit={1}>{providerName(acc.provider)}</Text>
     <Text font={font - 3} foregroundStyle={SUB} lineLimit={1}>{shortName(acc)}</Text>
     {acc.resetCredits != null
-      ? <Text font={font - 3} monospacedDigit foregroundStyle={acc.resetCredits > 0 ? "#7ED957" : SUB} lineLimit={1}>重置:{acc.resetCredits}</Text>
+      ? <Text font={font - 3} monospacedDigit foregroundStyle={acc.resetCredits > 0 ? GREEN : SUB} lineLimit={1}>重置:{acc.resetCredits}</Text>
       : null}
-    {acc.available ? null : <Text font={font - 3} foregroundStyle="#FF453A">不可用</Text>}
+    {acc.available ? null : <Text font={font - 3} foregroundStyle={RED}>不可用</Text>}
   </HStack>
 }
 
 function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   return <HStack spacing={3}>
-    <Image systemName={stale ? "wifi.slash" : "arrow.clockwise"} font={10} foregroundStyle={stale ? "#FF9F0A" : SUB} />
+    <Image systemName={stale ? "wifi.slash" : "arrow.clockwise"} font={10} foregroundStyle={stale ? ORANGE : SUB} />
     <Text font={12} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
   </HStack>
 }
@@ -201,7 +239,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
     <HStack>
       <HStack spacing={0}>
         <Text font={15} fontWeight="bold" foregroundStyle={FG}>us</Text>
-        <Text font={15} fontWeight="bold" foregroundStyle="#7ED957">A</Text>
+        <Text font={15} fontWeight="bold" foregroundStyle={GREEN}>A</Text>
         <Text font={15} fontWeight="bold" foregroundStyle={FG}>ge</Text>
       </HStack>
       <Spacer />
@@ -214,7 +252,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
 function Message({ text }: { text: string }) {
   return <VStack spacing={6}>
     <Spacer />
-    <Image systemName="exclamationmark.triangle" font={20} foregroundStyle="#FF9F0A" />
+    <Image systemName="exclamationmark.triangle" font={20} foregroundStyle={ORANGE} />
     <Text font={11} multilineTextAlignment="center" foregroundStyle={SUB}>{text}</Text>
     <Spacer />
   </VStack>
