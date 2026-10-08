@@ -18,7 +18,7 @@ function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
   let code = fs.readFileSync(name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
-  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, largeHeightBudget, smallRegionLayout }')
+  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, largeHeightBudget, smallRegionLayout, AccountTitle }')
   if (name === 'baseline-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
@@ -130,11 +130,12 @@ async function main() {
   assert.ok(!api.widgetAccounts(official.officialCached().accounts).some(a=>a.id===first.id))
   assert.equal(kc.get('parrot_management_key'),'mock-management'); api.saveSource('parrot'); assert.equal(storage.get('ai_usage_selected_accounts_v1')[0],'parrot-account')
   // JSX tree simulation verifies official stats not rendered as zero and unchanged family geometry.
-  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd,largeHeightBudget,smallRegionLayout}=load('widget.tsx')
+  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd,largeHeightBudget,smallRegionLayout,AccountTitle}=load('widget.tsx')
   scripting.Widget.displaySize={width:358,height:376}
   let normalizeLargeBar=false
+  let skipAccountTitles=false
   let proposedStatsWidth=null
-  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame?.height===5?330:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame?.height??134}}))];return [n,...expand(n.props?.children)] }
+  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function'&&skipAccountTitles&&n.type.name==='AccountTitle')return [];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame?.height===5?330:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame?.height??134}}))];return [n,...expand(n.props?.children)] }
   const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:i!==0,available:true,...mapped}))
   const data={today:null,month:null,accounts,fetchedAt:now,todayByFamily:{},monthByFamily:{}}
   for (const family of ['systemSmall','systemMedium','systemLarge']) {
@@ -382,25 +383,52 @@ async function main() {
     smallRegions.push([upper.props.frame.height,upper.props.frame.height+1+lower.props.padding.top,lower.props.frame.height])
   }
   assert.equal(JSON.stringify(smallRegions[0]),JSON.stringify(smallRegions[1]))
-  // Direct 1.7.10 baseline comparison: Medium exactly unchanged. Small geometry is the explicit new scope.
+  // All family layouts: common AccountTitle places one valid positive reset count at the full-width trailing edge.
+  for(const [family,parameter,titleCount,font] of [['systemSmall','1',1,11],['systemSmall','1,2',2,11],['systemMedium','',4,12],['systemLarge','',4,12]]){
+    scripting.Widget.family=family;scripting.Widget.parameter=parameter
+    for(const reset of [1,37,0,null,undefined,-1,NaN,Infinity]){
+      const resetData={...singleData,accounts:singleData.accounts.map(a=>({...a,resetCredits:reset,name:'很长的账号用户名用于测试压缩但不挤掉重置卡'}))}
+      const tree=expand(Root({data:resetData,stale:false,error:null}))
+      const titleRows=tree.filter(x=>x.type==='HStack'&&x.props.children?.[0]?.type?.name==='ProviderIcon')
+      assert.equal(titleRows.length,titleCount)
+      const show=typeof reset==='number'&&Number.isFinite(reset)&&reset>0
+      const texts=tree.filter(x=>x.type==='Text'&&[].concat(x.props.children).join('').startsWith('重置'))
+      assert.equal(texts.length,show?titleCount:0)
+      assert.ok(!tree.some(x=>typeof x==='string'&&x.startsWith('重置:')))
+      for(const row of titleRows){
+        const children=Array.from(row.props.children).filter(Boolean),name=children[2]
+        assert.equal(name.props.font,font-3);assert.equal(name.props.lineLimit,1)
+        if(show){
+          assert.equal(row.props.alignment,'bottom');assert.equal(row.props.frame.maxWidth,'infinity')
+          const [spacer,text]=children.slice(-2);assert.equal(spacer.type,'Spacer');assert.equal(text.type,'Text')
+          assert.equal([].concat(text.props.children).join(''),`重置：${reset}`)
+          assert.equal(text.props.font,name.props.font);assert.equal(text.props.lineLimit,1)
+          assert.equal(text.props.fixedSize.horizontal,true);assert.equal(text.props.fixedSize.vertical,true)
+          assert.equal(text.props.minScaleFactor,undefined)
+        } else {assert.equal(row.props.frame,undefined);assert.equal(row.props.alignment,undefined);assert.ok(!children.some(x=>x.type==='Spacer'))}
+      }
+    }
+  }
+  // Compare 1.7.11 baseline with only AccountTitle elided: quotas/statistics/dividers/footer are unchanged in every family.
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
-    scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
-    assert.equal(JSON.stringify(expand(Root({data:singleData,stale:false,error:null}))),JSON.stringify(expand(baseline({data:singleData,stale:false,error:null}))))
-    for(const parameter of ['1','1,2']){
-      scripting.Widget.family='systemSmall';scripting.Widget.parameter=parameter
-      const nowTree=expand(Root({data:singleData,stale:false,error:null})),oldTree=expand(baseline({data:singleData,stale:false,error:null}))
-      const geometry=tree=>tree.filter(x=>x.type==='SVG'||x.type==='RoundedRectangle'||(x.type==='Text'&&(x.props.children==='%'||x.props.font===8||x.props.fontWeight==='semibold')))
-      assert.equal(JSON.stringify(geometry(nowTree)),JSON.stringify(geometry(oldTree)))
+    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemMedium',''],['systemLarge','']]){
+      scripting.Widget.family=family;scripting.Widget.parameter=parameter;skipAccountTitles=true
+      const current=expand(Root({data:singleData,stale:false,error:null})),previous=expand(baseline({data:singleData,stale:false,error:null}))
+      skipAccountTitles=false
+      assert.equal(JSON.stringify(current),JSON.stringify(previous),family+parameter+' only AccountTitle changes')
     }
-    scripting.Widget.family='systemLarge';scripting.Widget.parameter=''
-    const current=expand(Root({data:singleData,stale:false,error:null})),previous=expand(baseline({data:singleData,stale:false,error:null}))
-    const unchangedText=tree=>tree.filter(x=>x.type==='Text'||x.type==='SVG')
-    assert.equal(JSON.stringify(unchangedText(current)),JSON.stringify(unchangedText(previous)))
-    const accountBlocks=current.filter(x=>x.type==='VStack'&&x.props.children?.[1]?.type?.name==='AccountTitle')
-    const budget=largeHeightBudget(376,4,true)
-    assert.ok(accountBlocks.length>0);assert.ok(accountBlocks.every(x=>x.props.spacing===budget.windowGap))
-    console.log('PASS: 1.7.10 baseline: Medium exact tree; Small stats/quota/title text + LCD/segments unchanged; Large all Text/SVG unchanged; only shared region geometry/large two-row+gap changes')
+    // Null/undefined: even the complete title layout is visually unchanged (ignore invisible null JSX slots).
+    for(const resetCredits of [null,undefined]){
+      const normalize=(key,value)=>key==='children'&&Array.isArray(value)?value.filter(x=>x!=null):value
+      const acc={...accounts[0],resetCredits}
+      const current=expand(AccountTitle({acc,font:12}))
+      scripting.Widget.family='systemMedium';scripting.Widget.parameter='1'
+      const prevTree=expand(baseline({data:{...singleData,accounts:[acc]},stale:false,error:null}))
+      const old=prevTree.find(x=>x.type==='HStack'&&x.props.children?.[0]?.type?.name==='ProviderIcon')
+      assert.equal(JSON.stringify(current,normalize),JSON.stringify(expand(old),normalize))
+    }
+    console.log('PASS: reset1/37/0/null/undefined/invalid across Small single/double, Medium 4 cells, Large 4 accounts; bottom + full-width + trailing Spacer + fixedSize; all other 1.7.11 family trees unchanged')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -487,7 +515,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.11')
+  assert.equal(api.VERSION,'1.7.12')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')

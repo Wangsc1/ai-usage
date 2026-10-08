@@ -144,14 +144,18 @@ function providerName(p: string) {
 }
 
 function AccountTitle({ acc, font }: { acc: Account; font: number }) {
-  return <HStack spacing={5}>
+  const showReset = typeof acc.resetCredits === "number" && Number.isFinite(acc.resetCredits) && acc.resetCredits > 0
+  // Same full-width container as the quota rows: trailing reset text aligns to the entire LCD/% right edge.
+  // Only the positive-count case changes layout; unknown and zero remain distinct data values, both hidden.
+  return <HStack spacing={5} alignment={showReset ? "bottom" : undefined}
+    frame={showReset ? { maxWidth: "infinity" } : undefined}>
     <ProviderIcon provider={acc.provider} size={font + 1} muted={!acc.enabled} />
     <Text font={font} fontWeight="semibold" foregroundStyle={acc.enabled ? FG : SUB} lineLimit={1}>{providerName(acc.provider)}</Text>
     <Text font={font - 3} foregroundStyle={SUB} lineLimit={1}>{shortName(acc)}</Text>
-    {acc.resetCredits != null
-      ? <Text font={font - 3} monospacedDigit foregroundStyle={acc.resetCredits > 0 ? GREEN : SUB} lineLimit={1}>重置:{acc.resetCredits}</Text>
-      : null}
     {acc.enabled && !acc.available ? <Text font={font - 3} foregroundStyle={RED}>不可用</Text> : null}
+    {showReset ? <Spacer /> : null}
+    {showReset ? <Text font={font - 3} monospacedDigit foregroundStyle={GREEN} lineLimit={1}
+      fixedSize={{ horizontal: true, vertical: true }}>重置：{acc.resetCredits}</Text> : null}
   </HStack>
 }
 
