@@ -421,77 +421,62 @@ async function main() {
       }
     }
   }
-  // Compare actual 1.7.12 baseline: Medium unchanged, Small only shared 3pt divider/lower anchor shift.
+  // Exactly three FINAL selected accounts: shared SmallStats in top-left, original Quads in the other slots.
+  scripting.Widget.family='systemMedium'
+  const findCells=tree=>{
+    const grid=tree.find(x=>x.type==='ZStack'&&x.props.children?.[0]?.type==='Rectangle'&&x.props.children?.[0]?.props.frame?.width===1)
+    assert.ok(grid);assert.equal(grid.props.children[1].props.frame.height,1)
+    const rows=grid.props.children[2].props.children
+    return {grid,cells:rows.flatMap(row=>row.props.children)}
+  }
+  for(const [parameter,input] of [['',{...singleData,accounts:accounts.slice(0,3)}],['3,1,4',singleData],['3,3,x,1,9,4',singleData]]){
+    scripting.Widget.parameter=parameter;proposedStatsWidth=130
+    const tree=expand(Root({data:input,stale:false,error:null})),{cells}=findCells(tree)
+    assert.equal(cells.length,4);assert.equal(cells[0].props.children.type.name,'SmallStats')
+    const selected=Array.from(api.widgetAccounts(input.accounts,parameter),a=>a.id)
+    assert.equal(selected.length,3)
+    assert.deepEqual(Array.from(cells.slice(1),c=>c.props.children.props.acc.id),selected)
+    assert.ok(cells.slice(1).every(c=>c.props.children.type.name==='Quad'))
+    assert.equal(tree.filter(x=>x.type==='HStack'&&x.props.children?.[0]?.type?.name==='ProviderIcon').length,3)
+    assert.equal(new Set(cells.slice(1).map(c=>c.props.children.props.acc.id)).size,3)
+    const statsTree=expand(cells[0].props.children)
+    const rows=checkStatsLayout(statsTree,4,7,9,2,2)
+    assert.deepEqual(Array.from(rows[0].props.children,c=>c.props.children[0].props.children),['缓存','缓存率','Token','花费'])
+    assert.deepEqual(Array.from(rows[0].props.children,c=>c.props.children[1].props.children),['70','17.6%','370','$0.1'])
+    // Identical shared statistics component rendering at identical available width, not native pixel proof.
+    scripting.Widget.family='systemSmall';scripting.Widget.parameter='1'
+    const small=expand(Root({data:input,stale:false,error:null})).find(x=>x.props?.children?.type?.name==='SmallStats')?.props.children
+    assert.ok(small);assert.equal(JSON.stringify(statsTree),JSON.stringify(expand(small)))
+    scripting.Widget.family='systemMedium';scripting.Widget.parameter=parameter
+    for(const missing of [{...input,today:null},{...input,month:null},{...input,today:null,month:null}]){
+      const missingTree=expand(Root({data:missing,stale:false,error:null})),missingCells=findCells(missingTree).cells
+      const blank=expand(missingCells[0].props.children)
+      assert.ok(blank.includes('今日/本月统计未提供'));assert.ok(!blank.some(x=>x.type==='GeometryReader'))
+      assert.ok(!blank.some(x=>typeof x==='string'&&(x.includes('$0')||x==='--')))
+      assert.deepEqual(Array.from(missingCells.slice(1),c=>c.props.children.props.acc.id),selected)
+    }
+  }
+  proposedStatsWidth=null
+  // Direct pre-change baseline: ALL other sizes and Medium selections 1/2/4 remain byte-identical component trees.
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
-    for(const [family,parameter] of [['systemMedium','']]){
-      scripting.Widget.family=family;scripting.Widget.parameter=parameter;skipAccountTitles=true
-      const current=expand(Root({data:singleData,stale:false,error:null})),previous=expand(baseline({data:singleData,stale:false,error:null}))
-      skipAccountTitles=false
-      assert.equal(JSON.stringify(current),JSON.stringify(previous),family+parameter+' unchanged 1.7.12 tree')
+    scripting.Widget.family='systemMedium';scripting.Widget.parameter='3,1,4'
+    const currentCells=findCells(expand(Root({data:singleData,stale:false,error:null}))).cells
+    const oldCells=findCells(expand(baseline({data:singleData,stale:false,error:null}))).cells
+    assert.deepEqual(Array.from(currentCells.slice(1),c=>c.props.children.props.acc.id),['p2','p0','p3'])
+    for(let slot=0;slot<4;slot++)assert.equal(JSON.stringify(currentCells[slot].props.padding),JSON.stringify(oldCells[slot].props.padding))
+    for(let i=0;i<3;i++)assert.equal(JSON.stringify(expand(currentCells[i+1].props.children)),JSON.stringify(expand(oldCells[i].props.children))) // original account/title/LCD/spacing/reset-card unchanged
+    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemSmall','3,1,4'],['systemLarge',''],['systemLarge','3,1,4'],['systemMedium','1'],['systemMedium','1,2'],['systemMedium',''],['systemMedium','4,2,3,1']]){
+      scripting.Widget.family=family;scripting.Widget.parameter=parameter
+      assert.equal(JSON.stringify(expand(Root({data:singleData,stale:false,error:null}))),JSON.stringify(expand(baseline({data:singleData,stale:false,error:null}))),family+' '+parameter+' unchanged pre-change tree')
     }
-    for(const parameter of ['1','1,2']){
-      scripting.Widget.family='systemSmall';scripting.Widget.parameter=parameter
-      const nowTree=expand(Root({data:singleData,stale:false,error:null})),oldTree=expand(baseline({data:singleData,stale:false,error:null}))
-      const unchanged=tree=>tree.filter(x=>x.type==='Text'||x.type==='SVG'||x.type==='RoundedRectangle')
-      assert.equal(JSON.stringify(unchanged(nowTree)),JSON.stringify(unchanged(oldTree)))
-      const region=tree=>tree.find(x=>x.type==='VStack'&&x.props.spacing===0&&x.props.frame?.height===134&&x.props.frame?.width===130)
-      const current=region(nowTree),previous=region(oldTree)
-      assert.ok(Math.abs(current.props.children[0].props.frame.height-(previous.props.children[0].props.frame.height-2))<1e-9)
-      assert.equal(current.props.children[2].props.padding.top,previous.props.children[2].props.padding.top)
-      assert.ok(Math.abs(current.props.children[2].props.frame.height-(previous.props.children[2].props.frame.height+2))<1e-9)
+    // Default final counts 1/2/4: no statistics insertion, identical original slot padding/Quads.
+    for(const count of [1,2,4]){
+      scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
+      const input={...singleData,accounts:accounts.slice(0,count)}
+      assert.equal(JSON.stringify(expand(Root({data:input,stale:false,error:null}))),JSON.stringify(expand(baseline({data:input,stale:false,error:null}))))
     }
-    scripting.Widget.family='systemLarge';scripting.Widget.parameter=''
-    const currentTree=expand(Root({data:singleData,stale:false,error:null})),previousTree=expand(baseline({data:singleData,stale:false,error:null}))
-    const container=tree=>tree.find(x=>x.type==='VStack'&&x.props.children?.[0]?.type?.name==='PeriodStats')
-    const currentLarge=container(currentTree),previousLarge=container(previousTree)
-    const nowStats=currentLarge.props.children[0],oldStats=previousLarge.props.children[0]
-    assert.equal(nowStats.props.valueFont,11);assert.equal(oldStats.props.valueFont,12)
-    for(const prop of ['labelFont','gap','verticalGap','contentWidth'])assert.equal(nowStats.props[prop],oldStats.props[prop])
-    assert.equal(expand(nowStats)[0].props.frame.height,undefined);assert.ok(!expand(nowStats).some(x=>x.type==='GeometryReader'))
-    assert.equal(nowStats.props.sizingValueFont,oldStats.props.valueFont) // preserve title fitting factor on narrower/long-value cases too
-    for(const width of [260,292,330]){
-      const columns=oldStats.props.columns.map(c=>({...c,today:'1234.5M',month:'$12345.6'}))
-      const newer=expand(PeriodStats({...nowStats.props,contentWidth:width,columns}))
-      const older=expand(oldStats.type({...oldStats.props,contentWidth:width,columns}))
-      const titles=tree=>tree.filter(x=>x.type==='Text'&&x.props.fontWeight!=='semibold')
-      assert.equal(JSON.stringify(titles(newer)),JSON.stringify(titles(older)))
-      const values=tree=>tree.filter(x=>x.type==='Text'&&x.props.fontWeight==='semibold')
-      const nv=values(newer),ov=values(older);assert.equal(nv.length,12)
-      for(let i=0;i<nv.length;i++)assert.ok(Math.abs(nv[i].props.font/ov[i].props.font-11/12)<1e-9)
-    }
-    assert.equal(currentLarge.props.spacing,previousLarge.props.spacing) // divider follows natural stats, no reserved-height filler
-    const nowList=currentLarge.props.children[2],oldList=previousLarge.props.children[2]
-    assert.equal(nowList.props.spacing,oldList.props.spacing)
-    let added=0
-    for(let i=0;i<4;i++){
-      const nowBlock=nowList.props.children[i],oldBlock=oldList.props.children[i]
-      assert.equal(nowBlock.props.spacing,oldBlock.props.spacing) // title→5h and divider→title stay 1
-      const nowWindows=nowBlock.props.children[2],oldWindows=oldBlock.props.children[2]
-      assert.equal(nowWindows.props.spacing,oldBlock.props.spacing+2)
-      assert.equal(JSON.stringify(expand(nowWindows.props.children)),JSON.stringify(expand(oldWindows))) // windows, LCD, 2pt internal gap and bars unchanged
-      assert.equal(JSON.stringify(nowBlock.props.children[1]),JSON.stringify(oldBlock.props.children[1])) // title/reset unchanged
-      if(i>0){
-        const oldLine=oldBlock.props.children[0],newLine=nowBlock.props.children[0]
-        assert.equal(JSON.stringify(newLine.props.modifiers.calls.slice(0,2)),JSON.stringify(oldLine.props.modifiers.calls))
-        assert.equal(newLine.props.modifiers.calls[2][1].top,1);added+=1
-      }
-      added+=2
-    }
-    assert.equal(added,11) // four window-pair gaps + three separator upper gaps; no height-squeeze mechanism
-    const untouched=tree=>tree.filter(x=>x.type==='SVG'||x.type==='RoundedRectangle'||(x.type==='Text'&&!(x.props.monospacedDigit&&x.props.fontWeight==='semibold'&&JSON.stringify(x.props.foregroundStyle)===JSON.stringify({light:'#1C1C1E',dark:'#FFFFFF'}))))
-    assert.equal(JSON.stringify(untouched(currentTree)),JSON.stringify(untouched(previousTree)))
-    // Null/undefined: even the complete title layout is visually unchanged (ignore invisible null JSX slots).
-    for(const resetCredits of [null,undefined]){
-      const normalize=(key,value)=>key==='children'&&Array.isArray(value)?value.filter(x=>x!=null):value
-      const acc={...accounts[0],resetCredits}
-      const current=expand(AccountTitle({acc,font:12}))
-      scripting.Widget.family='systemMedium';scripting.Widget.parameter='1'
-      const prevTree=expand(baseline({data:{...singleData,accounts:[acc]},stale:false,error:null}))
-      const old=prevTree.find(x=>x.type==='HStack'&&x.props.children?.[0]?.type?.name==='ProviderIcon')
-      assert.equal(JSON.stringify(current,normalize),JSON.stringify(expand(old),normalize))
-    }
-    console.log('PASS: reset1/37/0/null/undefined/invalid across Small single/double, Medium 4 cells, Large 4 accounts; bottom + full-width + trailing Spacer + fixedSize; 1.7.13 baseline: Medium exact, Small only shared2pt shift; Large gaps+11pt and values12→11, titles/LCD/windows/reset/bars unchanged')
+    console.log('PASS: Medium exactly3 final selection (default/parameters/dedup) shared SmallStats top-left, Quads in selected order, missing statistics truthful; Medium1/2/4 and Small/Large exact pre-change trees')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -578,7 +563,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.15')
+  assert.equal(api.VERSION,'1.7.16')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')

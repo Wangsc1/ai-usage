@@ -305,28 +305,29 @@ function Quad({ acc, s, fixedLcd = false }: { acc?: Account; s: Scale; fixedLcd?
 }
 
 // 十字分隔线画在底层，竖线贯穿整个高度、横线贯穿整个宽度
-function QuadGrid({ accounts, s, fixedLcd = false }: { accounts: Account[]; s: Scale; fixedLcd?: boolean }) {
+function QuadGrid({ accounts, s, fixedLcd = false, statsData }: { accounts: Account[]; s: Scale; fixedLcd?: boolean; statsData?: UsageData }) {
   const a = accounts.slice(0, 4)
   const pad = s.gap * 2 + 3
-  const cell = (acc?: Account, top = false, left = false) =>
+  const cell = (acc?: Account, top = false, left = false, statistics = false) =>
     <VStack
       padding={{ top: top ? 0 : pad, bottom: top ? pad : 0, leading: left ? 0 : 10, trailing: left ? 10 : 0 }}
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
     >
-      <Quad acc={acc} s={s} fixedLcd={fixedLcd} />
+      {statistics && statsData ? <SmallStats data={statsData} /> : <Quad acc={acc} s={s} fixedLcd={fixedLcd} />}
     </VStack>
   return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
     <Rectangle fill={DIVIDER} frame={{ width: 1, maxHeight: "infinity" }} />
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
     <VStack spacing={0}>
-      <HStack spacing={0}>{cell(a[0], true, true)}{cell(a[1], true, false)}</HStack>
-      <HStack spacing={0}>{cell(a[2], false, true)}{cell(a[3], false, false)}</HStack>
+      <HStack spacing={0}>{statsData ? cell(undefined, true, true, true) : cell(a[0], true, true)}{cell(a[statsData ? 0 : 1], true, false)}</HStack>
+      <HStack spacing={0}>{cell(a[statsData ? 1 : 2], false, true)}{cell(a[statsData ? 2 : 3], false, false)}</HStack>
     </VStack>
   </ZStack>
 }
 
 // ---------- 中号：四宫格，最多 4 个账号 ----------
 function Medium({ data }: { data: UsageData }) {
+  if (data.accounts.length === 3) return <QuadGrid accounts={data.accounts} s={MEDIUM_SCALE} fixedLcd statsData={data} />
   return <QuadGrid accounts={data.accounts} s={MEDIUM_SCALE} fixedLcd />
 }
 
