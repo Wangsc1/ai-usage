@@ -254,7 +254,7 @@ export function fmtResetDays(iso: string | null): string {
   const ms = new Date(iso).getTime() - Date.now()
   if (!(ms > 0)) return "--"
   const d = Math.floor(ms / 86400000)
-  return d >= 1 ? `${d}天` : fmtReset(iso)
+  return d >= 1 ? fmtReset(iso).replace("d ", "天 ") : fmtReset(iso)
 }
 
 // 重置倒计时：01:36 / 3d 04:48；未知或已过期显示 --:--
