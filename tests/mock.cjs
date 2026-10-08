@@ -7,7 +7,7 @@ const kc = new Map(), storage = new Map(), storageWrites = []
 class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])) } static now() { return now } }
 const modules = {}
 const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { return o[k] || k } })
-scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;return v=>{calls.push([k,v]);return m}}});return m}
+scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
 const jsx = (type, props, key) => key === undefined ? ({type, props}) : ({type, props, key})
 const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise,
   Keychain: { get(k) { reads.push(k); return kc.get(k) ?? null }, set(k,v) { kc.set(k,v); return true }, remove(k) { kc.delete(k); return true } },
@@ -204,15 +204,16 @@ async function main() {
   const exampleMonth=['26.4M','1.3M','440M','91.1%','468M','$199.9']
   const exampleLabels=['输入','输出','缓存','缓存率','Token','估算花费']
   const exampleColumns=exampleLabels.map((label,i)=>({label,today:exampleToday[i],month:exampleMonth[i]}))
-  for(const [indexes,lf,vf,gap,vg,widths] of [[[0,1,2,3,4,5],9,12,4,3,[330,300]],[[2,3,4,5],7,9,2,2,[130,120]]]){
+  for(const [indexes,lf,vf,gap,vg,widths] of [[[0,1,2,3,4,5],9,11,4,3,[330,300]],[[2,3,4,5],7,9,2,2,[130,120]]]){
     const cols=indexes.map(i=>({...exampleColumns[i],label:i===5&&indexes.length===4?'花费':exampleColumns[i].label}))
     for(const width of widths){
-      const budget=statsWidthBudget(cols,lf,vf,gap,width)
+      const sizingFont=indexes.length===6?12:vf
+      const budget=statsWidthBudget(cols,lf,sizingFont,gap,width)
       assert.ok(budget.fitted<=width+1e-9);assert.ok(budget.scale>0.7&&budget.scale<=1)
-      const rescaled=statsWidthBudget(cols,lf*budget.scale,vf*budget.scale,gap*budget.scale,width)
+      const rescaled=statsWidthBudget(cols,lf*budget.scale,sizingFont*budget.scale,gap*budget.scale,width)
       assert.ok(rescaled.natural<=width+1e-9)
       proposedStatsWidth=width
-      const tree=expand(PeriodStats({columns:cols,labelFont:lf,valueFont:vf,gap,verticalGap:vg}))
+      const tree=expand(PeriodStats({columns:cols,labelFont:lf,valueFont:vf,sizingValueFont:sizingFont,gap,verticalGap:vg}))
       const rows=checkStatsLayout(tree,cols.length,lf,vf,gap,vg)
       for(let p=0;p<2;p++)assert.deepEqual(Array.from(rows[p].props.children,x=>x.props.children[1].props.children),cols.map(c=>c[p?'month':'today']))
       assert.ok(!tree.some(x=>typeof x==='string'&&(x.includes('...')||x.includes('…'))))
@@ -220,10 +221,10 @@ async function main() {
     }
   }
   proposedStatsWidth=null
-  const labels=checkStatsLayout(parrotTree,6,9,12,4,3)
+  const labels=checkStatsLayout(parrotTree,6,9,11,4,3)
   // Each uncompressed column owns both periods; a shared factor fits the measured container width.
   const varied={...result.data,month:{...result.data.month,inputTokens:987654321,outputTokens:1,cacheReadTokens:70000000,costUsd:1234.56,totalTokens:1057654322}}
-  const variedRows=checkStatsLayout(expand(Root({data:varied,stale:false,error:null})),6,9,12,4,3)
+  const variedRows=checkStatsLayout(expand(Root({data:varied,stale:false,error:null})),6,9,11,4,3)
   assert.notEqual(variedRows[0].props.children[0].props.children[1].props.children,variedRows[1].props.children[0].props.children[1].props.children)
   for(const family of ['systemSmall','systemMedium','systemLarge']) {
     scripting.Widget.family=family
@@ -369,6 +370,10 @@ async function main() {
   for(const block of accountList.props.children){
     assert.equal(block.props.fixedSize.vertical,true);assert.equal(block.props.spacing,1);assert.equal(block.props.frame.maxHeight,undefined)
     const title=block.props.children[1];assert.equal(title.props.fixedSize.vertical,true)
+    const windows=block.props.children[2];assert.equal(windows.props.spacing,3);assert.equal(windows.props.fixedSize.vertical,true)
+    assert.equal(windows.props.children.length,2)
+    const line=block.props.children[0]
+    if(line)assert.equal(JSON.stringify(line.props.modifiers.calls),JSON.stringify([['frame',{height:1}],['frame',{maxWidth:'infinity'}],['padding',{top:1}]]))
   }
   for(const bar of largeTree.filter(x=>x.type==='RoundedRectangle')){
     assert.equal(JSON.stringify(bar.props.modifiers.calls),JSON.stringify([['frame',{height:5}],['frame',{maxWidth:'infinity'}]]))
@@ -376,7 +381,7 @@ async function main() {
   const sourceWidget=fs.readFileSync(path.join(root,'widget.tsx'),'utf8')
   assert.ok(!sourceWidget.includes('largeHeightBudget'))
   for(const height of [132,134,142]){
-    const region=smallRegionLayout(height);assert.equal(region.fits,true);assert.ok(region.dividerY-66>=5);assert.ok(region.lowerY+52<=height)
+    const region=smallRegionLayout(height);assert.equal(region.fits,true);assert.ok(region.dividerY-66>=3);assert.ok(region.lowerY+52<=height)
   }
   assert.equal(smallRegionLayout(120).fits,false)
   const smallRegions=[]
@@ -432,10 +437,50 @@ async function main() {
       assert.equal(JSON.stringify(unchanged(nowTree)),JSON.stringify(unchanged(oldTree)))
       const region=tree=>tree.find(x=>x.type==='VStack'&&x.props.spacing===0&&x.props.frame?.height===134&&x.props.frame?.width===130)
       const current=region(nowTree),previous=region(oldTree)
-      assert.ok(Math.abs(current.props.children[0].props.frame.height-(previous.props.children[0].props.frame.height-3))<1e-9)
+      assert.ok(Math.abs(current.props.children[0].props.frame.height-(previous.props.children[0].props.frame.height-2))<1e-9)
       assert.equal(current.props.children[2].props.padding.top,previous.props.children[2].props.padding.top)
-      assert.ok(Math.abs(current.props.children[2].props.frame.height-(previous.props.children[2].props.frame.height+3))<1e-9)
+      assert.ok(Math.abs(current.props.children[2].props.frame.height-(previous.props.children[2].props.frame.height+2))<1e-9)
     }
+    scripting.Widget.family='systemLarge';scripting.Widget.parameter=''
+    const currentTree=expand(Root({data:singleData,stale:false,error:null})),previousTree=expand(baseline({data:singleData,stale:false,error:null}))
+    const container=tree=>tree.find(x=>x.type==='VStack'&&x.props.children?.[0]?.type?.name==='PeriodStats')
+    const currentLarge=container(currentTree),previousLarge=container(previousTree)
+    const nowStats=currentLarge.props.children[0],oldStats=previousLarge.props.children[0]
+    assert.equal(nowStats.props.valueFont,11);assert.equal(oldStats.props.valueFont,12)
+    for(const prop of ['labelFont','gap','verticalGap','contentWidth'])assert.equal(nowStats.props[prop],oldStats.props[prop])
+    assert.equal(expand(nowStats)[0].props.frame.height,undefined);assert.ok(!expand(nowStats).some(x=>x.type==='GeometryReader'))
+    assert.equal(nowStats.props.sizingValueFont,oldStats.props.valueFont) // preserve title fitting factor on narrower/long-value cases too
+    for(const width of [260,292,330]){
+      const columns=oldStats.props.columns.map(c=>({...c,today:'1234.5M',month:'$12345.6'}))
+      const newer=expand(PeriodStats({...nowStats.props,contentWidth:width,columns}))
+      const older=expand(oldStats.type({...oldStats.props,contentWidth:width,columns}))
+      const titles=tree=>tree.filter(x=>x.type==='Text'&&x.props.fontWeight!=='semibold')
+      assert.equal(JSON.stringify(titles(newer)),JSON.stringify(titles(older)))
+      const values=tree=>tree.filter(x=>x.type==='Text'&&x.props.fontWeight==='semibold')
+      const nv=values(newer),ov=values(older);assert.equal(nv.length,12)
+      for(let i=0;i<nv.length;i++)assert.ok(Math.abs(nv[i].props.font/ov[i].props.font-11/12)<1e-9)
+    }
+    assert.equal(currentLarge.props.spacing,previousLarge.props.spacing) // divider follows natural stats, no reserved-height filler
+    const nowList=currentLarge.props.children[2],oldList=previousLarge.props.children[2]
+    assert.equal(nowList.props.spacing,oldList.props.spacing)
+    let added=0
+    for(let i=0;i<4;i++){
+      const nowBlock=nowList.props.children[i],oldBlock=oldList.props.children[i]
+      assert.equal(nowBlock.props.spacing,oldBlock.props.spacing) // title→5h and divider→title stay 1
+      const nowWindows=nowBlock.props.children[2],oldWindows=oldBlock.props.children[2]
+      assert.equal(nowWindows.props.spacing,oldBlock.props.spacing+2)
+      assert.equal(JSON.stringify(expand(nowWindows.props.children)),JSON.stringify(expand(oldWindows))) // windows, LCD, 2pt internal gap and bars unchanged
+      assert.equal(JSON.stringify(nowBlock.props.children[1]),JSON.stringify(oldBlock.props.children[1])) // title/reset unchanged
+      if(i>0){
+        const oldLine=oldBlock.props.children[0],newLine=nowBlock.props.children[0]
+        assert.equal(JSON.stringify(newLine.props.modifiers.calls.slice(0,2)),JSON.stringify(oldLine.props.modifiers.calls))
+        assert.equal(newLine.props.modifiers.calls[2][1].top,1);added+=1
+      }
+      added+=2
+    }
+    assert.equal(added,11) // four window-pair gaps + three separator upper gaps; no height-squeeze mechanism
+    const untouched=tree=>tree.filter(x=>x.type==='SVG'||x.type==='RoundedRectangle'||(x.type==='Text'&&!(x.props.monospacedDigit&&x.props.fontWeight==='semibold'&&JSON.stringify(x.props.foregroundStyle)===JSON.stringify({light:'#1C1C1E',dark:'#FFFFFF'}))))
+    assert.equal(JSON.stringify(untouched(currentTree)),JSON.stringify(untouched(previousTree)))
     // Null/undefined: even the complete title layout is visually unchanged (ignore invisible null JSX slots).
     for(const resetCredits of [null,undefined]){
       const normalize=(key,value)=>key==='children'&&Array.isArray(value)?value.filter(x=>x!=null):value
@@ -446,7 +491,7 @@ async function main() {
       const old=prevTree.find(x=>x.type==='HStack'&&x.props.children?.[0]?.type?.name==='ProviderIcon')
       assert.equal(JSON.stringify(current,normalize),JSON.stringify(expand(old),normalize))
     }
-    console.log('PASS: reset1/37/0/null/undefined/invalid across Small single/double, Medium 4 cells, Large 4 accounts; bottom + full-width + trailing Spacer + fixedSize; Medium 1.7.12 tree unchanged; Large intrinsic-height no reader/no mixed frame protection')
+    console.log('PASS: reset1/37/0/null/undefined/invalid across Small single/double, Medium 4 cells, Large 4 accounts; bottom + full-width + trailing Spacer + fixedSize; 1.7.13 baseline: Medium exact, Small only shared2pt shift; Large gaps+11pt and values12→11, titles/LCD/windows/reset/bars unchanged')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -480,7 +525,7 @@ async function main() {
   // Minimal documented-shape mocks: Observable{value,setValue}, chainable modifiers() recorder.
   let obsStore=[],obsIndex=0
   scripting.useObservable=init=>{const i=obsIndex++;if(!(i in obsStore)){const o={value:typeof init==='function'?init():init,setValue(v){o.value=v}};obsStore[i]=o}return obsStore[i]}
-  scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;return v=>{calls.push([k,v]);return m}}});return m}
+  scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
   const ids=()=>Array.from(api.cachedAccounts(),a=>a.id)
   const link=()=>render().find(x=>x.type==='NavigationLink')
   assert.ok(link());assert.equal(link().props.children.props.children,'账号排序')
@@ -533,7 +578,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.13')
+  assert.equal(api.VERSION,'1.7.14')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')

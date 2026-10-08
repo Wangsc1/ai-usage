@@ -192,13 +192,14 @@ function statsWidthBudget(columns: StatColumn[], labelFont: number, valueFont: n
   const scale = Math.min(1, Math.max(1, width) / natural)
   return { columnWidths, natural, scale, fitted: natural * scale }
 }
-function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap, contentWidth }: {
-  columns: StatColumn[]; labelFont: number; valueFont: number; gap: number; verticalGap: number; contentWidth?: number
+function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap, contentWidth, sizingValueFont = valueFont }: {
+  columns: StatColumn[]; labelFont: number; valueFont: number; gap: number; verticalGap: number; contentWidth?: number; sizingValueFont?: number
 }) {
   // Bound reader height to six text lines + the existing inter-period/label gaps, rather than filling the widget.
   const height = 4 * Math.ceil(labelFont * 1.2) + 2 * Math.ceil(valueFont * 1.2) + 3 * verticalGap + 2
   const render = (width: number) => {
-      const { scale } = statsWidthBudget(columns, labelFont, valueFont, gap, width)
+      // Large keeps the old 12pt width budget so title fitting remains identical while values render at 11pt.
+      const { scale } = statsWidthBudget(columns, labelFont, sizingValueFont, gap, width)
       const cells: VirtualNode[] = []
       columns.forEach((c, i) => {
         if (i > 0) cells.push(<Spacer frame={{ minWidth: gap * scale, maxWidth: "infinity" }} />)
@@ -242,9 +243,9 @@ function SmallStats({ data }: { data: UsageData }) {
 }
 
 // ---------- 小号：上下两个账号，各自5 h在上、每周在下 ----------
-// Shared single/double geometry, shifted 3pt up from 1.7.12; lower account retains its 4pt inset.
+// Shared single/double geometry: 1.7.13 moved up 3pt, 1.7.14 another 2pt; lower account retains its 4pt inset.
 function smallRegionLayout(height: number) {
-  const dividerY = Math.max(74, Math.min(height * 0.56, height - 57)) - 3
+  const dividerY = Math.max(74, Math.min(height * 0.56, height - 57)) - 5
   return { dividerY, lowerY: dividerY + 1 + 4, lowerHeight: height - dividerY - 1, fits: height >= 131 }
 }
 function Small({ data, stale }: { data: UsageData; stale: boolean }) {
@@ -360,7 +361,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   return <VStack alignment="leading" spacing={3}
     modifiers={modifiers().fixedSize({ horizontal: false, vertical: true })
       .frame({ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" })}>
-    {m && month ? <PeriodStats labelFont={9} valueFont={12} gap={4} verticalGap={3} contentWidth={contentWidth}
+    {m && month ? <PeriodStats labelFont={9} valueFont={11} sizingValueFont={12} gap={4} verticalGap={3} contentWidth={contentWidth}
       columns={["输入", "输出", "缓存", "缓存率", "Token", "估算花费"].map((label, i) => ({
         label, today: values(m)[i], month: values(month)[i],
       }))} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
@@ -368,9 +369,14 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
     <VStack alignment="leading" spacing={2} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
       {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={1}
         fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
-        {i > 0 ? <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} /> : null}
+        {/* Outer account-list gap 2 + this inset 1 => weekly bar to next divider 3 (formerly 2).
+            Account spacing 1 still controls divider→title and title→5h; only the two windows use gap 3. */}
+        {i > 0 ? <Rectangle fill={DIVIDER}
+          modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" }).padding({ top: 1 })} /> : null}
         <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}><AccountTitle acc={acc} font={12} /></VStack>
-        {windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} />)}
+        <VStack alignment="leading" spacing={3} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
+          {windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} />)}
+        </VStack>
       </VStack>)}
     </VStack>
   </VStack>
