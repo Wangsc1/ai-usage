@@ -151,10 +151,56 @@ const windowsOf = (a: Account): Win[] => [
   { label: "每周", w: a.sevenDay, fmt: fmtResetDays },
 ]
 
+// Small single-account stats use the same Parrot summary scope as Large, not per-account totals.
+const SMALL_STAT_COLUMNS = Array.from({ length: 4 }, () => ({
+  size: { type: "flexible" as const, min: 0, max: "infinity" as const },
+  spacing: 2,
+  alignment: "leading" as const,
+}))
+
+function SmallStats({ data }: { data: UsageData }) {
+  const today = data.today, month = data.month
+  if (!today || !month) return <Text font={7} foregroundStyle={SUB} lineLimit={2}>今日/本月统计未提供</Text>
+  const stat = (label: string, value: string) => <VStack alignment="leading" spacing={1}
+    frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+    <Text font={7} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.7}>{label}</Text>
+    <Text font={9} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.65}>{value}</Text>
+  </VStack>
+  const row = (m: NonNullable<UsageData["today"]>) => {
+    const inputSide = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
+    const rate = inputSide > 0 ? (m.cacheReadTokens / inputSide * 100).toFixed(1) + "%" : "--"
+    return <LazyVGrid columns={SMALL_STAT_COLUMNS} alignment="leading" spacing={0}
+      frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+      {stat("缓存", fmtTokens(m.cacheReadTokens + m.cacheCreationTokens))}
+      {stat("缓存率", rate)}
+      {stat("Token", fmtTokens(m.totalTokens))}
+      {stat("花费", fmtUsd(m.costUsd))}
+    </LazyVGrid>
+  }
+  return <VStack alignment="leading" spacing={2}>
+    <Text font={7} foregroundStyle={SUB}>今日</Text>
+    {row(today)}
+    <Text font={7} foregroundStyle={SUB}>本月</Text>
+    {row(month)}
+  </VStack>
+}
+
 // ---------- 小号：上下两个账号，各自5 h在上、每周在下 ----------
 function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
   const accounts = data.accounts.slice(0, 2)
+  // Only the final one-account selection gets stats. The two-account path below is unchanged.
+  if (data.accounts.length === 1) return <VStack alignment="leading" spacing={4}
+    frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    <SmallStats data={data} />
+    <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
+    <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+      <VStack alignment="leading" spacing={3}>
+        <AccountTitle acc={accounts[0]} font={s.title} />
+        {windowsOf(accounts[0]).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} />)}
+      </VStack>
+    </VStack>
+  </VStack>
   // 分隔线独立铺在几何中心，不放进下方账号的内容堆栈。
   return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
     {accounts.length > 1 ? <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} /> : null}

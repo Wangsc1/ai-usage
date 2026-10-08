@@ -17,8 +17,8 @@ const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise
 function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
-  let code = fs.readFileSync(path.join(root,name),'utf8')
-  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
+  let code = fs.readFileSync(name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
+  if (name === 'widget.tsx' || name === 'baseline-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
@@ -171,6 +171,42 @@ async function main() {
       assert.ok(icon);assert.equal(icon.props.font,8);assert.ok(!images.some(x=>x.props.systemName==='arrow.clockwise'))
     }
   }
+  // Small stats are conditional on the final selection (also numeric parameters).
+  scripting.Widget.family='systemSmall'
+  scripting.Widget.parameter='1'
+  const singleData={...result.data,accounts,month:varied.month}
+  const single=expand(Root({data:singleData,stale:false,error:null}))
+  const smallRows=single.filter(x=>x.type==='LazyVGrid')
+  assert.equal(smallRows.length,2);assert.equal(smallRows[0].props.columns,smallRows[1].props.columns)
+  for(const row of smallRows){
+    assert.equal(row.props.columns.length,4);assert.equal(row.props.alignment,'leading')
+    assert.deepEqual(Array.from(row.props.children,x=>x.props.children[0].props.children),['缓存','缓存率','Token','花费'])
+    for(const col of row.props.columns){assert.equal(col.size.type,'flexible');assert.equal(col.size.min,0);assert.equal(col.spacing,2);assert.equal(col.alignment,'leading')}
+    for(const cell of row.props.children){assert.equal(cell.props.frame.alignment,'leading');assert.equal(cell.props.children[0].props.font,7);assert.equal(cell.props.children[1].props.font,9)}
+  }
+  assert.deepEqual(Array.from(smallRows[0].props.children,x=>x.props.children[1].props.children),['70','17.6%','370','$0.1'])
+  assert.equal(smallRows[1].props.children[3].props.children[1].props.children,'$1234.6')
+  const singleTexts=single.filter(x=>typeof x==='string')
+  assert.equal(singleTexts.filter(x=>x==='Codex').length,1);assert.ok(singleTexts.includes('5 h'));assert.ok(singleTexts.includes('每周'))
+  assert.ok(single.some(x=>x.type==='Image'&&x.props.systemName==='arrow.triangle.2.circlepath'))
+  const missing=expand(Root({data:{...singleData,today:null,month:null},stale:false,error:null}))
+  assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='LazyVGrid'));assert.ok(!missing.some(x=>x==='$0.0'))
+  scripting.Widget.parameter='1,2'
+  const double=expand(Root({data:singleData,stale:false,error:null}))
+  assert.ok(!double.some(x=>x.type==='LazyVGrid'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
+  assert.equal(double.filter(x=>x==='Codex').length,2)
+  // Optional direct comparison with the real pre-change 1.7.2 widget (no fixture copied into project).
+  if(process.env.BASELINE_WIDGET_PATH){
+    const baseline=load('baseline-widget.tsx').Root
+    for(const family of ['systemSmall','systemMedium','systemLarge']){
+      scripting.Widget.family=family
+      const current=expand(Root({data:singleData,stale:false,error:null}))
+      const previous=expand(baseline({data:singleData,stale:false,error:null}))
+      assert.equal(JSON.stringify(current),JSON.stringify(previous),family+' unchanged 1.7.2 tree')
+    }
+    console.log('PASS: exact 1.7.2 tree comparison: Small two-account, Medium, Large')
+  }
+  scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
   for(const row of labels){assert.deepEqual(Array.from(row.props.children,x=>x.props.children[0].props.children),['输入','输出','缓存','缓存率','Token','估算花费']);assert.equal(row.props.children[4].props.children[1].props.children,'370');assert.ok(row.props.children.every(x=>x.props.children.every(t=>t.props.lineLimit===1)))}
   // Exercise App sorting controls with persistent mock hook state, not only the data helper.
@@ -218,11 +254,11 @@ async function main() {
   assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>{throw Error('must not load')}}),false)
   api.saveSource('parrot')
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.2')
+  assert.equal(api.VERSION,'1.7.3')
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/selection/parameters/pruning; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared 6 equal grid columns/leading alignment; dual-arrow refresh icon in 3 families')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/selection/parameters/pruning; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared 6 equal grid columns/leading alignment; dual-arrow refresh icon in 3 families; Small one-account 4 stats/shared columns/summary scope; Small two-account no stats; official missing')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
