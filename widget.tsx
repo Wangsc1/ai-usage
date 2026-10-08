@@ -42,7 +42,7 @@ const LCD_OFF = C("#B9BCC3", "#363A44")
 
 function levelColor(remaining: number | null): DC {
   if (remaining == null) return SUB
-  if (remaining <= 15) return RED
+  if (remaining <= 20) return RED
   if (remaining <= 60) return ORANGE
   return GREEN
 }
