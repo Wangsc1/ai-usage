@@ -230,7 +230,7 @@ function LargeQuota({ label, w, fmt }: Win) {
   return <HStack spacing={5}>
     <Text font={9} foregroundStyle={SUB} frame={{ width: 20, alignment: "leading" as any }}>{label}</Text>
     <Text font={9} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.8}
-      frame={{ width: 65, alignment: "leading" as any }}>{fmt(w.resetsAt)}</Text>
+      frame={{ width: 65, alignment: "leading" as any }}>· {fmt(w.resetsAt)}</Text>
     <SegBar remaining={w.remainingPercent} count={20} height={5} />
     <Lcd value={w.remainingPercent} height={12} />
   </HStack>
