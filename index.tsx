@@ -77,7 +77,7 @@ function SettingsView() {
       </Section>
 
       <Section>
-        <LabeledContent title={"版本"} value={"1.1.0"} />
+        <LabeledContent title={"版本"} value={"1.2.0"} />
         <Button
           title={"清除配置"}
           action={async () => {
