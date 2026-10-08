@@ -18,14 +18,20 @@
 
 ## 安装
 
-1. 在 Scripting 中新建脚本项目（例如命名为 `AI 用量`）。
-2. 把 `api.ts`、`widget.tsx`、`index.tsx` 三个文件放进项目。
-3. 运行脚本，在打开的设置页填写：
+在 iPhone 上点击下面的链接，一键导入 Scripting：
+
+```
+https://scripting.fun/import_scripts?urls=["https%3A%2F%2Fgithub.com%2FWangsc1%2Fai-usage"]
+```
+
+导入后：
+
+1. 运行脚本，在打开的设置页填写：
    - Parrot 地址，例如 `https://pr.jjbb.me`
    - 管理密钥（Parrot 配置里的 `managementKey`）
-4. 点“保存并测试”，显示“✅ 连接成功”后，在桌面添加 Scripting 小组件，长按 → 编辑小组件 → 选择该脚本。
+2. 点“保存并测试”，显示“✅ 连接成功”后，在桌面添加 Scripting 小组件，长按 → 编辑小组件 → 选择该脚本。
 
-设置页还可以预览三种尺寸、测试连接、清除配置。
+设置页还可以预览三种尺寸、测试连接、清除配置。更新版本时先删除旧脚本再重新导入。
 
 ## 安全说明
 
