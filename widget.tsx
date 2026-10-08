@@ -243,15 +243,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
     <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
   </VStack>
   return <VStack alignment="leading" spacing={6} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    <HStack>
-      <HStack spacing={0}>
-        <Text font={13} fontWeight="bold" foregroundStyle={FG}>us</Text>
-        <Text font={13} fontWeight="bold" foregroundStyle={GREEN}>A</Text>
-        <Text font={13} fontWeight="bold" foregroundStyle={FG}>ge</Text>
-      </HStack>
-      <Text font={9} foregroundStyle={SUB}>今日</Text>
-      <Spacer />
-    </HStack>
+    <Text font={9} foregroundStyle={SUB}>今日</Text>
     <HStack spacing={6}>
       {stat("输入", fmtTokens(m.inputTokens))}
       {stat("输出", fmtTokens(m.outputTokens))}
@@ -300,7 +292,7 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     <ZStack padding={{ bottom: data ? 14 : 0 }} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>{body}</ZStack>
     {data ? <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
       <Spacer />
-      <HStack><Spacer /><RefreshTime data={data} stale={stale} /></HStack>
+      <HStack offset={{ x: 7, y: 6 }}><Spacer /><RefreshTime data={data} stale={stale} /></HStack>
     </VStack> : null}
   </ZStack>
 }
