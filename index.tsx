@@ -5,7 +5,7 @@ import {
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.5"
+const VERSION = "1.7.6"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -239,7 +239,7 @@ function SettingsView() {
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
-      <Section header={<Text>小组件账号</Text>} footer={<Text>含已停用账号。长按账号行的文字区域，拖到目标账号行后松手排序（向上放在目标前，向下放在目标后），默认按此列表顺序显示，小号前2个、中大号前4个，包含已停用账号。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。两种来源的排序独立保存。</Text>}>
+      <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。长按账号行的文字区域，拖到目标账号行后松手排序（向上放在目标前，向下放在目标后），默认按此列表顺序显示，小号前2个、中大号前4个，不按启用状态过滤。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。两种来源的排序独立保存。</Text>}>
         {accounts.map((a, i) => <VStack key={a.id} alignment="leading" spacing={4}
           onDrag={busy ? undefined : {
             data: () => ItemProvider.fromText(JSON.stringify({ session: dragSession, source, id: a.id })),
@@ -247,7 +247,7 @@ function SettingsView() {
           }}
           onDrop={accountDrop(a.id)}
         >
-          <Text>{`${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}${a.enabled ? "" : "（已停用）"}`}</Text>
+          <Text foregroundStyle={a.enabled ? undefined : { light: "#5E6068", dark: "#8E8E93" }}>{`${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`}</Text>
         </VStack>)}
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>

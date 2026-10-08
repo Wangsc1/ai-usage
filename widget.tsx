@@ -112,10 +112,12 @@ const iconSvg = (path: string, color: string) =>
 const CLAUDE_SVG = iconSvg(CLAUDE_PATH, "#D97757")
 const OPENAI_SVG = { light: iconSvg(OPENAI_PATH, "#1C1C1E"), dark: iconSvg(OPENAI_PATH, "#FFFFFF") }
 
-function ProviderIcon({ provider, size }: { provider: string; size: number }) {
-  if (provider === "claude") return <SVG code={CLAUDE_SVG} resizable frame={{ width: size, height: size }} />
-  if (provider === "openai") return <SVG code={OPENAI_SVG} resizable frame={{ width: size, height: size }} />
-  return <Image systemName="sparkle" font={size * 0.85} foregroundStyle={FG} frame={{ width: size, height: size }} />
+function ProviderIcon({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
+  // SVG paths have explicit fills; changing only the parent's foregroundStyle cannot gray them.
+  const graySvg = (path: string) => ({ light: iconSvg(path, SUB.light), dark: iconSvg(path, SUB.dark) })
+  if (provider === "claude") return <SVG code={muted ? graySvg(CLAUDE_PATH) : CLAUDE_SVG} resizable frame={{ width: size, height: size }} />
+  if (provider === "openai") return <SVG code={muted ? graySvg(OPENAI_PATH) : OPENAI_SVG} resizable frame={{ width: size, height: size }} />
+  return <Image systemName="sparkle" font={size * 0.85} foregroundStyle={muted ? SUB : FG} frame={{ width: size, height: size }} />
 }
 
 function shortName(acc: Account) {
@@ -128,13 +130,13 @@ function providerName(p: string) {
 
 function AccountTitle({ acc, font }: { acc: Account; font: number }) {
   return <HStack spacing={5}>
-    <ProviderIcon provider={acc.provider} size={font + 1} />
-    <Text font={font} fontWeight="semibold" foregroundStyle={FG} lineLimit={1}>{providerName(acc.provider)}</Text>
+    <ProviderIcon provider={acc.provider} size={font + 1} muted={!acc.enabled} />
+    <Text font={font} fontWeight="semibold" foregroundStyle={acc.enabled ? FG : SUB} lineLimit={1}>{providerName(acc.provider)}</Text>
     <Text font={font - 3} foregroundStyle={SUB} lineLimit={1}>{shortName(acc)}</Text>
     {acc.resetCredits != null
       ? <Text font={font - 3} monospacedDigit foregroundStyle={acc.resetCredits > 0 ? GREEN : SUB} lineLimit={1}>重置:{acc.resetCredits}</Text>
       : null}
-    {!acc.enabled ? <Text font={font - 3} foregroundStyle={SUB}>已停用</Text> : acc.available ? null : <Text font={font - 3} foregroundStyle={RED}>不可用</Text>}
+    {acc.enabled && !acc.available ? <Text font={font - 3} foregroundStyle={RED}>不可用</Text> : null}
   </HStack>
 }
 

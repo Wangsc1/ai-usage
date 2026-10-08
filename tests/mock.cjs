@@ -138,7 +138,7 @@ async function main() {
     const tree=expand(Root({data,stale:false,error:null})), texts=tree.filter(x=>typeof x==='string')
     assert.ok(texts.includes(new Date(now).getHours().toString().padStart(2,'0')+':'+new Date(now).getMinutes().toString().padStart(2,'0')))
     assert.equal(texts.filter(x=>x==='Codex').length,family==='systemSmall'?2:4)
-    assert.ok(texts.includes('已停用'));assert.ok(texts.includes('匿名0'))
+    assert.ok(!texts.some(x=>x.includes('已停用')));assert.ok(texts.includes('匿名0'))
     const fullList={...data,accounts:[...accounts,{...accounts[1],id:'p4',name:'末尾第五'}]}
     const allTexts=expand(Root({data:fullList,stale:false,error:null})).filter(x=>typeof x==='string')
     assert.ok(!allTexts.includes('末尾第五'))
@@ -196,6 +196,33 @@ async function main() {
       assert.ok(icon);assert.equal(icon.props.font,8);assert.ok(!images.some(x=>x.props.systemName==='arrow.clockwise'))
     }
   }
+  // Provider title AND explicit SVG fill respect enabled, never infer disabled from 0%/available/stale.
+  const gray={light:'#5E6068',dark:'#8E8E93'}, normal={light:'#1C1C1E',dark:'#FFFFFF'}
+  const statusAccounts=Array.from({length:4},(_,i)=>({...accounts[1],id:'status'+i,provider:i%2?'openai':'claude',name:'状态'+i,enabled:i>=2,available:false,
+    fiveHour:{usedPercent:100,remainingPercent:0,resetsAt:null},sevenDay:{usedPercent:100,remainingPercent:0,resetsAt:null}}))
+  for(const family of ['systemSmall','systemMedium','systemLarge']){
+    scripting.Widget.family=family
+    for(let i=0;i<statusAccounts.length;i++){
+      scripting.Widget.parameter=String(i+1)
+      for(const stale of [false,true]){
+        const statusTree=expand(Root({data:{...data,accounts:statusAccounts},stale,error:stale?'network failed':null}))
+        const a=statusAccounts[i], title=statusTree.find(x=>x.type==='Text'&&x.props.fontWeight==='semibold'&&x.props.children===(a.provider==='claude'?'Claude':'Codex'))
+        assert.ok(title);assert.equal(JSON.stringify(title.props.foregroundStyle),JSON.stringify(a.enabled?normal:gray))
+        const brand=statusTree.find(x=>x.type==='SVG'&&(typeof x.props.code==='string'?x.props.code:x.props.code?.light)?.includes('<path '))
+        assert.ok(brand)
+        if(!a.enabled){assert.ok(brand.props.code.light.includes('fill="'+gray.light+'"'));assert.ok(brand.props.code.dark.includes('fill="'+gray.dark+'"'))}
+        else if(a.provider==='claude'){assert.ok(brand.props.code.includes('fill="#D97757"'))}
+        else{assert.ok(brand.props.code.light.includes('fill="#1C1C1E"'));assert.ok(brand.props.code.dark.includes('fill="#FFFFFF"'))}
+        assert.ok(!statusTree.some(x=>typeof x==='string'&&x.includes('已停用')))
+        // The same exhausted windows keep their quota colors/bars, irrespective of disabled title treatment.
+        const quota=JSON.stringify(statusTree.filter(x=>x.type==='RoundedRectangle'||(x.type==='SVG'&&!(typeof x.props.code==='string'?x.props.code:x.props.code?.light)?.includes('<path '))))
+        const enabledTree=expand(Root({data:{...data,accounts:statusAccounts.map(b=>({...b,enabled:true}))},stale,error:null}))
+        const enabledQuota=JSON.stringify(enabledTree.filter(x=>x.type==='RoundedRectangle'||(x.type==='SVG'&&!(typeof x.props.code==='string'?x.props.code:x.props.code?.light)?.includes('<path '))))
+        assert.equal(quota,enabledQuota)
+      }
+    }
+  }
+  scripting.Widget.parameter=''
   // Small stats are conditional on the final selection (also numeric parameters).
   scripting.Widget.family='systemSmall'
   scripting.Widget.parameter='1'
@@ -219,9 +246,11 @@ async function main() {
     const baseline=load('baseline-widget.tsx').Root
     for(const family of ['systemSmall','systemMedium']){
       scripting.Widget.family=family
-      const current=expand(Root({data:singleData,stale:false,error:null}))
-      const previous=expand(baseline({data:singleData,stale:false,error:null}))
-      assert.equal(JSON.stringify(current),JSON.stringify(previous),family+' unchanged baseline layout tree')
+      const enabledData={...singleData,accounts:singleData.accounts.map(a=>({...a,enabled:true}))}
+      const current=expand(Root({data:enabledData,stale:false,error:null}))
+      const previous=expand(baseline({data:enabledData,stale:false,error:null}))
+      const visualProps=(key,value)=>key==='muted'&&value===false?undefined:value // new opt-in metadata does not alter enabled visuals
+      assert.equal(JSON.stringify(current,visualProps),JSON.stringify(previous,visualProps),family+' unchanged baseline layout tree')
     }
     console.log('PASS: exact baseline layout tree comparison: Small two-account, Medium')
   }
@@ -242,7 +271,12 @@ async function main() {
   assert.ok(!ui.some(x=>x.type==='Toggle'))
   assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='小组件账号'))
   assert.ok(!ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='小组件账号（最多4个）'))
-  assert.ok(ui.some(x=>typeof x==='string'&&x.startsWith('1. Codex · 匿名0')&&x.includes('（已停用）')))
+  assert.ok(ui.some(x=>typeof x==='string'&&x==='1. Codex · 匿名0'))
+  assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('已停用')))
+  const appDisabled=ui.find(x=>x.type==='Text'&&x.props.children==='1. Codex · 匿名0')
+  assert.equal(JSON.stringify(appDisabled.props.foregroundStyle),JSON.stringify({light:'#5E6068',dark:'#8E8E93'}))
+  const appEnabled=ui.find(x=>x.type==='Text'&&x.props.children==='2. Codex · 匿名1')
+  assert.equal(appEnabled.props.foregroundStyle,undefined)
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
   context.ItemProvider={fromText:text=>({loadText:async()=>text})}
   const rows=()=>render().filter(x=>x.props?.onDrag)
@@ -275,13 +309,23 @@ async function main() {
   assert.equal(dragRows[0].props.onDrop.validateDrop(),false);assert.equal(dragRows[0].props.onDrop.dropUpdated(),'forbidden')
   assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>{throw Error('must not load')}}),false)
   api.saveSource('parrot')
+  storage.set('ai_usage_cache_v1',{...data,accounts:statusAccounts});api.saveAccountOrder(statusAccounts.map(a=>a.id))
+  states.length=0
+  const statusUI=render()
+  for(let i=0;i<statusAccounts.length;i++){
+    const a=statusAccounts[i]
+    const appRow=statusUI.find(x=>x.type==='Text'&&x.props.children===`${i+1}. ${a.provider==='claude'?'Claude':'Codex'} · ${a.name}`)
+    assert.ok(appRow)
+    assert.equal(JSON.stringify(appRow.props.foregroundStyle),a.enabled?undefined:JSON.stringify(gray))
+  }
+  assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.5')
+  assert.equal(api.VERSION,'1.7.6')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared intrinsic 6-column Grid/leading alignment/no outer blank cells/equal internal flexible Spacers; dual-arrow refresh icon in 3 families; Small one-account 4 stats/shared intrinsic Grid/equal internal Spacers/summary scope; Small two-account no stats; official missing')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared intrinsic 6-column Grid/leading alignment/no outer blank cells/equal internal flexible Spacers; dual-arrow refresh icon in 3 families; Small one-account 4 stats/shared intrinsic Grid/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 families/App, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
