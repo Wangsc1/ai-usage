@@ -1,11 +1,10 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.7.3"
+export const VERSION = "1.7.4"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
-function selectionKey() { return getSource() === "official" ? "ai_usage_official_selected_v1" : KEY_SELECTION }
 
 const KEY_BASE = "parrot_base_url"
 const KEY_MGMT = "parrot_management_key"
@@ -62,13 +61,6 @@ export function saveRefreshMinutes(minutes: number) {
   if (REFRESH_OPTIONS.includes(minutes)) Storage.set(KEY_REFRESH, minutes)
 }
 
-const KEY_SELECTION = "ai_usage_selected_accounts_v1"
-export function getSelectedAccounts(): string[] | null {
-  return Storage.get<string[]>(selectionKey())
-}
-export function saveSelectedAccounts(ids: string[]) {
-  Storage.set(selectionKey(), ids.slice(0, 4))
-}
 function orderKey(source: DataSource) { return source === "official" ? "ai_usage_official_order_v1" : "ai_usage_parrot_order_v1" }
 export function saveAccountOrder(ids: string[], source: DataSource = getSource()) {
   Storage.set(orderKey(source), [...new Set(ids)])
@@ -87,9 +79,6 @@ export function sortAccounts(accounts: Account[], source: DataSource = getSource
 function syncAccountOrder(accounts: Account[], source: DataSource): Account[] {
   const sorted = sortAccounts(accounts, source)
   saveAccountOrder(sorted.map(a => a.id), source) // prune removed IDs only on a successful full fetch
-  const key = source === "official" ? "ai_usage_official_selected_v1" : KEY_SELECTION
-  const selected = Storage.get<string[]>(key)
-  if (selected) Storage.set(key, selected.filter(id => sorted.some(a => a.id === id)).slice(0, 4))
   return sorted
 }
 export function cachedAccounts(): Account[] {
@@ -109,9 +98,9 @@ export function widgetAccounts(accounts: Account[], parameter = ""): Account[] {
     }
     return picked
   }
-  const ids = getSelectedAccounts()
-  if (ids !== null) return accounts.filter(a => ids.includes(a.id)).slice(0, 4)
-  return accounts.filter(a => a.enabled).slice(0, 4)
+  // Default follows the complete ordered list, including disabled accounts.
+  // Legacy selected-ID keys are intentionally ignored; rendering takes 2 or 4.
+  return accounts.slice(0, 4)
 }
 
 // ---------- 配置 ----------
@@ -134,7 +123,7 @@ export function clearConfig() {
   Keychain.remove(KEY_SESSION)
   Storage.remove(KEY_CACHE)
   Storage.remove(KEY_CREDITS)
-  Storage.remove(KEY_SELECTION)
+  Storage.remove("ai_usage_selected_accounts_v1")
   Storage.remove(KEY_REFRESH)
   Storage.remove(orderKey("parrot"))
 }
@@ -383,8 +372,6 @@ export function logoutOfficial(id: string) {
   if (cache) Storage.set(CACHE, { ...cache, accounts: cache.accounts.filter(a => a.id !== id) })
   const order = Storage.get<string[]>(orderKey("official"))
   if (order) saveAccountOrder(order.filter(x => x !== id), "official")
-  const selection = Storage.get<string[]>("ai_usage_official_selected_v1")
-  if (selection) Storage.set("ai_usage_official_selected_v1", selection.filter(x => x !== id))
 }
 // Never surface response bodies / transport errors, which may contain secrets.
 async function request(url: string, options: any = {}) {

@@ -3,14 +3,14 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const ts = require(process.env.TYPESCRIPT_PATH || '/tmp/chk/node_modules/typescript')
 const root = path.resolve(__dirname, '..')
 let now = 1800000000000, handler, calls = [], reads = []
-const kc = new Map(), storage = new Map()
+const kc = new Map(), storage = new Map(), storageWrites = []
 class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])) } static now() { return now } }
 const modules = {}
 const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { return o[k] || k } })
 const jsx = (type, props) => ({type, props})
 const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise,
   Keychain: { get(k) { reads.push(k); return kc.get(k) ?? null }, set(k,v) { kc.set(k,v); return true }, remove(k) { kc.delete(k); return true } },
-  Storage: { get(k) { return storage.has(k) ? JSON.parse(JSON.stringify(storage.get(k))) : null }, set(k,v) { storage.set(k,JSON.parse(JSON.stringify(v))) }, remove(k) { storage.delete(k) } },
+  Storage: { get(k) { return storage.has(k) ? JSON.parse(JSON.stringify(storage.get(k))) : null }, set(k,v) { storageWrites.push(k); storage.set(k,JSON.parse(JSON.stringify(v))) }, remove(k) { storage.delete(k) } },
   Data: { fromBase64String(s) { return { toRawString: () => Buffer.from(s,'base64').toString() } } },
   fetch: async (url, options) => { calls.push({url,options}); return handler(url,options) }
 })
@@ -43,24 +43,30 @@ function authFlow(account='account-A', user='user-A') {
 async function main() {
   // Namespace isolation, numeric parameters and existing Parrot config preservation.
   kc.set('parrot_management_key','mock-management'); kc.set('parrot_base_url','mock-base')
-  api.saveSelectedAccounts(['parrot-account']); api.saveRefreshMinutes(30)
-  api.saveSource('official'); assert.equal(api.getSelectedAccounts(),null)
-  api.saveSelectedAccounts(['official-account']); api.saveSource('parrot')
-  assert.equal(api.getSelectedAccounts()[0],'parrot-account'); assert.equal(api.getRefreshMinutes(),30)
+  storage.set('ai_usage_selected_accounts_v1',['parrot-account']); api.saveRefreshMinutes(30)
+  storage.set('ai_usage_official_selected_v1',['official-account']); api.saveSource('parrot')
+  assert.equal(api.getRefreshMinutes(),30)
   assert.deepEqual(Array.from(api.widgetAccounts([{id:'a'},{id:'b'},{id:'c'}], '3，1 3 0 x').map(a=>a.id)),['c','a'])
-  // Stable-ID sorting is independent by source, selection order is NOT display order.
+  // Stable-ID ordering is independent by source; every legacy selected-ID value is ignored.
   const list=[{id:'a',enabled:true},{id:'b',enabled:false},{id:'c',enabled:true},{id:'d',enabled:true},{id:'e',enabled:true}]
-  api.saveAccountOrder(['c','a','b']); api.saveSelectedAccounts(['b','a','c'])
-  assert.deepEqual(Array.from(api.widgetAccounts(list).map(a=>a.id)),['c','a','b'])
+  api.saveAccountOrder(['c','a','b'])
+  for(const legacy of [[],['e'],['b','a','c'],['removed-id']]) {
+    storage.set('ai_usage_selected_accounts_v1',legacy)
+    assert.deepEqual(Array.from(api.widgetAccounts(list).map(a=>a.id)),['c','a','b','d'])
+  }
   assert.deepEqual(Array.from(api.widgetAccounts(list,'3,1').map(a=>a.id)),['b','c'])
   assert.deepEqual(Array.from(api.sortAccounts(list).map(a=>a.id)),['c','a','b','d','e'])
   assert.deepEqual(Array.from(api.sortAccounts(list.filter(a=>a.id!=='a')).map(a=>a.id)),['c','b','d','e'])
   api.saveSource('official'); api.saveAccountOrder(['a','c','b'])
   assert.deepEqual(Array.from(api.sortAccounts(list).map(a=>a.id)),['a','c','b','d','e'])
+  for(const legacy of [[],['e']]) {
+    storage.set('ai_usage_official_selected_v1',legacy)
+    assert.deepEqual(Array.from(api.widgetAccounts(list).map(a=>a.id)),['a','c','b','d'])
+  }
   api.saveSource('parrot'); assert.deepEqual(Array.from(api.sortAccounts(list).map(a=>a.id)),['c','a','b','d','e'])
   storage.delete('ai_usage_selected_accounts_v1')
-  assert.deepEqual(Array.from(api.widgetAccounts(list).map(a=>a.id)),['c','a','d','e'])
-  api.saveSelectedAccounts(['parrot-account'])
+  assert.deepEqual(Array.from(api.widgetAccounts(list).map(a=>a.id)),['c','a','b','d'])
+  storage.set('ai_usage_selected_accounts_v1',['parrot-account'])
   api.saveSource('official')
   authFlow(); const d = await official.beginDeviceLogin()
   assert.equal(d.interval,5000)
@@ -116,21 +122,28 @@ async function main() {
   result=await official.loadOfficialUsage(); assert.equal(result.data.accounts[0].resetCredits,null)
   handler=async()=>resp(500,{error:'private-secret'}); result=await official.loadOfficialUsage(); assert.equal(result.stale,true); assert.ok(!result.error.includes('private-secret'))
   handler=async()=>resp(401); result=await official.loadOfficialUsage(); assert.equal(result.stale,true); assert.match(result.error,/登录已失效/)
-  // Logout only this account; caches/selection can't retain it; Parrot untouched.
-  api.saveSelectedAccounts(official.officialAccounts().map(a=>a.id)); official.logoutOfficial(first.id)
-  assert.equal(official.officialAccounts().length,1); assert.ok(!official.officialCached().accounts.some(a=>a.id===first.id)); assert.ok(!api.getSelectedAccounts().includes(first.id))
-  assert.equal(kc.get('parrot_management_key'),'mock-management'); api.saveSource('parrot'); assert.equal(api.getSelectedAccounts()[0],'parrot-account')
+  // Logout only this account; cache/order pruned, obsolete selected IDs untouched and ignored.
+  const legacyOfficial=[first.id]; storage.set('ai_usage_official_selected_v1',legacyOfficial); official.logoutOfficial(first.id)
+  assert.equal(official.officialAccounts().length,1); assert.ok(!official.officialCached().accounts.some(a=>a.id===first.id)); assert.ok(!storage.get('ai_usage_official_order_v1').includes(first.id))
+  assert.equal(storage.get('ai_usage_official_selected_v1'),legacyOfficial)
+  assert.ok(!api.widgetAccounts(official.officialCached().accounts).some(a=>a.id===first.id))
+  assert.equal(kc.get('parrot_management_key'),'mock-management'); api.saveSource('parrot'); assert.equal(storage.get('ai_usage_selected_accounts_v1')[0],'parrot-account')
   // JSX tree simulation verifies official stats not rendered as zero and unchanged family geometry.
   const {Root}=load('widget.tsx')
   function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function')return expand(n.type(n.props));return [n,...expand(n.props?.children)] }
-  const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:true,available:true,...mapped}))
-  api.saveSelectedAccounts(accounts.map(a=>a.id))
+  const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:i!==0,available:true,...mapped}))
   const data={today:null,month:null,accounts,fetchedAt:now,todayByFamily:{},monthByFamily:{}}
   for (const family of ['systemSmall','systemMedium','systemLarge']) {
     scripting.Widget.family=family
     const tree=expand(Root({data,stale:false,error:null})), texts=tree.filter(x=>typeof x==='string')
     assert.ok(texts.includes(new Date(now).getHours().toString().padStart(2,'0')+':'+new Date(now).getMinutes().toString().padStart(2,'0')))
     assert.equal(texts.filter(x=>x==='Codex').length,family==='systemSmall'?2:4)
+    assert.ok(texts.includes('已停用'));assert.ok(texts.includes('匿名0'))
+    const fullList={...data,accounts:[...accounts,{...accounts[1],id:'p4',name:'末尾第五'}]}
+    const allTexts=expand(Root({data:fullList,stale:false,error:null})).filter(x=>typeof x==='string')
+    assert.ok(!allTexts.includes('末尾第五'))
+    for(let i=0;i<(family==='systemSmall'?2:4);i++)assert.ok(allTexts.includes('匿名'+i))
+    if(family==='systemSmall')assert.ok(!allTexts.includes('匿名2'))
     if(family==='systemLarge'){
       assert.ok(texts.includes('官方未提供今日/本月Token与花费'));assert.ok(!texts.includes('$0.00'))
       const labels=tree.filter(x=>x.type==='HStack' && x.props.spacing===1 && Array.isArray(x.props.children) && x.props.children[0]?.props?.frame?.width===20)
@@ -147,7 +160,6 @@ async function main() {
     return resp(200,{data:{usageWindows:[],resetCreditCount:0}})
   }
   result=await api.loadUsage(); assert.equal(result.stale,false);assert.equal(result.data.today.totalTokens,370)
-  api.saveSelectedAccounts(result.data.accounts.map(a=>a.id))
   const parrotTree=expand(Root({data:result.data,stale:false,error:null}))
   const labels=parrotTree.filter(x=>x.type==='LazyVGrid' && Array.isArray(x.props.children) && x.props.children.length===6)
   assert.equal(labels.length,2)
@@ -195,16 +207,16 @@ async function main() {
   const double=expand(Root({data:singleData,stale:false,error:null}))
   assert.ok(!double.some(x=>x.type==='LazyVGrid'));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
   assert.equal(double.filter(x=>x==='Codex').length,2)
-  // Optional direct comparison with the real pre-change 1.7.2 widget (no fixture copied into project).
+  // Optional direct comparison with a real pre-change widget (no fixture copied into project).
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
     for(const family of ['systemSmall','systemMedium','systemLarge']){
       scripting.Widget.family=family
       const current=expand(Root({data:singleData,stale:false,error:null}))
       const previous=expand(baseline({data:singleData,stale:false,error:null}))
-      assert.equal(JSON.stringify(current),JSON.stringify(previous),family+' unchanged 1.7.2 tree')
+      assert.equal(JSON.stringify(current),JSON.stringify(previous),family+' unchanged baseline layout tree')
     }
-    console.log('PASS: exact 1.7.2 tree comparison: Small two-account, Medium, Large')
+    console.log('PASS: exact baseline layout tree comparison: Small two-account, Medium, Large')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -216,11 +228,14 @@ async function main() {
   scripting.Navigation={useDismiss:()=>()=>{}}
   scripting.Widget.reloadAll=async()=>{}
   storage.set('ai_usage_cache_v1',{...data,accounts})
-  api.saveAccountOrder(accounts.map(a=>a.id));api.saveSelectedAccounts([accounts[3].id,accounts[0].id])
+  api.saveAccountOrder(accounts.map(a=>a.id));storage.set('ai_usage_selected_accounts_v1',[accounts[3].id,accounts[0].id])
   const {SettingsView}=load('index.tsx')
   const render=()=>{hook=0;return expand(SettingsView())}
-  let ui=render();let toggles=ui.filter(x=>x.type==='Toggle')
-  assert.ok(toggles[0].props.title.startsWith('1.'));assert.equal(toggles[0].props.value,true)
+  let ui=render()
+  assert.ok(!ui.some(x=>x.type==='Toggle'))
+  assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='小组件账号'))
+  assert.ok(!ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='小组件账号（最多4个）'))
+  assert.ok(ui.some(x=>typeof x==='string'&&x.startsWith('1. Codex · 匿名0')&&x.includes('（已停用）')))
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
   context.ItemProvider={fromText:text=>({loadText:async()=>text})}
   const rows=()=>render().filter(x=>x.props?.onDrag)
@@ -236,8 +251,8 @@ async function main() {
   }
   await drop(dragRows[2],provider)
   assert.deepEqual(Array.from(api.cachedAccounts(),a=>a.id),['p1','p2','p0','p3'])
-  toggles=render().filter(x=>x.type==='Toggle');assert.ok(toggles[2].props.title.startsWith('3.'));assert.ok(toggles[2].props.title.includes('匿名0'))
-  assert.deepEqual(Array.from(api.widgetAccounts(accounts),a=>a.id),['p0','p3'])
+  assert.ok(render().some(x=>typeof x==='string'&&x.startsWith('3. Codex · 匿名0')))
+  assert.deepEqual(Array.from(api.widgetAccounts(accounts),a=>a.id),['p1','p2','p0','p3'])
   assert.deepEqual(Array.from(api.widgetAccounts(accounts,'3,1'),a=>a.id),['p0','p1'])
   dragRows=rows();await drop(dragRows[0],dragRows[3].props.onDrag.data()) // upward
   assert.deepEqual(Array.from(api.cachedAccounts(),a=>a.id),['p3','p1','p2','p0'])
@@ -254,11 +269,12 @@ async function main() {
   assert.equal(dragRows[0].props.onDrop.performDrop({itemProviders:()=>{throw Error('must not load')}}),false)
   api.saveSource('parrot')
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.3')
+  assert.equal(api.VERSION,'1.7.4')
+  assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/selection/parameters/pruning; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared 6 equal grid columns/leading alignment; dual-arrow refresh icon in 3 families; Small one-account 4 stats/shared columns/summary scope; Small two-account no stats; official missing')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; native drag/drop scope/up/down/cancel/self/invalid/cross-source; one-decimal rounding; shared 6 equal grid columns/leading alignment; dual-arrow refresh icon in 3 families; Small one-account 4 stats/shared columns/summary scope; Small two-account no stats; official missing')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
