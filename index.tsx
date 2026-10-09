@@ -5,8 +5,9 @@ import {
 } from "scripting"
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
+import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin } from "./api"
 
-const VERSION = "1.7.40"
+const VERSION = "1.8.0"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -111,7 +112,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
 
 const DEVICE_URL = "https://auth.openai.com/codex/device"
 const UNSUPPORTED_BROWSER = "当前Scripting不支持WebViewController临时浏览器，请更新Scripting或使用Safari备用"
-async function presentIsolatedAuthorization(register?: (release: (() => void) | null) => void) {
+async function presentIsolatedAuthorization(register?: (release: (() => void) | null) => void, url = DEVICE_URL) {
   // loadURL resolves on navigation completion, not on initiating the load. Present BEFORE waiting
   // for a login/redirect page, otherwise its pending navigation can hide the modal indefinitely.
   // WebViewController is a GLOBAL API in the official WebView example, not a scripting module export.
@@ -128,7 +129,7 @@ async function presentIsolatedAuthorization(register?: (release: (() => void) | 
       timer = setTimeout(() => reject(new Error("授权页面加载超时，请使用Safari备用或外部无痕浏览器")), 20000)
     })
     const shown = browser.present({ fullscreen: true, navigationTitle: "官方授权（临时会话）" })
-    const loading = browser.loadURL(DEVICE_URL).then(ok => {
+    const loading = browser.loadURL(url).then(ok => {
       if (timer != null) clearTimeout(timer)
       if (!ok && !released) throw new Error("授权页面加载失败，请使用Safari备用或外部无痕浏览器")
       return new Promise<void>(() => {}) // Loading success is NOT dismissal or authorization success.
@@ -158,9 +159,12 @@ function SettingsView() {
   const close = Navigation.useDismiss()
   const [source, setSource] = useState<DataSource>(getSource())
   const [device, setDevice] = useState<DeviceLogin | null>(null)
+  const [loginProvider, setLoginProvider] = useState("codex")
+  const [claude, setClaude] = useState<ClaudeLogin | null>(null)
+  const [claudeCode, setClaudeCode] = useState("")
   const [logins, setLogins] = useState(officialAccounts())
-  const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, releaseBrowser: null as (() => void) | null })
-  const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null) }
+  const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
+  const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const cur = getConfig()
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
@@ -178,7 +182,7 @@ function SettingsView() {
     if (getSource() === "official" || cur.managementKey) test()
   }, [])
 
-  useEffect(() => () => { auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; auth.epoch++ }, [])
+  useEffect(() => () => { auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
     stopAuth()
@@ -191,6 +195,7 @@ function SettingsView() {
   }
 
   async function addOfficial() {
+    if (loginProvider === "claude") { startClaude(); return }
     if (auth.running) return
     setBrowserError("")
     auth.running = true
@@ -203,6 +208,58 @@ function SettingsView() {
       setDevice(d)
       setStatus("请打开官方授权页输入一次性代码；关闭网页后自动检查，也可手动检查")
     } catch (e: any) { if (auth.alive) setStatus(e.message) }
+    finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
+  }
+
+  function startClaude(manual = false) {
+    if (auth.running) return
+    stopAuth(); setBrowserError("")
+    try {
+      const d = beginClaudeLogin(() => { if (auth.claude === d && auth.alive) void completeClaude(d) }, () => {
+        if (auth.claude === d && auth.alive) { stopAuth(); setBusy(false); setStatus("Claude授权已过期，请重新开始") }
+      }, manual)
+      auth.claude = d; setClaude(d); setClaudeCode("")
+      setStatus(d.fallback || (d.manual ? "请完成Claude官方页面授权并粘贴完整code#state" : "请打开Claude授权页；本机回调成功后自动检查并保存"))
+    } catch (e: any) { setStatus(e.message); setBrowserError(e.message) }
+  }
+  async function completeClaude(attempt = auth.claude) {
+    if (!attempt || attempt.consumed) return
+    const epoch = auth.epoch
+    const valid = () => auth.alive && auth.claude === attempt && auth.epoch === epoch && getSource() === "official"
+    if (!valid()) return
+    auth.running = true; setBusy(true); setBrowserError("")
+    try {
+      await finishClaudeLogin(attempt, claudeCode, valid)
+      if (!valid()) return
+      auth.claude = null; setClaude(null); setClaudeCode("")
+      auth.releaseBrowser?.(); auth.releaseBrowser = null
+      setLogins(officialAccounts()); await test()
+    } catch (e: any) {
+      if (valid()) {
+        setStatus(e.message); setBrowserError(e.message); setClaudeCode("")
+        if (attempt.consumed || attempt.cancelled) {
+          auth.claude = null; setClaude(null); auth.releaseBrowser?.(); auth.releaseBrowser = null
+        }
+      }
+    } finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
+  }
+  async function openClaude(safari: boolean) {
+    const d = auth.claude
+    if (!d || auth.running) return
+    const epoch = auth.epoch
+    const valid = () => auth.alive && auth.claude === d && auth.epoch === epoch && getSource() === "official"
+    auth.running = true; setBusy(true); setBrowserError(""); setStatus("正在打开Claude官方授权页…")
+    try {
+      if (safari) await Safari.present(d.url)
+      else await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url)
+      if (valid() && !d.consumed) {
+        if (d.code) await completeClaude(d)
+        else setStatus(d.manual ? "请粘贴本次完整code#state后完成Claude授权" : "尚未收到Claude回调，可重试或重新发起手动授权码流程")
+      }
+    } catch (e: any) { if (valid()) {
+      const message = e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载") ? e.message : "无法打开Claude授权页，请重试或使用Safari备用"
+      setBrowserError(message); setStatus(message)
+    } }
     finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
   }
 
@@ -273,7 +330,7 @@ function SettingsView() {
         const d = r.data
         setStatus(r.stale ? "❌ 额度使用缓存：" + (r.error ?? "读取失败") : d.statistics?.error ? "⚠️ 额度已刷新；Parrot统计独立读取失败" : "✅ 连接成功")
         setLines([
-          `统计：Parrot全部账号汇总；额度：${requestSource === "official" ? "Codex官方OAuth" : "Parrot"}`,
+          `统计：Parrot全部账号汇总；额度：${requestSource === "official" ? "官方OAuth（Codex/Claude）" : "Parrot"}`,
           ...(d.statistics ? [d.statistics.fetchedAt == null ? "Parrot统计未提供" : `Parrot统计${d.statistics.stale ? "缓存" : "更新时间"}：${new Date(d.statistics.fetchedAt).toLocaleString()}`,
             ...(d.statistics.error ? [`Parrot统计错误：${d.statistics.error}`] : [])] : []),
           ...(d.today && d.month ? [
@@ -315,12 +372,28 @@ function SettingsView() {
       <Section header={<Text>数据来源</Text>} footer={<Text>切换不删除另一来源的配置、账号或选择。普通 API Key 不能查询 Parrot 管理接口。</Text>}>
         <Picker title={"来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot密钥</Text>
-          <Text tag={"official"}>Codex官方OAuth</Text>
+          <Text tag={"official"}>官方OAuth（Codex/Claude）</Text>
         </Picker>
       </Section>
 
-      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>默认临时会话不保留登录Cookie，便于添加不同账号；仅支持独立Codex登录。Google/Apple等可能限制嵌入登录，可用Safari备用（可能复用旧会话），或在外部无痕窗口打开下方网址，输入本次代码后返回手动检查。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
-        {!device ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy} /> : <>
+      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>默认临时会话不保留登录Cookie，便于添加不同账号；支持独立Codex与Claude登录。Claude自动接收本机回调，无法使用时可重新发起手动授权码流程。Google/Apple等可能限制嵌入登录，可用Safari备用（可能复用旧会话）。Codex也可在外部无痕窗口打开下方网址输入本次代码后返回检查；Claude可重新发起手动授权码流程。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
+        <Picker title="登录服务" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
+          <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text>
+        </Picker>
+        {!device && !claude ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy} /> : null}
+        {claude ? <>
+          <Text>{claude.manual ? "Claude官方手动授权码：完成授权后粘贴完整code#state" : "Claude本机回调：完成网页授权后自动保存账号"}</Text>
+          {claude.fallback ? <Text font={12} foregroundStyle="secondaryLabel">{claude.fallback}</Text> : null}
+          <Button title="打开Claude授权页" action={() => openClaude(false)} disabled={busy} />
+          <Button title="Safari备用Claude授权页" action={() => openClaude(true)} disabled={busy} />
+          {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
+          {claude.manual ? <>
+            <SecureField title="本次完整授权码" value={claudeCode} onChanged={setClaudeCode} prompt="code#state" />
+            <Button title="完成Claude授权" action={() => completeClaude()} disabled={busy} />
+          </> : <Button title="改用手动授权码" action={() => startClaude(true)} disabled={busy} />}
+          <Button title="取消Claude登录" action={() => { stopAuth(); setBusy(false); setStatus("已取消Claude登录") }} />
+        </> : null}
+        {device ? <>
           <Text contextMenu={{ menuItems: <Group>
             <Button title="复制代码" action={async () => {
               // A retained menu action must not copy an old, cancelled or expired attempt.
@@ -335,8 +408,9 @@ function SettingsView() {
           <Text font={12} foregroundStyle="secondaryLabel">外部无痕授权网址：https://auth.openai.com/codex/device；输入本次代码后返回点“检查授权”。无需退出已授权账号。</Text>
           <Button title={"检查授权"} action={() => checkOfficial()} disabled={busy} />
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />
-        </>}
-        {logins.map(a => <Button title={`退出 ${a.name}`} disabled={busy || !!device} action={async () => {
+        </> : null}
+        {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
+        {logins.map(a => <Button title={`退出 ${a.name}`} disabled={busy || !!device || !!claude} action={async () => {
           try {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
@@ -345,7 +419,7 @@ function SettingsView() {
             await Widget.reloadAll()
           } catch (e: any) { setStatus(e.message) }
         }} />)}
-        <Button title={"刷新官方额度"} action={test} disabled={busy || !!device} />
+        <Button title={"刷新官方额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
         <SecureField title={"管理密钥"} value={key} onChanged={setKey} prompt={hasKey ? "已保存，留空沿用" : "managementKey"} />

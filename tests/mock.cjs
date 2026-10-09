@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.40')
+  assert.equal(api.VERSION,'1.8.0')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1046,7 +1046,7 @@ async function main() {
   // App uses the same composed path and reports source/freshness independently.
   states.length=0;authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
-  authUI=render();assert.ok(authUI.includes('统计：Parrot全部账号汇总；额度：Codex官方OAuth'))
+  authUI=render();assert.ok(authUI.includes('统计：Parrot全部账号汇总；额度：官方OAuth（Codex/Claude）'))
   assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('23 次')))
   assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
   // Only statistics fails: quota refresh is still current; stats cache has its OWN unchanged time.
@@ -1100,6 +1100,189 @@ async function main() {
   assert.equal(combined.data.today.requests,23);assert.equal(combined.data.statistics.stale,true);assert.ok(combined.data.accounts.every(a=>a.id.startsWith('combined-official-')))
   api.clearConfig();assert.equal(storage.get('ai_usage_parrot_stats_v1'),undefined);assert.ok(api.officialCached())
   console.log('PASS: real composed loader/App/widget entry; Parrot aggregate unfiltered; stats-only 2 requests official/no account fetch; Parrot no duplicate; isolated headers/caches/accounts; missing/failure/cache times/401; quota failure independent; all statistics layouts preserve source')
+  // Claude public OAuth contracts: globals only, actual SHA256/base64url, loopback native-shaped API.
+  const nodeCrypto=require('node:crypto'),claudeAPI=api,claudeServers=[],claudeTimers=new Map()
+  let nextClaudeTimer=100000
+  context.setTimeout=(fn,ms)=>{const id=nextClaudeTimer++;claudeTimers.set(id,{fn,ms});return id}
+  context.clearTimeout=id=>claudeTimers.delete(id)
+  const binary=buf=>({toBase64String:()=>Buffer.from(buf).toString('base64'),toRawString:()=>Buffer.from(buf).toString(),bytes:Buffer.from(buf)})
+  context.Data.fromRawString=value=>binary(Buffer.from(value))
+  context.Crypto={generateSymmetricKey:bits=>{assert.equal(bits,256);return binary(nodeCrypto.randomBytes(bits/8))},sha256:data=>binary(nodeCrypto.createHash('sha256').update(data.bytes).digest())}
+  context.HttpResponseBody={text:text=>text};context.HttpResponse={ok:body=>({body})}
+  let serverError=false
+  context.HttpServer=class {
+    constructor(){this.stops=0;this.handlers={};claudeServers.push(this)}
+    registerHandler(path,handler){this.handlers[path]=handler}
+    start(options){assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(options.forceIPv4,true);assert.equal(options.port,0);this.port=45678;return serverError?'mock-bind-failure':null}
+    stop(){this.stops++}
+  }
+  kc.delete('ai_usage_claude_oauth_v1')
+  let claudeAccount='claude-a',claudeEmail='claude-a@example.test',claudeOrg='org-a',claudePostFailure=false,claudeProfileFailure=false,claudeUsageFailure=false,claudeRefreshFailure=false,omitRefresh=false,usage401=false
+  let lastExchange,refreshCount=0,holdToken,holdProfile,releaseClaudeRequest
+  const claudeUsage={five_hour:{utilization:37.5,resets_at:'2030-01-01T01:00:00Z'},seven_day:{utilization:81,resets_at:'2030-01-03T01:00:00Z'},seven_day_sonnet:{utilization:2},seven_day_opus:{utilization:3},extra_usage:{utilization:4}}
+  const claudeHandler=async(u,o)=>{
+    if(u==='https://platform.claude.com/v1/oauth/token'){
+      assert.equal(o.headers['Content-Type'],'application/json');const b=JSON.parse(o.body)
+      assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
+      if(b.grant_type==='authorization_code'){
+        lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
+        if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
+      }else{assert.equal(b.grant_type,'refresh_token');assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:'user:profile user:inference'})
+    }
+    if(u==='https://api.anthropic.com/api/oauth/profile'){
+      assert.ok(o.headers.Authorization.startsWith('Bearer mock-claude-'));assert.ok(!o.headers['ChatGPT-Account-ID'])
+      if(holdProfile)await new Promise(resolve=>releaseClaudeRequest=resolve)
+      return claudeProfileFailure?resp(503):resp(200,{account:{uuid:claudeAccount,email:claudeEmail},organization:{uuid:claudeOrg}})
+    }
+    if(u==='https://api.anthropic.com/api/oauth/usage'){
+      assert.equal(o.headers['anthropic-beta'],'oauth-2025-04-20');assert.ok(!o.headers['ChatGPT-Account-ID']);assert.ok(o.headers.Authorization.startsWith('Bearer mock-claude-'))
+      if(usage401){usage401=false;return resp(401)}
+      return claudeUsageFailure?resp(503):resp(200,claudeUsage)
+    }
+    throw new Error('unexpected Claude path '+u)
+  }
+  handler=claudeHandler
+  let notified=0,cl=claudeAPI.beginClaudeLogin(()=>notified++),server=claudeServers.at(-1)
+  const authURL=new URL(cl.url)
+  assert.equal(authURL.origin+authURL.pathname,'https://claude.com/cai/oauth/authorize')
+  assert.deepEqual(Array.from(authURL.searchParams.keys()).sort(),['client_id','code','code_challenge','code_challenge_method','redirect_uri','response_type','scope','state'].sort())
+  assert.equal(authURL.searchParams.get('redirect_uri'),'http://localhost:45678/callback');assert.equal(authURL.searchParams.get('code'),'true')
+  assert.equal(authURL.searchParams.get('code_challenge'),nodeCrypto.createHash('sha256').update(cl.verifier).digest('base64url'))
+  assert.match(cl.verifier,/^[A-Za-z0-9_-]{43}$/);assert.notEqual(cl.state,cl.verifier);assert.equal(cl.manual,false)
+  const callback=(state,code='mock-claude-code',extra=[])=>({method:'GET',queryParams:[{key:'code',value:code},{key:'state',value:state},...extra]})
+  const callbackFn=server.handlers['/callback'];before=calls.length
+  callbackFn(callback('wrong-state'));callbackFn(callback(cl.state,'mock',[{key:'state',value:cl.state}]))
+  assert.equal(cl.code,null);assert.equal(calls.length,before)
+  const pkceVerifier=cl.verifier,pkceState=cl.state
+  const response=callbackFn(callback(cl.state));assert.ok(!response.body.includes(pkceState));assert.ok(!response.body.includes('mock-claude-code'))
+  await Promise.resolve();assert.equal(notified,1)
+  const claudeA=await claudeAPI.finishClaudeLogin(cl)
+  assert.equal(lastExchange.redirect_uri,'http://localhost:45678/callback');assert.equal(lastExchange.code_verifier,pkceVerifier);assert.equal(lastExchange.state,pkceState)
+  assert.equal(claudeA,'claude:claude-a:org-a');assert.equal(claudeAPI.claudeAccounts()[0].name,claudeEmail)
+  assert.equal(server.stops,1);assert.equal(cl.verifier,'');assert.equal(cl.state,'');assert.equal(claudeTimers.size,0)
+  await assert.rejects(()=>claudeAPI.finishClaudeLogin(cl),/取消或过期/)
+  // Native callback unavailable/bind failure -> genuine official manual redirect, not a fake app URL.
+  serverError=true;cl=claudeAPI.beginClaudeLogin();assert.equal(cl.manual,true);assert.equal(claudeServers.at(-1).stops,1);claudeAPI.cancelClaudeLogin(cl);serverError=false
+  const nativeServer=context.HttpServer;delete context.HttpServer
+  cl=claudeAPI.beginClaudeLogin();assert.equal(cl.manual,true);assert.equal(cl.redirect,'https://platform.claude.com/oauth/code/callback')
+  before=calls.length;await assert.rejects(()=>claudeAPI.finishClaudeLogin(cl,'wrong#state'),/state不匹配/);assert.equal(calls.length,before)
+  claudeAccount='claude-b';claudeEmail='claude-b@example.test'
+  const manualState=cl.state,manualVerifier=cl.verifier
+  const claudeB=await claudeAPI.finishClaudeLogin(cl,'mock-manual#'+manualState)
+  assert.equal(lastExchange.redirect_uri,'https://platform.claude.com/oauth/code/callback');assert.equal(lastExchange.code_verifier,manualVerifier)
+  assert.equal(claudeAPI.claudeAccounts().length,2);assert.equal(claudeTimers.size,0)
+  // Duplicate account update leaves position/alias intact.
+  api.saveWidgetName(claudeB,'自定义Claude','official');cl=claudeAPI.beginClaudeLogin();await claudeAPI.finishClaudeLogin(cl,'mock#'+cl.state)
+  assert.equal(claudeAPI.claudeAccounts()[1].id,claudeB);assert.equal(claudeAPI.claudeAccounts().length,2);assert.equal(api.getWidgetName(claudeB,'official'),'自定义Claude')
+  for(const failure of ['token','profile','cancelToken','cancelProfile','inactive','expiry']){
+    cl=claudeAPI.beginClaudeLogin();const snapshot=kc.get('ai_usage_claude_oauth_v1')
+    claudePostFailure=failure==='token';claudeProfileFailure=failure==='profile';holdToken=failure==='cancelToken';holdProfile=failure==='cancelProfile'
+    if(failure==='expiry'){claudeTimers.get(cl.timer).fn();await assert.rejects(()=>claudeAPI.finishClaudeLogin(cl,'mock#'+cl.state),/取消或过期/)}
+    else{
+      const pending=claudeAPI.finishClaudeLogin(cl,'mock#'+cl.state,()=>failure!=='inactive')
+      if(holdToken||holdProfile){for(let i=0;i<12&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest);claudeAPI.cancelClaudeLogin(cl);releaseClaudeRequest();releaseClaudeRequest=null}
+      await assert.rejects(()=>pending);claudeAPI.cancelClaudeLogin(cl)
+    }
+    assert.equal(kc.get('ai_usage_claude_oauth_v1'),snapshot);assert.equal(claudeTimers.size,0)
+    claudePostFailure=claudeProfileFailure=holdToken=holdProfile=false
+  }
+  context.HttpServer=nativeServer
+  // Aggregate windows only: utilization percent, valid reset ISO, absent/unknown don't become zero.
+  let claudeMapped=claudeAPI.mapClaudeUsage(claudeUsage);assert.equal(claudeMapped.fiveHour.remainingPercent,62.5);assert.equal(claudeMapped.sevenDay.remainingPercent,19);assert.equal(claudeMapped.resetCredits,null)
+  claudeMapped=claudeAPI.mapClaudeUsage({seven_day_sonnet:{utilization:4},five_hour:{utilization:NaN,resets_at:'invalid'}})
+  assert.equal(claudeMapped.sevenDay.remainingPercent,null);assert.equal(claudeMapped.fiveHour.usedPercent,null);assert.equal(claudeMapped.fiveHour.resetsAt,null)
+  assert.equal(claudeAPI.mapClaudeUsage({five_hour:{utilization:0},seven_day:{utilization:100}}).fiveHour.remainingPercent,100)
+  // Refresh rotates only Claude key, retains email and omitted refresh token; one retry on 401.
+  const codexSnapshot=kc.get('ai_usage_official_oauth_v1')
+  const expireClaude=()=>{const rows=JSON.parse(kc.get('ai_usage_claude_oauth_v1'));rows.forEach(a=>a.expiresAt=now);kc.set('ai_usage_claude_oauth_v1',JSON.stringify(rows))}
+  expireClaude();refreshCount=0;let clAccounts=await claudeAPI.loadClaudeAccounts();assert.equal(refreshCount,2);assert.equal(clAccounts[0].name,'claude-a@example.test');assert.equal(kc.get('ai_usage_official_oauth_v1'),codexSnapshot)
+  const refreshBefore=JSON.parse(kc.get('ai_usage_claude_oauth_v1')).map(a=>a.refresh);omitRefresh=true;expireClaude();await claudeAPI.loadClaudeAccounts();assert.deepEqual(JSON.parse(kc.get('ai_usage_claude_oauth_v1')).map(a=>a.refresh),refreshBefore);omitRefresh=false
+  usage401=true;refreshCount=0;await claudeAPI.loadClaudeAccounts();assert.equal(refreshCount,1)
+  expireClaude();claudeRefreshFailure=true;await assert.rejects(()=>claudeAPI.loadClaudeAccounts(),e=>e.message.includes('Claude续期失败')&&!e.message.includes('sensitive-refresh'));claudeRefreshFailure=false
+  expireClaude();refreshCount=0;await Promise.all([claudeAPI.loadClaudeAccounts(),claudeAPI.loadClaudeAccounts()]);assert.equal(refreshCount,2) // once per account, not per caller
+  // Mixed official snapshot + unchanged Parrot aggregate/headers/cache/selection and widget aliases.
+  api.saveConfig('mock-base','mock-management');api.saveSource('official');statsFailure=false;quotaFailure=false
+  handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
+  api.saveAccountOrder([claudeB,'combined-official-1',claudeA],'official');before=calls.length
+  combined=await api.loadUsage();batch=calls.slice(before)
+  assert.equal(combined.stale,false);assert.equal(combined.data.today.requests,23);assert.equal(combined.data.accounts.length,5)
+  assert.equal(combined.data.accounts[0].id,claudeB);assert.equal(combined.data.accounts[0].provider,'claude')
+  assert.equal(batch.filter(c=>c.url.includes('/stats/summary')).length,2);assert.equal(batch.filter(c=>c.url==='https://api.anthropic.com/api/oauth/usage').length,2)
+  assert.equal(storage.get('ai_usage_official_cache_v1').today,null);assert.ok(!JSON.stringify(storage.get('ai_usage_official_cache_v1')).includes('mock-claude-access'))
+  for(const family of ['systemSmall','systemMedium','systemLarge']){
+    scripting.Widget.family=family;scripting.Widget.parameter='1,2';const tree=expand(Root({data:combined.data,stale:false,error:null}))
+    assert.ok(tree.includes('自定义Claude'));assert.ok(tree.includes('Claude'));assert.ok(!tree.includes('only-parrot'))
+    const resets=tree.filter(x=>x.type==='Text'&&String(x.props.children).startsWith('RE:'));assert.equal(resets.length,1) // only Codex, never Claude
+  }
+  states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  assert.ok(render().some(x=>typeof x==='string'&&x.includes('Claude claude-b@example.test：')))
+  claudeUsageFailure=true;combined=await api.loadUsage();assert.equal(combined.stale,true);assert.equal(combined.data.accounts.length,5);assert.equal(combined.data.statistics.stale,false);claudeUsageFailure=false
+  // Local provider-scoped exits preserve Codex, other Claude accounts, Parrot cache and unrelated aliases.
+  const parrotCacheSnapshot=JSON.stringify(storage.get('ai_usage_cache_v1')),codexBeforeLogout=kc.get('ai_usage_official_oauth_v1')
+  api.logoutOfficial(claudeB);assert.equal(api.getWidgetName(claudeB,'official'),'');assert.equal(kc.get('ai_usage_official_oauth_v1'),codexBeforeLogout);assert.equal(claudeAPI.claudeAccounts().length,1)
+  assert.ok(!api.officialCached().accounts.some(a=>a.id===claudeB));assert.equal(JSON.stringify(storage.get('ai_usage_cache_v1')),parrotCacheSnapshot)
+  const clBeforeCodexLogout=kc.get('ai_usage_claude_oauth_v1');api.logoutOfficial('combined-official-1');assert.equal(kc.get('ai_usage_claude_oauth_v1'),clBeforeCodexLogout)
+  // In-flight refresh cannot restore a locally logged-out Claude or its old cached row.
+  expireClaude();holdToken=true;releaseClaudeRequest=null;const lateLoad=api.loadUsage()
+  for(let i=0;i<12&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
+  api.logoutOfficial(claudeA);releaseClaudeRequest();holdToken=false;combined=await lateLoad
+  assert.equal(claudeAPI.claudeAccounts().length,0);assert.ok(!combined.data?.accounts.some(a=>a.id===claudeA))
+  // UI owns the actual callback lifecycle: async code arrival completes while temporary modal is open.
+  claudeAccount='ui-claude-auto';claudeEmail='ui-auto@example.test';handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
+  loadBrowser=async()=>true;let closeClaudeModal;presentBrowser=()=>new Promise(resolve=>closeClaudeModal=resolve)
+  const uiAttempt=()=>states.find(x=>x&&typeof x.url==='string'&&x.url.startsWith('https://claude.com/'))
+  const startClaudeUI=async()=>{
+    states.length=0;api.saveSource('official');let tree=render()
+    tree.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('claude')
+    tree=render();await tree.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action();return render()
+  }
+  authUI=await startClaudeUI();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='打开Claude授权页'))
+  let uiD=uiAttempt(),uiServer=claudeServers.at(-1)
+  const autoBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
+  assert.equal(instances.at(-1).options.ephemeral,true);assert.equal(instances.at(-1).urls[0],uiD.url)
+  uiServer.handlers['/callback'](callback(uiD.state));await autoBrowser
+  for(let i=0;i<50&&!render().some(x=>x.type==='Button'&&x.props.title==='退出 ui-auto@example.test');i++)await Promise.resolve()
+  assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='退出 ui-auto@example.test'))
+  for(let i=0;i<50&&!api.officialCached()?.accounts.some(a=>a.id==='claude:ui-claude-auto:org-a');i++)await Promise.resolve()
+  assert.ok(api.officialCached().accounts.some(a=>a.id==='claude:ui-claude-auto:org-a'));assert.equal(instances.at(-1).disposed,1);assert.equal(uiServer.stops,1)
+  assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'));assert.equal(claudeTimers.size,0)
+  closeClaudeModal() // native dismissal settlement may occur later; already disposed/completed
+  // Switching explicitly to manual cancels the old callback and generates a fresh state/redirect.
+  claudeAccount='ui-claude-manual';claudeEmail='ui-manual@example.test';authUI=await startClaudeUI()
+  const autoState=uiAttempt().state,oldUiServer=claudeServers.at(-1)
+  authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
+  authUI=render();uiD=uiAttempt();assert.equal(uiD.manual,true);assert.notEqual(uiD.state,autoState);assert.equal(oldUiServer.stops,1)
+  context.Safari.present=async url=>{assert.equal(url,uiD.url)}
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用Claude授权页').props.action()
+  assert.equal(uiD.consumed,false);authUI=render()
+  authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-ui-code#'+uiD.state)
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
+  assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='退出 ui-manual@example.test'));assert.equal(claudeTimers.size,0)
+  assert.ok(!JSON.stringify(Array.from(storage.entries())).includes('mock-ui-code'))
+  // UI cancel/source/settings dismissal during exchange: late response cannot persist account/code.
+  for(const mode of ['cancel','source','dismiss','provider']){
+    claudeAccount='ui-abandoned-'+mode;claudeEmail=mode+'@example.test';authUI=await startClaudeUI()
+    authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action();authUI=render();uiD=uiAttempt()
+    authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-ui-late#'+uiD.state)
+    authUI=render();holdToken=true;releaseClaudeRequest=null
+    const credentialSnapshot=kc.get('ai_usage_claude_oauth_v1'),pending=authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
+    for(let i=0;i<12&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
+    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    else if(mode==='source')await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    else if(mode==='provider')authUI.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('codex')
+    else authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
+    releaseClaudeRequest();holdToken=false;await pending
+    assert.equal(kc.get('ai_usage_claude_oauth_v1'),credentialSnapshot);assert.equal(claudeTimers.size,0)
+    assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'))
+  }
+  authUI=await startClaudeUI();uiD=uiAttempt();claudeTimers.get(uiD.timer).fn()
+  assert.ok(render().includes('Claude授权已过期，请重新开始'));assert.equal(claudeTimers.size,0);assert.equal(claudeServers.at(-1).stops,1)
+  const savedCrypto=context.Crypto;delete context.Crypto;authUI=await startClaudeUI()
+  assert.ok(authUI.some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children==='当前Scripting不支持Claude PKCE加密，请更新Scripting'))
+  context.Crypto=savedCrypto
+  console.log('PASS: Claude UI automatic loopback callback while ephemeral modal open; manual fresh state/paste flow; unsupported crypto inline; cancel/source/dismiss late exchange and expiry release all resources; no stored authorization code')
+  console.log('PASS: Claude PKCE actual SHA256/global APIs/loopback and manual contracts; state/expiry/cancel/code reuse; token/profile failures; refresh rotation/dedup/401; aggregate windows; mixed official+Parrot stats; local provider exits and late logout isolation')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

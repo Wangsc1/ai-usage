@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.7.40"
+export const VERSION = "1.8.0"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -440,7 +440,7 @@ function officialDisplay(item: Credential, index: number): string {
   return item.email || `账号 ${index + 1}（邮箱未提供）`
 }
 export function officialAccounts(): { id: string; name: string; email: string }[] {
-  return credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "" }))
+  return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "" })), ...claudeAccounts()]
 }
 export function officialCached(): UsageData | null {
   const cache = Storage.get<UsageData>(CACHE)
@@ -449,7 +449,8 @@ export function officialCached(): UsageData | null {
   return { ...cache, accounts: sortAccounts(cache.accounts.map(a => ({ ...a, name: names.get(a.id) ?? a.name })), "official") }
 }
 export function logoutOfficial(id: string) {
-  persist(credentials().filter(x => x.id !== id))
+  if (id.startsWith("claude:")) logoutClaude(id)
+  else persist(credentials().filter(x => x.id !== id))
   saveWidgetName(id, "", "official")
   const cache = officialCached()
   if (cache) Storage.set(CACHE, { ...cache, accounts: cache.accounts.filter(a => a.id !== id) })
@@ -611,16 +612,197 @@ async function fetchAccount(item: Credential, index: number): Promise<Account> {
   return { id: item.id, name: officialDisplay(token, index), provider: "openai", enabled: true, available: true, ...mapped }
 }
 export async function loadOfficialUsage(): Promise<LoadResult> {
-  const cached = officialCached()
   try {
     const items = credentials()
-    if (!items.length) return { data: null, stale: false, error: "请在脚本中添加官方账号" }
-    // Do not silently drop a failed account or present partial data as current.
-    const accounts = syncAccountOrder(await Promise.all(items.map(fetchAccount)), "official")
+    if (!items.length && !claudeAccounts().length) return { data: null, stale: false, error: "请在脚本中添加官方账号" }
+    // Keep complete mixed-provider snapshots: a failed account is not silently dropped as current.
+    const [codex, claude] = await Promise.all([Promise.all(items.map(fetchAccount)), loadClaudeAccounts()])
+    const live = new Set(officialAccounts().map(a => a.id))
+    const accounts = syncAccountOrder([...codex, ...claude].filter(a => live.has(a.id)), "official")
     const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts, fetchedAt: Date.now() }
     Storage.set(CACHE, data)
     return { data, stale: false, error: null }
   } catch (e: any) {
+    // Logout may have pruned the cache while a request was in flight; never resurrect its old snapshot.
+    const cached = officialCached()
     return { data: cached, stale: !!cached, error: e?.message ?? "官方额度读取失败" }
   }
 }
+
+// Keep Claude isolated within this module so the existing three-file updater remains compatible.
+namespace ClaudeOAuth {
+// Claude Code public OAuth protocol (official @anthropic-ai/claude-code 2.1.295; readable 2.1.80 cross-check).
+// All browser state/PKCE/code stays in memory; only completed credentials go to this separate Keychain key.
+const CLIENT = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+const TOKEN = "https://platform.claude.com/v1/oauth/token"
+const MANUAL = "https://platform.claude.com/oauth/code/callback"
+const API = "https://api.anthropic.com/api/oauth"
+const SCOPE = "user:profile user:inference"
+const KEY = "ai_usage_claude_oauth_v1"
+type Credential = { id: string; accountId: string; organizationId: string; email: string; access: string; refresh: string; expiresAt: number; scope: string }
+export type ClaudeLogin = {
+  url: string; redirect: string; manual: boolean; fallback: string | null
+  verifier: string; state: string; expiresAt: number; cancelled: boolean; consumed: boolean
+  code: string | null; server: any; timer: any
+}
+function credentials(): Credential[] {
+  const raw = Keychain.get(KEY)
+  if (!raw) return []
+  try { const items = JSON.parse(raw); if (!Array.isArray(items)) throw new Error(); return items }
+  catch { throw new Error("Claude登录记录损坏，请重新添加账号") }
+}
+function persist(items: Credential[]) {
+  let saved = false
+  try { saved = Keychain.set(KEY, JSON.stringify(items)) } catch { /* never expose native errors containing credentials */ }
+  if (!saved) throw new Error("Claude钥匙串保存失败")
+}
+export function claudeAccounts(): { id: string; name: string; email: string }[] {
+  return credentials().map((a, i) => ({ id: a.id, name: a.email || `Claude账号 ${i + 1}（邮箱未提供）`, email: a.email }))
+}
+export function logoutClaude(id: string) { persist(credentials().filter(a => a.id !== id)) }
+const base64url = (data: any): string => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+function active(d: ClaudeLogin) {
+  if (d.cancelled || Date.now() >= d.expiresAt) throw new Error("Claude本次授权已取消或过期，请重新开始")
+}
+export function cancelClaudeLogin(d: ClaudeLogin) {
+  d.cancelled = true
+  d.verifier = ""; d.state = ""; d.code = null
+  if (d.timer != null) { clearTimeout(d.timer); d.timer = null }
+  if (d.server) { d.server.stop(); d.server = null }
+}
+export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => void = () => {}, manual = false): ClaudeLogin {
+  if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function" || typeof Crypto.sha256 !== "function")
+    throw new Error("当前Scripting不支持Claude PKCE加密，请更新Scripting")
+  const verifier = base64url(Crypto.generateSymmetricKey(256)), state = base64url(Crypto.generateSymmetricKey(256))
+  const input = Data.fromRawString(verifier)
+  if (!input) throw new Error("无法生成Claude PKCE")
+  const challenge = base64url(Crypto.sha256(input))
+  const d: ClaudeLogin = { url: "", redirect: MANUAL, manual: true, fallback: null, verifier, state,
+    expiresAt: Date.now() + 15 * 60 * 1000, cancelled: false, consumed: false, code: null, server: null, timer: null }
+  if (!manual && typeof HttpServer !== "undefined" && typeof HttpServer === "function") {
+    const server = new HttpServer()
+    try {
+      // Never bind to LAN/wildcard. localhost is the exact official CLI redirect, not scripting://.
+      server.listenAddressIPv4 = "127.0.0.1"
+      if (server.listenAddressIPv4 !== "127.0.0.1") throw new Error()
+      server.registerHandler("/callback", (req: any) => {
+        const values = (key: string) => (req.queryParams ?? []).filter((x: any) => x.key === key).map((x: any) => x.value)
+        const codes = values("code"), states = values("state")
+        const ok = req.method === "GET" && !d.cancelled && !d.consumed && Date.now() < d.expiresAt &&
+          states.length === 1 && states[0] === d.state && codes.length === 1 && typeof codes[0] === "string" && !!codes[0] && !d.code
+        if (!ok) return HttpResponse.ok(HttpResponseBody.text("本次回调无效或已失效。请返回脚本检查授权。"))
+        d.code = codes[0]
+        // Respond without echoing code/state. Schedule exchange AFTER returning the local response.
+        Promise.resolve().then(onCode)
+        return HttpResponse.ok(HttpResponseBody.text("已收到本次授权回调，请返回脚本等待账号保存。此页面不代表授权已完成。"))
+      })
+      const error = server.start({ port: 0, forceIPv4: true })
+      if (error || !server.port) throw new Error()
+      d.server = server; d.manual = false; d.redirect = `http://localhost:${server.port}/callback`
+    } catch { server.stop(); d.fallback = "本机回调不可用，使用Claude官方手动授权码页" }
+  } else if (!manual) d.fallback = "当前Scripting没有本机回调API，使用Claude官方手动授权码页"
+  // Parameters are those in the official CLI buildAuthUrl; no cookie extraction or invented redirect.
+  const params: Record<string, string> = { code: "true", client_id: CLIENT, response_type: "code", redirect_uri: d.redirect,
+    scope: SCOPE, code_challenge: challenge, code_challenge_method: "S256", state }
+  d.url = "https://claude.com/cai/oauth/authorize?" + Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&")
+  d.timer = setTimeout(() => { if (!d.cancelled) { cancelClaudeLogin(d); onExpire() } }, 15 * 60 * 1000)
+  return d
+}
+async function request(url: string, options: any = {}) {
+  try { return await fetch(url, { ...options, timeout: 20 }) }
+  catch { throw new Error("Claude官方服务网络请求失败") }
+}
+async function json(r: any) { try { return await r.json() } catch { throw new Error("Claude官方响应无法解析") } }
+function tokenBody(b: any, old?: Credential) {
+  if (b?.refresh_token != null && (typeof b.refresh_token !== "string" || !b.refresh_token)) throw new Error("Claude官方令牌响应不完整")
+  if (typeof b?.access_token !== "string" || !b.access_token ||
+    !(typeof b.refresh_token === "string" && b.refresh_token || old?.refresh) ||
+    typeof b.expires_in !== "number" || !Number.isFinite(b.expires_in) || b.expires_in <= 0)
+    throw new Error("Claude官方令牌响应不完整")
+  return { access: b.access_token, refresh: b.refresh_token || old!.refresh,
+    expiresAt: Date.now() + b.expires_in * 1000, scope: typeof b.scope === "string" ? b.scope : old?.scope || SCOPE }
+}
+const post = (body: any) => request(TOKEN, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive: () => boolean = () => true): Promise<string> {
+  active(d)
+  if (d.consumed) throw new Error("Claude本次授权码已使用，请重新开始")
+  if (!stillActive()) throw new Error("Claude本次授权已取消")
+  let code = d.code
+  if (d.manual) {
+    const parts = pasted.trim().split("#")
+    if (parts.length !== 2 || !parts[0] || parts[1] !== d.state) throw new Error("Claude授权码格式或state不匹配，请粘贴本次页面提供的完整code#state")
+    code = parts[0]
+  }
+  if (!code) throw new Error("尚未收到Claude回调，请完成网页授权或改用手动授权码")
+  d.consumed = true
+  try {
+    const r = await post({ grant_type: "authorization_code", code, redirect_uri: d.redirect, client_id: CLIENT, code_verifier: d.verifier, state: d.state })
+    if (r.status !== 200) throw new Error(`Claude授权交换失败（HTTP ${r.status}），请重新开始`)
+    const tokens = tokenBody(await json(r))
+    active(d); if (!stillActive()) throw new Error("Claude本次授权已取消")
+    const profile = await request(API + "/profile", { headers: { Authorization: `Bearer ${tokens.access}`, "Content-Type": "application/json" } })
+    if (profile.status !== 200) throw new Error(`Claude账号资料读取失败（HTTP ${profile.status}），请重新开始`)
+    const p = await json(profile)
+    if (typeof p?.account?.uuid !== "string" || !p.account.uuid || typeof p?.organization?.uuid !== "string" || !p.organization.uuid)
+      throw new Error("Claude账号资料缺少真实身份，请重新开始")
+    const id = `claude:${p.account.uuid}:${p.organization.uuid}`
+    const item: Credential = { id, accountId: p.account.uuid, organizationId: p.organization.uuid,
+      email: typeof p.account.email === "string" && p.account.email.includes("@") ? p.account.email : "", ...tokens }
+    active(d); if (!stillActive()) throw new Error("Claude本次授权已取消")
+    const items = credentials(), index = items.findIndex(x => x.id === id)
+    if (index < 0) items.push(item)
+    else { if (!item.email) item.email = items[index].email; items[index] = item }
+    persist(items)
+    return id
+  } finally { cancelClaudeLogin(d) }
+}
+const refreshing = new Map<string, Promise<Credential>>()
+async function refresh(item: Credential): Promise<Credential> {
+  const existing = refreshing.get(item.id)
+  if (existing) return existing
+  const job = (async () => {
+    const current = credentials().find(a => a.id === item.id)
+    if (!current) throw new Error("该Claude账号已退出")
+    if (current.access !== item.access) return current
+    const r = await post({ grant_type: "refresh_token", refresh_token: current.refresh, client_id: CLIENT, scope: current.scope })
+    if (r.status !== 200) throw new Error(`Claude续期失败（HTTP ${r.status}），请重新登录该账号`)
+    const next = { ...current, ...tokenBody(await json(r), current) }, items = credentials()
+    if (!items.some(a => a.id === item.id)) throw new Error("该Claude账号已退出")
+    persist(items.map(a => a.id === item.id ? next : a)); return next
+  })()
+  refreshing.set(item.id, job)
+  try { return await job } finally { refreshing.delete(item.id) }
+}
+export function mapClaudeUsage(b: any): { fiveHour: QuotaWindow; sevenDay: QuotaWindow; resetCredits: null } {
+  const window = (w: any): QuotaWindow => {
+    const used = typeof w?.utilization === "number" && Number.isFinite(w.utilization) ? Math.max(0, Math.min(100, w.utilization)) : null
+    const at = typeof w?.resets_at === "string" ? Date.parse(w.resets_at) : NaN
+    return { usedPercent: used, remainingPercent: used == null ? null : 100 - used,
+      resetsAt: Number.isFinite(at) ? new Date(at).toISOString() : null }
+  }
+  // Never substitute model-specific Opus/Sonnet or extra usage for the aggregate weekly window.
+  return { fiveHour: window(b?.five_hour), sevenDay: window(b?.seven_day), resetCredits: null }
+}
+export async function loadClaudeAccounts(): Promise<Account[]> {
+  return Promise.all(credentials().map(async item => {
+    let current = item.expiresAt <= Date.now() + 60000 ? await refresh(item) : item
+    const getUsage = () => request(API + "/usage", { headers: { Authorization: `Bearer ${current.access}`,
+      "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
+    let r = await getUsage()
+    if (r.status === 401) { current = await refresh(current); r = await getUsage() }
+    if (r.status !== 200) throw new Error(`Claude额度读取失败（HTTP ${r.status}）`)
+    const mapped = mapClaudeUsage(await json(r))
+    if (!credentials().some(a => a.id === item.id)) throw new Error("该Claude账号已退出")
+    return { id: current.id, name: current.email || "Claude账号（邮箱未提供）", provider: "claude", enabled: true, available: true, ...mapped }
+  }))
+}
+}
+
+export type ClaudeLogin = ClaudeOAuth.ClaudeLogin
+export const claudeAccounts = ClaudeOAuth.claudeAccounts
+export const loadClaudeAccounts = ClaudeOAuth.loadClaudeAccounts
+export const logoutClaude = ClaudeOAuth.logoutClaude
+export const beginClaudeLogin = ClaudeOAuth.beginClaudeLogin
+export const cancelClaudeLogin = ClaudeOAuth.cancelClaudeLogin
+export const finishClaudeLogin = ClaudeOAuth.finishClaudeLogin
+export const mapClaudeUsage = ClaudeOAuth.mapClaudeUsage
