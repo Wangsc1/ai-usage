@@ -159,7 +159,7 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
     <Text font={font - 3} foregroundStyle={SUB} lineLimit={1}>{shortName(acc)}</Text>
     {acc.enabled && !acc.available ? <Text font={font - 3} foregroundStyle={RED}>不可用</Text> : null}
     {showReset ? <Spacer /> : null}
-    {showReset ? <Text font={font - 3} monospacedDigit foregroundStyle={GREEN} lineLimit={1}
+    {showReset ? <Text font={font - 3} monospacedDigit foregroundStyle={SUB} lineLimit={1}
       fixedSize={{ horizontal: true, vertical: true }}>重置：{acc.resetCredits}</Text> : null}
   </HStack>
 }
