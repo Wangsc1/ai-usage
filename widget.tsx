@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, getWidgetBackgroundStyle } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, getWidgetBackgroundStyle, getGlassBackgroundPath } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -498,21 +498,6 @@ function AccessoryRoot({ data, error, family }: { data: UsageData | null; error:
   return <AccessoryRectangular acc={acc} />
 }
 
-const DOCK_MATERIAL = "ultraThinMaterial"
-// Native Material is placed in the ordinary background view, not the widgetBackground style.
-// A clear widgetBackground removes this script's decorative fill; no white highlight fill covers the material.
-// This is a host compatibility trial, not proof that WidgetKit exposes the wallpaper to local materials.
-function DockBackgroundLayers() {
-  return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
-    <RoundedRectangle cornerRadius={22}
-      fill={DOCK_MATERIAL}
-      frame={{ maxWidth: "infinity", maxHeight: "infinity" }} />
-    <RoundedRectangle cornerRadius={22}
-      stroke={{ shapeStyle: { gradient: [{ color: "rgba(255,255,255,0.75)", location: 0 }, { color: "rgba(255,255,255,0.18)", location: 1 }], startPoint: { x: 0.5, y: 0 }, endPoint: { x: 0.5, y: 1 } } as any, strokeStyle: { lineWidth: 1 } }}
-      frame={{ maxWidth: "infinity", maxHeight: "infinity" }} />
-  </ZStack>
-}
-
 function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; error: string | null }) {
   if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} />
   let body: VirtualNode
@@ -527,13 +512,13 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />
   }
-  // Public background accepts a VirtualNode; ShapeProps.fill accepts system Material.
-  // Explicit clear decorative background + separate native Material layer avoids assigning Material to widgetBackground.
-  // No private containerBackground/removal API or assumed default host fill. Content is untouched.
-  const backgroundStyle = getWidgetBackgroundStyle()
-  const backgroundProps = backgroundStyle === "glass" ? {
+  // A full-widget image, not a content-sized layer; original pixels are neither blurred nor tinted.
+  // File lookup is local-only. Missing or invalid images safely use the original gradient.
+  const backgroundPath = getGlassBackgroundPath(getWidgetBackgroundStyle())
+  const backgroundProps = backgroundPath ? {
     widgetBackground: "clear",
-    background: <DockBackgroundLayers />,
+    background: <Image filePath={backgroundPath} resizable scaleToFill
+      frame={{ width: Widget.displaySize.width, height: Widget.displaySize.height, alignment: "center" }} clipped />,
   } : { widgetBackground: BG }
   return <ZStack
     padding={{ horizontal: 14, vertical: 12 }}

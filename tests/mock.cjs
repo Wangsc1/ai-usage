@@ -693,7 +693,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.9')
+  assert.equal(api.VERSION,'1.9.10')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1182,8 +1182,14 @@ async function main() {
   let nextClaudeTimer=100000
   context.setTimeout=(fn,ms)=>{const id=nextClaudeTimer++;claudeTimers.set(id,{fn,ms});return id}
   context.clearTimeout=id=>claudeTimers.delete(id)
-  const binary=buf=>({toBase64String:()=>Buffer.from(buf).toString('base64'),toRawString:()=>Buffer.from(buf).toString(),bytes:Buffer.from(buf)})
+  const binary=buf=>({size:buf.length,toHexString:()=>Buffer.from(buf).toString('hex'),toBase64String:()=>Buffer.from(buf).toString('base64'),toRawString:()=>Buffer.from(buf).toString(),bytes:Buffer.from(buf)})
   context.Data.fromRawString=value=>binary(Buffer.from(value))
+  const mockImage={fromData:data=>data.bytes?.[0]===255&&data.bytes?.[1]===216?{width:1200,height:1000}:null}
+  function resourceFS(initial=[]){
+    const files=new Map(initial),writes=[],removes=[]
+    return {files,writes,removes,existsSync:p=>files.has(p),createDirectory:async()=>{},readAsDataSync:p=>binary(files.get(p)),readAsData:async p=>binary(files.get(p)),readAsString:async p=>files.get(p).toString(),
+      writeAsData:async(p,d)=>{writes.push(p);files.set(p,Buffer.from(d.bytes))},writeAsString:async(p,s)=>{writes.push(p);files.set(p,Buffer.from(s))},remove:async p=>{removes.push(p);files.delete(p)}}
+  }
   context.Crypto={generateSymmetricKey:bits=>{assert.equal(bits,256);return binary(nodeCrypto.randomBytes(bits/8))},sha256:data=>binary(nodeCrypto.createHash('sha256').update(data.bytes).digest())}
   context.HttpResponseBody={text:text=>text};context.HttpResponse={ok:body=>({statusCode:200,reasonPhrase:'OK',body})}
   let serverError=false,diagnosticStage=null,startNativeError=null,startThrows=false,startCalls=0,startScenario=null
@@ -1218,7 +1224,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.9')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.10')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1452,7 +1458,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.9'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.10'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1756,7 +1762,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.9')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.10')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1766,7 +1772,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.9 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.10 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1867,23 +1873,43 @@ async function main() {
   api.logoutOfficial(targetResetID);releaseReset();await assert.rejects(()=>lateReset,/已退出/)
   kc.set('ai_usage_claude_oauth_v1',queryCredentials);handler=claudeHandler
   console.log('PASS: official cedar_ember schema/grants resets_left sum (missing unknown/explicit zero/positive/invalid/overflow); inline or one optional GET only; HTTP/network/JSON failures do not block quota; no reset/claim POST; logout late-query guard; RE>0 existing layout rules preserved')
-  // New updater must install the mandatory AppIntent file before its dependent widget.
-  const savedFileManager=context.FileManager,savedScript=scripting.Script,updateWrites=[],updateReads=[]
-  scripting.Script={directory:'/mock-script'};context.FileManager={writeAsString:async(p,b)=>updateWrites.push({p,b})}
-  handler=async(u,o)=>{
-    assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
-    const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.9.9'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+  // Seven-resource updater: all downloads validated before writes; image/code write failure rolls back.
+  const savedFileManager=context.FileManager,savedScript=scripting.Script,savedImage=context.UIImage,updateReads=[]
+  scripting.Script={directory:'/mock-script'};context.UIImage=mockImage
+  const names=['api.ts','app_intents.tsx','widget.tsx','index.tsx',...api.GLASS_ASSETS.map(a=>a.file)]
+  const oldResources=names.map(f=>['/mock-script/'+f,Buffer.from('old '+f)])
+  oldResources.push(['/mock-script/script.json',Buffer.from('old metadata')],['/mock-script/unrelated.txt',Buffer.from('keep')])
+  let updateFS=resourceFS(oldResources),failDownload='',corruptDownload=''
+  context.FileManager=updateFS
+  const downloadHandler=async(u,o)=>{
+    assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20);assert.equal(o.headers,undefined)
+    const name=u.replace(/^.*\/main\//,'').split('?')[0];updateReads.push(name)
+    if(name===failDownload)return resp(404)
+    if(name==='script.json')return resp(200,{version:'1.9.10'})
+    return {status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8'),data:async()=>binary(name===corruptDownload?Buffer.from('wrong'):fs.readFileSync(path.join(root,name)))}
   }
+  handler=downloadHandler
   await load('index.tsx').updateFromGitHub(true)
-  assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
-  assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
-  assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
-  updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.9'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
-  await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
-  scripting.Script=savedScript;context.FileManager=savedFileManager
-  console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
+  assert.deepEqual(updateReads,['script.json',...names]);assert.equal(updateFS.writes.length,7)
+  for(const f of names)assert.deepEqual(updateFS.files.get('/mock-script/'+f),fs.readFileSync(path.join(root,f)))
+  assert.ok(updateFS.writes.indexOf('/mock-script/app_intents.tsx')<updateFS.writes.indexOf('/mock-script/widget.tsx'))
+  const snapshot=m=>JSON.stringify([...m].map(([p,b])=>[p,b.toString('hex')]).sort())
+  for(const failed of ['app_intents.tsx',...api.GLASS_ASSETS.map(a=>a.file)]){
+    updateFS=resourceFS(oldResources);context.FileManager=updateFS;failDownload=failed
+    await assert.rejects(()=>load('index.tsx').updateFromGitHub(true));assert.equal(updateFS.writes.length,0);assert.equal(snapshot(updateFS.files),snapshot(new Map(oldResources)))
+  }
+  failDownload='';corruptDownload='assets/glass-2.jpg';updateFS=resourceFS(oldResources);context.FileManager=updateFS
+  await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/校验失败/);assert.equal(updateFS.writes.length,0)
+  corruptDownload=''
+  for(const failed of ['assets/glass-2.jpg','index.tsx']){
+    updateFS=resourceFS(oldResources);context.FileManager=updateFS
+    const write=failed.endsWith('.jpg')?'writeAsData':'writeAsString',original=updateFS[write];let failedOnce=false
+    updateFS[write]=async(p,b)=>{await original(p,b);if(p.endsWith(failed)&&!failedOnce){failedOnce=true;throw Error('mock partial write')}}
+    await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/已恢复原文件/)
+    assert.equal(snapshot(updateFS.files),snapshot(new Map(oldResources)))
+  }
+  scripting.Script=savedScript;context.FileManager=savedFileManager;context.UIImage=savedImage
+  console.log('PASS: seven original resources downloaded before writes; each missing asset/intent or corrupt JPEG writes nothing; partial image/code writes roll back; metadata/unrelated files untouched; intent installed before widget')
   // 1.8.14 request budget: one plain usage per refresh, hourly card selector, 429 cooldown per account, in-flight sharing.
   storage.delete('ai_usage_claude_reset_cards_v1');storage.delete('ai_usage_claude_usage_cooldown_v1')
   const usageURL='https://api.anthropic.com/api/oauth/usage',budgetRows=JSON.parse(kc.get('ai_usage_claude_oauth_v1'))
@@ -2229,96 +2255,92 @@ async function main() {
     api.saveSource(saved);scripting.Widget.family=family;scripting.Widget.parameter=param
   }
   console.log('PASS: exact finite zero in either window grays ENTIRE account SVG/title/two LCD/%/both lit bars, empty slots retained; enabled/available/429 do not determine gray; 0.1/null/negative/NaN not zero; three sources all families identical; circular/inline same account rule')
-  // Dock-style Material background: documented widgetBackground {style: Material, shape} + RoundedRectangle gradient fill/stroke layers.
+  // Original JPEG backgrounds and local cache only; no synthetic Material/overlay effects.
   {
-    const oldReload=scripting.Widget.reloadAll,oldSource=api.getSource(),oldFamily=scripting.Widget.family,oldParameter=scripting.Widget.parameter,oldStyle=storage.get('ai_usage_widget_background_v1')
-    const code=fs.readFileSync(path.join(root,'widget.tsx'),'utf8')+fs.readFileSync(path.join(root,'api.ts'),'utf8')+fs.readFileSync(path.join(root,'index.tsx'),'utf8')
-    assert.ok(!/UIGlass|glassEffect|createWidgetGlass|Device\.|import \* as Scripting/.test(code))
-    const docs=fs.readFileSync('/tmp/scd/as/Scripting Documentation/views/concentric_rectangle/en.md','utf8')
-    assert.ok(docs.includes('ultraThinMaterial')) // documented Material name
-    storage.delete('ai_usage_widget_background_v1');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
-    const prior=process.env.PRE_ACCESSORY_WIDGET_PATH?load('pre-accessory-widget.tsx').Root:null
-    const sizes={systemSmall:{width:170,height:170},systemMedium:{width:358,height:170},systemLarge:{width:358,height:376},systemExtraLarge:{width:715,height:376}}
-    for(const [family,size] of Object.entries(sizes))for(const parameter of ['','1','1,2','3,1,4']){
-      scripting.Widget.family=family;scripting.Widget.parameter=parameter;scripting.Widget.displaySize=size
-      api.saveWidgetBackgroundStyle('gradient');const normal=Root({data:singleData,stale:false,error:null}),normalTree=JSON.stringify(expand(normal))
-      assert.ok(normal.props.widgetBackground.light.gradient);assert.equal(normal.props.background,undefined)
-      api.saveWidgetBackgroundStyle('glass');const dock=Root({data:singleData,stale:false,error:null})
-      assert.equal(dock.props.widgetBackground,'clear') // no native Material or opaque fill assigned to widget decoration
-      const layers=dock.props.background;assert.equal(layers.type.name,'DockBackgroundLayers')
-      const rendered=layers.type();const [highlight,outline]=expand(rendered).filter(x=>x.type==='RoundedRectangle')
-      assert.equal(highlight.props.fill,'ultraThinMaterial');assert.equal(highlight.props.fill.gradient,undefined) // no white/alpha-filled background overlay
-      assert.equal(outline.props.fill,undefined);assert.equal(outline.props.stroke.strokeStyle.lineWidth,1)
-      assert.ok(outline.props.stroke.shapeStyle.gradient[0].color.endsWith('0.75)'));assert.ok(outline.props.stroke.shapeStyle.gradient[1].color.endsWith('0.18)'))
-      assert.equal(outline.props.cornerRadius,22);assert.equal(highlight.props.cornerRadius,22)
-      assert.equal(dock.props.opacity,undefined);assert.equal(dock.props.glassEffect,undefined)
-      const restored={...dock,props:{...dock.props,widgetBackground:normal.props.widgetBackground}};delete restored.props.background
-      assert.equal(JSON.stringify(expand(restored)),normalTree,family+' '+parameter) // every text/color/layout/button node unchanged
-      // Default output equals pre-Dock widget baseline apart from nothing: byte-identical tree.
-      api.saveWidgetBackgroundStyle('gradient');if(prior)assert.equal(JSON.stringify(expand(Root({data:singleData,stale:false,error:null}))),JSON.stringify(expand(prior({data:singleData,stale:false,error:null}))))
-    }
-    for(const family of ['accessoryRectangular','accessoryCircular','accessoryInline']){
-      scripting.Widget.family=family;scripting.Widget.parameter='1'
-      api.saveWidgetBackgroundStyle('gradient');const original=JSON.stringify(expand(Root({data:singleData,stale:false,error:null})))
-      api.saveWidgetBackgroundStyle('glass');assert.equal(JSON.stringify(expand(Root({data:singleData,stale:false,error:null}))),original)
-    }
-    api.saveWidgetBackgroundStyle('gradient');states.length=0;let settings=render();let reloads=0;scripting.Widget.reloadAll=async()=>{reloads++}
-    const picker=settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式');assert.equal(picker.props.value,'gradient')
-    const labels=expand(picker);assert.ok(labels.includes('渐变背景'));assert.ok(labels.includes('玻璃背景'));assert.ok(!labels.includes('去除背景'));assert.deepEqual(expand(picker).filter(x=>x?.type==='Text').map(x=>x.props.tag),['gradient','glass']);assert.ok(!labels.some(x=>typeof x==='string'&&x.includes('实验')))
-    assert.ok(!settings.some(x=>typeof x==='string'&&(x.includes('UIGlass')||x.includes('实验'))))
-    before=calls.length;const creds=JSON.stringify([...kc.entries()]),sources=[api.getSource(),api.getStatisticsSource()]
-    await picker.props.onChanged('glass');assert.equal(api.getWidgetBackgroundStyle(),'glass');assert.equal(reloads,1);assert.equal(calls.length,before)
-    assert.equal(JSON.stringify([...kc.entries()]),creds);assert.deepEqual([api.getSource(),api.getStatisticsSource()],sources)
-    states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'glass')
-    const bgFooter=expand(settings.find(x=>x.type==='Section'&&expand(x.props.header).includes('小组件背景')).props.footer).join('');assert.ok(bgFooter.includes('尚未证实能透出壁纸')&&bgFooter.includes('不更改系统全局外观')&&!bgFooter.includes('UIGlass')&&!bgFooter.includes('实验'))
-    storage.set('ai_usage_widget_background_v1','none');const storedBefore=JSON.stringify([...storage.entries()])
-    states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'gradient')
-    assert.equal(JSON.stringify([...storage.entries()]),storedBefore);assert.equal(storage.get('ai_usage_widget_background_v1'),'none')
-    assert.ok(!bgFooter.includes('去除背景'));assert.ok(bgFooter.includes('不保证透明'))
-    assert.equal(calls.length,before);assert.equal(JSON.stringify([...kc.entries()]),creds)
-    await settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.onChanged('glass');assert.equal(reloads,2);assert.equal(api.getWidgetBackgroundStyle(),'glass')
-    states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'glass')
-    await settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.onChanged('gradient');assert.equal(reloads,3);api.saveWidgetBackgroundStyle('bad');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
-    storage.set('ai_usage_widget_background_v1','unknown');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
-    if(oldStyle==null)storage.delete('ai_usage_widget_background_v1');else storage.set('ai_usage_widget_background_v1',oldStyle)
-    scripting.Widget.reloadAll=oldReload;api.saveSource(oldSource);scripting.Widget.family=oldFamily;scripting.Widget.parameter=oldParameter;states.length=0
-  }
-  console.log('PASS: Glass compatibility trial = clear widgetBackground + native ultraThinMaterial RoundedRectangle in ordinary background; white highlight fill removed, gradient hairline unchanged; no UIGlass dependency; default gradient identical to pre-Dock baseline; only background differs; accessory unchanged; Picker labels/persistence/reload/no network or credential change; NOT native visual proof')
-  // Removed none setting safely falls back without migration or deletion; retained backgrounds stay identical.
-  {
+    const oldFS=context.FileManager,oldScript=scripting.Script,oldImage=context.UIImage,oldReload=scripting.Widget.reloadAll,oldHandler=handler
     const oldSource=api.getSource(),oldFamily=scripting.Widget.family,oldParameter=scripting.Widget.parameter,oldSize=scripting.Widget.displaySize,oldStyle=storage.get('ai_usage_widget_background_v1')
+    scripting.Script={directory:'/mock-images'};context.UIImage=mockImage
+    let imageFS=resourceFS();context.FileManager=imageFS
+    const beforeCreds=JSON.stringify([...kc.entries()]),beforeStatistics=api.getStatisticsSource()
+    const originalNames=['IMG_4538.jpeg','IMG_4537.jpeg','IMG_4535.jpeg']
+    for(let i=0;i<3;i++){
+      const a=api.GLASS_ASSETS[i],bytes=fs.readFileSync(path.join(root,a.file))
+      assert.equal(bytes.length,a.size);assert.equal(nodeCrypto.createHash('sha256').update(bytes).digest('hex'),a.sha256)
+      // Original source comparison is enabled when caller supplies the authorized attachments directory.
+      if(process.env.GLASS_ORIGINALS_PATH)assert.deepEqual(bytes,fs.readFileSync(path.join(process.env.GLASS_ORIGINALS_PATH,originalNames[i])))
+      api.validateGlassAsset(a.file,binary(bytes));assert.equal(api.getGlassBackgroundPath(a.style),null)
+    }
+    let downloads=[],failImage='',wrongImage=''
+    handler=async(u,o)=>{
+      assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/main/assets/'));assert.equal(o.timeout,20);assert.equal(o.headers,undefined)
+      const file=u.replace(/^.*\/main\//,'').split('?')[0];downloads.push(file)
+      if(file===failImage)return resp(404)
+      return {status:200,data:async()=>binary(file===wrongImage?Buffer.from('wrong'):fs.readFileSync(path.join(root,file)))}
+    }
+    failImage='assets/glass-3.jpg';await assert.rejects(()=>api.ensureGlassAssets());assert.equal(imageFS.writes.length,0)
+    failImage='';wrongImage='assets/glass-2.jpg';await assert.rejects(()=>api.ensureGlassAssets(),/校验失败/);assert.equal(imageFS.writes.length,0)
+    wrongImage='';const firstWrite=imageFS.writeAsData;let partialOnce=false
+    imageFS.writeAsData=async(p,b)=>{await firstWrite(p,b);if(p.endsWith('glass-2.jpg')&&!partialOnce){partialOnce=true;throw Error('partial first install')}}
+    await assert.rejects(()=>api.ensureGlassAssets(),/已恢复原文件/);assert.equal(imageFS.files.size,0)
+    imageFS.writeAsData=firstWrite;imageFS.writes.length=0;downloads=[];await Promise.all([api.ensureGlassAssets(),api.ensureGlassAssets()]);assert.deepEqual(downloads,Array.from(api.GLASS_ASSETS,a=>a.file));assert.equal(imageFS.writes.length,3)
+    const cachedCalls=calls.length;await api.ensureGlassAssets();assert.equal(calls.length,cachedCalls)
     const baseline=process.env.BACKGROUND_BASELINE_PATH?load('background-baseline.tsx').Root:null
-    const serialize=n=>JSON.stringify(expand(n)),background=n=>n.props.background?serialize(n.props.background):null
-    const sizes={systemSmall:{width:170,height:170},systemMedium:{width:358,height:170},systemLarge:{width:358,height:376},systemExtraLarge:{width:715,height:376}}
+    const serialize=n=>JSON.stringify(expand(n)),sizes={systemSmall:{width:170,height:170},systemMedium:{width:358,height:170},systemLarge:{width:358,height:376},systemExtraLarge:{width:715,height:376}}
     let cases=0
     for(const source of ['parrot','official','sub2api'])for(const [family,size] of Object.entries(sizes))for(const parameter of ['','1','1,2','3,1,4'])for(const window of ['fiveHour','sevenDay'])for(const remaining of [0,null,0.1,50]){
       api.saveSource(source);scripting.Widget.family=family;scripting.Widget.displaySize=size;scripting.Widget.parameter=parameter
       const data={...singleData,accounts:singleData.accounts.map(a=>({...a,[window]:{...a[window],remainingPercent:remaining}}))}
       api.saveWidgetBackgroundStyle('gradient');const normal=Root({data,stale:false,error:null})
-      for(const style of ['gradient','glass']){
-        api.saveWidgetBackgroundStyle(style);const current=Root({data,stale:false,error:null})
-        if(baseline){const previous=baseline({data,stale:false,error:null});assert.equal(serialize(current),serialize(previous));assert.equal(background(current),background(previous))}
+      if(baseline)assert.equal(serialize(normal),serialize(baseline({data,stale:false,error:null})))
+      for(const a of api.GLASS_ASSETS){
+        api.saveWidgetBackgroundStyle(a.style);const current=Root({data,stale:false,error:null}),img=current.props.background
+        assert.equal(current.props.widgetBackground,'clear');assert.equal(img.type,'Image');assert.equal(img.props.filePath,'/mock-images/'+a.file)
+        assert.equal(img.props.resizable,true);assert.equal(img.props.scaleToFill,true);assert.equal(img.props.clipped,true)
+        assert.deepEqual(Object.keys(img.props).sort(),['clipped','filePath','frame','resizable','scaleToFill'])
+        assert.equal(JSON.stringify(img.props.frame),JSON.stringify({...size,alignment:'center'}))
+        const restored={...current,props:{...current.props,widgetBackground:normal.props.widgetBackground}};delete restored.props.background
+        assert.equal(serialize(restored),serialize(normal),source+' '+family+' '+parameter+' '+window+' '+remaining+' content unchanged')
       }
-      storage.set('ai_usage_widget_background_v1','none');const fallback=Root({data,stale:false,error:null})
-      assert.equal(api.getWidgetBackgroundStyle(),'gradient');assert.equal(storage.get('ai_usage_widget_background_v1'),'none')
-      assert.equal(serialize(fallback),serialize(normal),source+' '+family+' '+parameter+' '+remaining+' legacy none => gradient unchanged')
       cases++
     }
-    // Error, empty-list and accessory paths share the same style-independent content.
+    assert.equal(calls.length,cachedCalls) // Rendering any family never fetches an image.
     for(const source of ['parrot','official','sub2api'])for(const family of [...Object.keys(sizes),'accessoryRectangular','accessoryCircular','accessoryInline'])for(const data of [singleData,null,{...singleData,accounts:[]}]){
       api.saveSource(source);scripting.Widget.family=family;scripting.Widget.parameter='1';scripting.Widget.displaySize=sizes[family]||{width:160,height:60}
-      api.saveWidgetBackgroundStyle('gradient');const original=Root({data,stale:true,error:'mock error'})
-      for(const style of ['glass','none']){
-        storage.set('ai_usage_widget_background_v1',style);const current=Root({data,stale:true,error:'mock error'})
-        if(family.startsWith('accessory'))assert.equal(serialize(current),serialize(original))
-        else {const restored={...current,props:{...current.props,widgetBackground:original.props.widgetBackground}};delete restored.props.background;assert.equal(serialize(restored),serialize(original))}
+      api.saveWidgetBackgroundStyle('gradient');const normal=Root({data,stale:true,error:'mock error'})
+      for(const a of api.GLASS_ASSETS){
+        api.saveWidgetBackgroundStyle(a.style);const current=Root({data,stale:true,error:'mock error'})
+        if(family.startsWith('accessory')){assert.equal(serialize(current),serialize(normal));assert.equal(current.props.background,undefined);if(baseline)assert.equal(serialize(current),serialize(baseline({data,stale:true,error:'mock error'})))}
+        else {const restored={...current,props:{...current.props,widgetBackground:normal.props.widgetBackground}};delete restored.props.background;assert.equal(serialize(restored),serialize(normal))}
       }
     }
-    api.saveWidgetBackgroundStyle('glass');api.saveWidgetBackgroundStyle('none');api.saveWidgetBackgroundStyle('bad');assert.equal(api.getWidgetBackgroundStyle(),'glass')
-    storage.set('ai_usage_widget_background_v1','unrecognized');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
+    storage.set('ai_usage_widget_background_v1','glass');assert.equal(api.getWidgetBackgroundStyle(),'glass1');assert.equal(storage.get('ai_usage_widget_background_v1'),'glass')
+    for(const value of ['none','bad',null]){storage.set('ai_usage_widget_background_v1',value);assert.equal(api.getWidgetBackgroundStyle(),'gradient')}
+    scripting.Widget.family='systemSmall';scripting.Widget.displaySize=sizes.systemSmall
+    api.saveWidgetBackgroundStyle('glass2');const asset2='/mock-images/assets/glass-2.jpg',savedBytes=imageFS.files.get(asset2)
+    imageFS.files.delete(asset2);assert.ok(Root({data:singleData,stale:false,error:null}).props.widgetBackground.light.gradient)
+    imageFS.files.set(asset2,Buffer.from('corrupt'));assert.ok(Root({data:singleData,stale:false,error:null}).props.widgetBackground.light.gradient)
+    imageFS.files.set(asset2,savedBytes)
+    let reloads=0;scripting.Widget.reloadAll=async()=>{reloads++};states.length=0;let settings=render()
+    let picker=settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式')
+    assert.deepEqual(expand(picker).filter(x=>x?.type==='Text').map(x=>x.props.tag),['gradient','glass1','glass2','glass3'])
+    const labels=expand(picker);for(const label of ['渐变背景','玻璃背景 1','玻璃背景 2','玻璃背景 3'])assert.ok(labels.includes(label));assert.ok(!labels.includes('玻璃背景'));assert.ok(!labels.includes('去除背景'))
+    const noNetworkBefore=calls.length
+    for(const style of ['glass1','glass2','glass3','gradient']){
+      await picker.props.onChanged(style);assert.equal(api.getWidgetBackgroundStyle(),style);states.length=0;settings=render();picker=settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式');assert.equal(picker.props.value,style)
+    }
+    assert.equal(reloads,4);assert.equal(calls.length,noNetworkBefore)
+    // Resource failure is safe user-visible text, keeps selected style and uses gradient until cached.
+    imageFS.files.delete(asset2);failImage='assets/glass-2.jpg';await picker.props.onChanged('glass2');settings=render()
+    assert.ok(settings.some(x=>typeof x==='string'&&x.includes('背景图片获取失败')));assert.equal(api.getWidgetBackgroundStyle(),'glass2')
+    failImage='';await settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.onChanged('glass2')
+    assert.equal(api.getGlassBackgroundPath('glass2'),asset2)
+    assert.equal(JSON.stringify([...kc.entries()]),beforeCreds);assert.equal(api.getStatisticsSource(),beforeStatistics)
+    api.saveWidgetBackgroundStyle('glass3');api.saveWidgetBackgroundStyle('glass');api.saveWidgetBackgroundStyle('none');assert.equal(api.getWidgetBackgroundStyle(),'glass3')
+    const widgetCode=fs.readFileSync(path.join(root,'widget.tsx'),'utf8');assert.ok(!/DockBackgroundLayers|ultraThinMaterial|DOCK_MATERIAL/.test(widgetCode))
     api.saveSource(oldSource);scripting.Widget.family=oldFamily;scripting.Widget.parameter=oldParameter;scripting.Widget.displaySize=oldSize
     if(oldStyle==null)storage.delete('ai_usage_widget_background_v1');else storage.set('ai_usage_widget_background_v1',oldStyle)
-    console.log('PASS: removed none safely defaults to gradient without storage migration/deletion; '+cases+' source/family/parameter/zero-null-fraction cases preserve all content; '+(baseline?'1.9.8 gradient/glass output and decoration byte-identical; ':'')+'accessory/error/empty paths unchanged; unknown enum defaults and invalid-save guards')
+    context.FileManager=oldFS;scripting.Script=oldScript;context.UIImage=oldImage;scripting.Widget.reloadAll=oldReload;handler=oldHandler;states.length=0
+    console.log('PASS: original 3 JPEG hashes/bytes; missing/corrupt cache safe gradient; validated App-only download and cache/dedup; four Picker labels/save/reload; '+cases+' source/family/dual-window cases x3 image backgrounds cover full displaySize with centered aspectFill, no overlays; '+(baseline?'1.9.9 default/accessory byte-identical; ':'')+'all content and exact-zero rules unchanged; legacy glass=>1; no Widget image network; NOT native render proof')
   }
   // Removal is UI-only: opening App in every source performs no storage/credential deletions.
   {
