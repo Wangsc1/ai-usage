@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.3"
+export const VERSION = "1.8.4"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -641,6 +641,21 @@ const API = "https://api.anthropic.com/api/oauth"
 // Official 2.1.295 base Claude subscription scopes (r); exclude optional plugins/projects and org API-key scope.
 const SCOPE = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 const KEY = "ai_usage_claude_oauth_v1"
+// Explicit nonzero port from Scripting's documented HTTP example. Never fall back to a LAN bind.
+const CALLBACK_PORT = 8080
+function startErrorCategory(error: unknown): string {
+  // Only exact known codes/messages are classified; never echo arbitrary native text or URLs.
+  let value = ""
+  try {
+    const e = error as any
+    value = typeof error === "string" ? error : typeof e?.code === "string" ? e.code : typeof e?.message === "string" ? e.message : ""
+  } catch { return "未知" }
+  const known = value.trim().toLowerCase()
+  if (["eaddrinuse", "address already in use", "port already in use"].includes(known)) return "端口占用"
+  if (["eacces", "eperm", "permission denied", "operation not permitted"].includes(known)) return "权限"
+  if (["einval", "invalid argument", "unsupported parameter", "invalid port", "port 0 is not supported"].includes(known)) return "不支持参数"
+  return "未知"
+}
 type Credential = { id: string; accountId: string; organizationId: string; email: string; access: string; refresh: string; expiresAt: number; scope: string }
 export type ClaudeLogin = {
   url: string; redirect: string; manual: boolean; fallback: string | null
@@ -684,6 +699,7 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
   if (!manual && typeof HttpServer !== "undefined" && typeof HttpServer === "function") {
     let server: any = null
     let stage = "构造"
+    let startFailure = ""
     try {
       server = new HttpServer()
       stage = "地址配置"
@@ -703,14 +719,17 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
         return HttpResponse.ok(HttpResponseBody.text("已收到本次授权回调，请返回脚本等待账号保存。此页面不代表授权已完成。"))
       })
       stage = "启动"
-      const error = server.start({ port: 0, forceIPv4: true })
-      if (error) throw new Error()
+      let error: string | null
+      try { error = server.start({ port: CALLBACK_PORT, forceIPv4: true }) }
+      catch (e) { startFailure = `抛异常/${startErrorCategory(e)}`; throw new Error() }
+      if (error) { startFailure = `返回错误/${startErrorCategory(error)}`; throw new Error() }
       stage = "端口"
-      if (!server.port) throw new Error()
-      d.server = server; d.manual = false; d.redirect = `http://localhost:${server.port}/callback`
+      const port = server.port
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error()
+      d.server = server; d.manual = false; d.redirect = `http://localhost:${port}/callback`
     } catch {
       try { server?.stop() } catch { /* no raw native error output */ }
-      d.fallback = `本机回调不可用（阶段：${stage}），使用Claude官方手动授权码页`
+      d.fallback = `本机回调不可用（阶段：${stage}${startFailure ? `；${startFailure}` : ""}），使用Claude官方手动授权码页`
     }
   } else if (!manual) d.fallback = "本机回调不可用（阶段：缺API），使用Claude官方手动授权码页"
   // Parameters are those in the official CLI buildAuthUrl; no cookie extraction or invented redirect.

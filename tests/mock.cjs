@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.3')
+  assert.equal(api.VERSION,'1.8.4')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1109,14 +1109,23 @@ async function main() {
   context.Data.fromRawString=value=>binary(Buffer.from(value))
   context.Crypto={generateSymmetricKey:bits=>{assert.equal(bits,256);return binary(nodeCrypto.randomBytes(bits/8))},sha256:data=>binary(nodeCrypto.createHash('sha256').update(data.bytes).digest())}
   context.HttpResponseBody={text:text=>text};context.HttpResponse={ok:body=>({body})}
-  let serverError=false,diagnosticStage=null
+  let serverError=false,diagnosticStage=null,startNativeError=null,startThrows=false,startCalls=0
   context.HttpServer=class {
-    constructor(){if(diagnosticStage==='构造')throw new Error('SECRET-native-url-token');this.stops=0;this.handlers={};claudeServers.push(this)}
+    constructor(){if(diagnosticStage==='构造')throw new Error('SECRET-native-url-token');this.stops=0;this.port=null;this.state='stopped';this.handlers={};claudeServers.push(this)}
     set listenAddressIPv4(value){if(diagnosticStage==='地址配置')throw new Error('SECRET-address');this.address=value}
     get listenAddressIPv4(){return diagnosticStage==='地址读回'?null:this.address}
     registerHandler(path,handler){if(diagnosticStage==='注册handler')throw new Error('SECRET-register');this.handlers[path]=handler}
-    start(options){assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(options.forceIPv4,true);assert.equal(options.port,0);this.port=diagnosticStage==='端口'?null:45678;return serverError||diagnosticStage==='启动'?'SECRET-start-url':null}
-    stop(){this.stops++}
+    start(options){
+      startCalls++;assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(options.forceIPv4,true)
+      // Documented start returns string|null, port is null before start and populated after success.
+      // Model a native compatibility failure for port0 without making it a proven device cause.
+      if(options.port===0)return 'port 0 is not supported'
+      assert.equal(options.port,8080)
+      if(startNativeError){if(startThrows)throw startNativeError;return startNativeError}
+      if(serverError||diagnosticStage==='启动')return 'SECRET-start-url'
+      this.port=diagnosticStage==='端口'?null:options.port;this.state='running';return null
+    }
+    stop(){this.stops++;this.state='stopped';this.port=null}
   }
   kc.delete('ai_usage_claude_oauth_v1')
   let claudeAccount='claude-a',claudeEmail='claude-a@example.test',claudeOrg='org-a',claudePostFailure=false,claudeProfileFailure=false,claudeUsageFailure=false,claudeRefreshFailure=false,omitRefresh=false,usage401=false
@@ -1150,7 +1159,7 @@ async function main() {
   const authURL=new URL(cl.url)
   assert.equal(authURL.origin+authURL.pathname,'https://claude.com/cai/oauth/authorize')
   assert.deepEqual(Array.from(authURL.searchParams.keys()).sort(),['client_id','code','code_challenge','code_challenge_method','redirect_uri','response_type','scope','state'].sort())
-  assert.equal(authURL.searchParams.get('redirect_uri'),'http://localhost:45678/callback');assert.equal(authURL.searchParams.get('code'),'true')
+  assert.equal(authURL.searchParams.get('redirect_uri'),'http://localhost:8080/callback');assert.equal(authURL.searchParams.get('code'),'true')
   assert.equal(authURL.searchParams.get('code_challenge'),nodeCrypto.createHash('sha256').update(cl.verifier).digest('base64url'))
   assert.match(cl.verifier,/^[A-Za-z0-9_-]{43}$/);assert.notEqual(cl.state,cl.verifier);assert.equal(cl.manual,false)
   const callback=(state,code='mock-claude-code',extra=[])=>({method:'GET',queryParams:[{key:'code',value:code},{key:'state',value:state},...extra]})
@@ -1161,7 +1170,7 @@ async function main() {
   const response=callbackFn(callback(cl.state));assert.ok(!response.body.includes(pkceState));assert.ok(!response.body.includes('mock-claude-code'))
   await Promise.resolve();assert.equal(notified,1)
   const claudeA=await claudeAPI.finishClaudeLogin(cl)
-  assert.equal(lastExchange.redirect_uri,'http://localhost:45678/callback');assert.equal(lastExchange.code_verifier,pkceVerifier);assert.equal(lastExchange.state,pkceState)
+  assert.equal(lastExchange.redirect_uri,'http://localhost:8080/callback');assert.equal(lastExchange.code_verifier,pkceVerifier);assert.equal(lastExchange.state,pkceState)
   assert.equal(claudeA,'claude:claude-a:org-a');assert.equal(claudeAPI.claudeAccounts()[0].name,claudeEmail)
   assert.equal(server.stops,1);assert.equal(cl.verifier,'');assert.equal(cl.state,'');assert.equal(claudeTimers.size,0)
   await assert.rejects(()=>claudeAPI.finishClaudeLogin(cl),/取消或过期/)
@@ -1343,7 +1352,7 @@ async function main() {
     diagnosticStage=stage;const savedServer=context.HttpServer
     if(stage==='缺API')delete context.HttpServer
     const beforeServers=claudeServers.length,attempt=api.beginClaudeLogin()
-    const expectedStage=stage==='地址读回'?'地址配置':stage
+    const expectedStage=stage==='地址读回'?'地址配置':stage==='启动'?'启动；返回错误/未知':stage
     assert.equal(attempt.manual,true);assert.equal(attempt.fallback,`本机回调不可用（阶段：${expectedStage}），使用Claude官方手动授权码页`)
     assert.ok(!attempt.fallback.includes('SECRET'));assert.ok(!attempt.fallback.includes(attempt.state));assert.ok(!attempt.fallback.includes(attempt.verifier))
     if(claudeServers.length>beforeServers)assert.equal(claudeServers.at(-1).stops,1)
@@ -1357,7 +1366,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.3'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.4'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1411,6 +1420,46 @@ async function main() {
   cl=api.beginClaudeLogin(()=>{},()=>{},true);const narrowID=await api.finishClaudeLogin(cl,'mock-narrow#'+cl.state)
   assert.equal(JSON.parse(kc.get('ai_usage_claude_oauth_v1')).find(a=>a.id===narrowID).scope,grantedClaudeScope)
   console.log('PASS: exact official five subscription scopes in auto/manual URLs; no org/plugins/projects; old grants untouched; server full/narrow grant stored; refresh_token submits original grant and missing response scope preserves it; cancellation cleanup')
+  // Nonzero documented start contract and sanitized return/throw classifications, no blind bind retries.
+  for(const [error,category] of [['EADDRINUSE','端口占用'],['Permission denied','权限'],['port 0 is not supported','不支持参数'],['SECRET-https://example.test/code?token=mock','未知']]){
+    for(const throwing of [false,true]){
+      startNativeError=throwing?new Error(error):error;startThrows=throwing
+      before=calls.length;const startsBefore=startCalls,attempt=api.beginClaudeLogin()
+      const expected=`本机回调不可用（阶段：启动；${throwing?'抛异常':'返回错误'}/${category}），使用Claude官方手动授权码页`
+      assert.equal(attempt.fallback,expected);assert.equal(startCalls,startsBefore+1);assert.equal(calls.length,before)
+      assert.equal(claudeServers.at(-1).stops,1);assert.ok(!attempt.fallback.includes('SECRET'));assert.ok(!attempt.fallback.includes('example.test'))
+      api.cancelClaudeLogin(attempt);assert.equal(claudeTimers.size,0)
+      authUI=await startClaudeUI();assert.ok(authUI.includes(expected));authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    }
+  }
+  startNativeError=null;startThrows=false
+  handler=claudeHandler;claudeAccount='nonzero-auto';claudeEmail='nonzero-auto@example.test'
+  authUI=await startClaudeUI();let nonzeroAttempt=uiAttempt(),nonzeroServer=claudeServers.at(-1)
+  assert.equal(nonzeroAttempt.manual,false);assert.equal(nonzeroServer.port,8080);assert.equal(nonzeroServer.listenAddressIPv4,'127.0.0.1')
+  assert.equal(new URL(nonzeroAttempt.url).searchParams.get('redirect_uri'),nonzeroAttempt.redirect)
+  const beforeNonzeroCalls=calls.length
+  // A callback from an external email/browser context uses exactly the same GET request contract.
+  // This models request delivery, not iOS background survival or Cookie/session bridging.
+  nonzeroServer.handlers['/callback'](callback(nonzeroAttempt.state,'mock-external-email-code'))
+  nonzeroServer.handlers['/callback'](callback(nonzeroAttempt.state,'mock-external-email-code'))
+  for(let i=0;i<70&&!api.officialAccounts().some(a=>a.email==='nonzero-auto@example.test');i++)await Promise.resolve()
+  assert.ok(api.officialAccounts().some(a=>a.email==='nonzero-auto@example.test'))
+  assert.equal(lastExchange.redirect_uri,'http://localhost:8080/callback')
+  assert.equal(calls.slice(beforeNonzeroCalls).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
+  assert.equal(nonzeroServer.stops,1);assert.equal(claudeTimers.size,0)
+  // Settle the previous UI's post-login quota refresh before mounting another UI instance.
+  for(let i=0;i<100;i++)await Promise.resolve()
+  // 429 remains a token-exchange failure, never a callback startup failure or automatic retry.
+  const token429Handler=handler
+  handler=(u,o)=>u==='https://platform.claude.com/v1/oauth/token'?resp(429,{error:'SECRET-rate-limit'}):token429Handler(u,o)
+  authUI=await startClaudeUI();const rateAttempt=uiAttempt(),rateServer=claudeServers.at(-1),rateCallsBefore=calls.length
+  rateServer.handlers['/callback'](callback(rateAttempt.state,'mock-429-code'))
+  for(let i=0;i<70&&!render().some(x=>x.type==='Text'&&String(x.props.children).includes('HTTP 429'));i++)await Promise.resolve()
+  assert.ok(render().some(x=>x.type==='Text'&&String(x.props.children).includes('Claude授权交换失败（HTTP 429）')))
+  assert.equal(calls.slice(rateCallsBefore).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
+  assert.equal(rateServer.stops,1);assert.equal(rateAttempt.cancelled,true);assert.equal(rateAttempt.consumed,true);assert.equal(claudeTimers.size,0)
+  handler=token429Handler
+  console.log('PASS: documented nonzero8080 loopback start, port0-rejecting native model; safe startup return/throw categories; one start/no LAN fallback; auto external-context GET delivery/email save/redirect match/exactly one exchange/listener cleanup (NOT iOS proof)')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
