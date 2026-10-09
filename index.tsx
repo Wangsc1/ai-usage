@@ -1,12 +1,12 @@
 import {
-  Button, Form, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, Form, Group, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
-  ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable, WebViewController,
+  ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.36"
+const VERSION = "1.7.37"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -110,9 +110,12 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
 }
 
 const DEVICE_URL = "https://auth.openai.com/codex/device"
+const UNSUPPORTED_BROWSER = "当前Scripting不支持WebViewController临时浏览器，请更新Scripting或使用Safari备用"
 async function presentIsolatedAuthorization(register?: (release: (() => void) | null) => void) {
   // loadURL resolves on navigation completion, not on initiating the load. Present BEFORE waiting
   // for a login/redirect page, otherwise its pending navigation can hide the modal indefinitely.
+  // WebViewController is a GLOBAL API in the official WebView example, not a scripting module export.
+  if (typeof WebViewController !== "function") throw new Error(UNSUPPORTED_BROWSER)
   const browser = new WebViewController({ ephemeral: true })
   let released = false
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -143,7 +146,7 @@ async function checkAfterSafari(d: DeviceLogin, active: () => boolean,
   present: () => Promise<void> = () => Safari.present(DEVICE_URL)) {
   try { await present() }
   catch (e: any) {
-    throw new Error(e?.message?.startsWith("授权页面加载") ? e.message : "无法打开官方授权页，请稍后重试")
+    throw new Error((e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载")) ? e.message : "无法打开官方授权页，请稍后重试")
   }
   if (!active() || d.cancelled) return null
   const remaining = Math.max(0, d.nextPoll - Date.now())
@@ -165,6 +168,7 @@ function SettingsView() {
   const [hasKey, setHasKey] = useState(!!cur.managementKey)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState(hasKey ? "已配置，可点“测试连接”" : "未配置：填写后点“保存并测试”")
+  const [browserError, setBrowserError] = useState("")
   const [lines, setLines] = useState<string[]>([])
   const [updateMsg, setUpdateMsg] = useState("")
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
@@ -188,6 +192,7 @@ function SettingsView() {
 
   async function addOfficial() {
     if (auth.running) return
+    setBrowserError("")
     auth.running = true
     const epoch = auth.epoch
     setBusy(true)
@@ -208,7 +213,7 @@ function SettingsView() {
     setBusy(true)
     const epoch = auth.epoch
     const active = () => auth.alive && auth.device === d && auth.epoch === epoch && getSource() === "official"
-    if (browser) setStatus("正在打开官方授权页…；加载失败时可改用Safari备用")
+    if (browser) { setBrowserError(""); setStatus("正在打开官方授权页…；加载失败时可改用Safari备用") }
     try {
       const result = browser ? await checkAfterSafari(d, active, undefined,
         browser === "safari" ? () => Safari.present(DEVICE_URL) : () => presentIsolatedAuthorization(release => { auth.releaseBrowser = release })) : await checkDeviceLogin(d)
@@ -223,7 +228,9 @@ function SettingsView() {
     } catch (e: any) {
       if (active()) {
         // A browser presentation failure is retryable; it says nothing about the device authorization.
-        if (e.message !== "无法打开官方授权页，请稍后重试" && !e.message.startsWith("授权页面加载")) {
+        const presentationFailed = e.message === UNSUPPORTED_BROWSER || e.message === "无法打开官方授权页，请稍后重试" || e.message.startsWith("授权页面加载")
+        if (presentationFailed) setBrowserError(e.message)
+        if (!presentationFailed) {
           cancelDeviceLogin(d)
           auth.device = null
           setDevice(null)
@@ -308,10 +315,17 @@ function SettingsView() {
 
       {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>默认临时会话不保留登录Cookie，便于添加不同账号；仅支持独立Codex登录。Google/Apple等可能限制嵌入登录，可用Safari备用（可能复用旧会话），或在外部无痕窗口打开下方网址，输入本次代码后返回手动检查。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
         {!device ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy} /> : <>
-          <Text>一次性代码：{device.code}</Text>
+          <Text contextMenu={{ menuItems: <Group>
+            <Button title="复制代码" action={async () => {
+              // A retained menu action must not copy an old, cancelled or expired attempt.
+              if (!auth.alive || auth.device !== device || device.cancelled || Date.now() >= device.expiresAt || getSource() !== "official") return
+              await Pasteboard.setString(device.code)
+            }} disabled={device.cancelled || Date.now() >= device.expiresAt} />
+          </Group> }}>一次性代码：{device.code}</Text>
           <Text>仅输入你自己在此脚本发起的代码，有效期15分钟。</Text>
           <Button title={"打开官方授权页"} action={() => checkOfficial(true)} disabled={busy} />
           <Button title={"Safari备用授权页"} action={() => checkOfficial("safari")} disabled={busy} />
+          {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
           <Text font={12} foregroundStyle="secondaryLabel">外部无痕授权网址：https://auth.openai.com/codex/device；输入本次代码后返回点“检查授权”。无需退出已授权账号。</Text>
           <Button title={"检查授权"} action={() => checkOfficial()} disabled={busy} />
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />

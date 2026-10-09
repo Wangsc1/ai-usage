@@ -6,7 +6,7 @@ let now = 1800000000000, handler, calls = [], reads = []
 const kc = new Map(), storage = new Map(), storageWrites = []
 class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])) } static now() { return now } }
 const modules = {}
-const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { return o[k] || k } })
+const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { if(k==='WebViewController')return undefined;return o[k] || k } })
 scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
 const jsx = (type, props, key) => key === undefined ? ({type, props}) : ({type, props, key})
 const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise, setTimeout: (fn,ms)=>{now+=ms;Promise.resolve().then(fn)}, Safari: {present: async()=>{}},
@@ -674,7 +674,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.36')
+  assert.equal(api.VERSION,'1.7.37')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -859,12 +859,18 @@ async function main() {
   context.setTimeout=(fn,ms)=>{if(ms===20000){const id=++timerId;browserTimers.set(id,fn);return id}now+=ms;Promise.resolve().then(fn);return 0}
   context.clearTimeout=id=>browserTimers.delete(id)
   const instances=[];let presentBrowser=async()=>{},loadBrowser=async()=>true
-  scripting.WebViewController=class {
+  context.WebViewController=class {
     constructor(options){this.options=options;this.disposed=0;this.urls=[];instances.push(this)}
     async loadURL(url){this.urls.push(url);return loadBrowser(this)}
     async present(options){this.presentation=options;await presentBrowser(this)}
     dispose(){this.disposed++}
   }
+  assert.equal(scripting.WebViewController,undefined)
+  // The old module-import construction fails despite a valid GLOBAL API.
+  const legacy=ts.transpileModule('import {WebViewController} from "scripting"; export function open(){return new WebViewController({ephemeral:true})}',{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText
+  const legacyModule={exports:{}}
+  vm.runInContext(`(function(require,module,exports){${legacy}})`,context)(()=>scripting,legacyModule,legacyModule.exports)
+  assert.throws(()=>legacyModule.exports.open(),/not a constructor/);assert.equal(instances.length,0)
   const {presentIsolatedAuthorization}=load('index.tsx')
   for(let i=0;i<2;i++)await presentIsolatedAuthorization()
   assert.notEqual(instances[0],instances[1])
@@ -939,6 +945,39 @@ async function main() {
   assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.disabled,false)
   assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
   assert.equal(instances.at(-1).disposed,1);assert.equal(browserTimers.size,0)
+  // Global absent: accurate error displayed adjacent to opening buttons, device remains retryable.
+  const supportedBrowser=context.WebViewController;delete context.WebViewController
+  states.length=0;api.saveSource('official');namedFlow({},'unsupported-global')
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();before=calls.length
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  authUI=render();assert.equal(calls.length,before);assert.equal(browserTimers.size,0)
+  const unsupported=authUI.find(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed')
+  assert.ok(unsupported.props.children.startsWith('当前Scripting不支持WebViewController'))
+  const section=authUI.find(x=>x.type==='Section'&&x.props.header?.props.children==='官方账号（独立登录）')
+  assert.ok(expand(section).includes(unsupported))
+  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.disabled,false)
+  context.WebViewController=supportedBrowser
+  // Long press uses official contextMenu and Pasteboard, copying ONLY this code value.
+  let copied=[];context.Pasteboard={setString:async value=>copied.push(value)}
+  for(const mode of ['cancel','source','dismiss','expired','success']){
+    states.length=0;api.saveSource('official');namedFlow({},'copy-'+mode)
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+    authUI=render();const codeText=authUI.find(x=>x.type==='Text'&&x.props.contextMenu)
+    assert.equal(codeText.props.children[0],'一次性代码：')
+    const copy=expand(codeText.props.contextMenu.menuItems).find(x=>x.type==='Button'&&x.props.title==='复制代码')
+    const beforeCopies=copied.length, beforeStorage=storageWrites.length
+    await copy.props.action();assert.equal(copied.length,beforeCopies+1);assert.equal(copied.at(-1),codeText.props.children[1]);assert.ok(!copied.at(-1).includes('一次性代码'));assert.equal(storageWrites.length,beforeStorage)
+    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+    else if(mode==='source')await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
+    else if(mode==='expired')now+=15*60*1000
+    else await authUI.find(x=>x.type==='Button'&&x.props.title==='检查授权').props.action()
+    await copy.props.action();assert.equal(copied.length,beforeCopies+1,'stale copy blocked: '+mode)
+    if(mode!=='expired')assert.ok(!render().some(x=>x.type==='Text'&&x.props.contextMenu))
+    else assert.equal(expand(render().find(x=>x.type==='Text'&&x.props.contextMenu).props.contextMenu.menuItems).find(x=>x.type==='Button').props.disabled,true)
+  }
+  console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
   console.log('PASS: Safari dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
