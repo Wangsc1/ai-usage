@@ -7,62 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.14"
-const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
-// script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
-const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
-
-function newer(a: string, b: string) {
-  const pa = a.split(".").map(Number), pb = b.split(".").map(Number)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
-    if (d) return d > 0
-  }
-  return false
-}
-
-// 从 GitHub 拉取最新文件覆盖当前脚本目录；返回新版本号，已是最新返回 null
-async function updateFromGitHub(force: boolean): Promise<string | null> {
-  const bust = `?t=${Date.now()}`
-  const meta = await fetch(RAW + "script.json" + bust, { timeout: 20 })
-  if (meta.status !== 200) throw new Error(`获取版本信息失败（HTTP ${meta.status}）`)
-  const remote = String((await meta.json())?.version ?? "")
-  if (!force && !newer(remote, VERSION)) return null
-  // 先全部下载成功再写入，避免半更新
-  const bodies: string[] = []
-  for (const f of FILES) {
-    const r = await fetch(RAW + f + bust, { timeout: 20 })
-    if (r.status !== 200) throw new Error(`下载 ${f} 失败（HTTP ${r.status}）`)
-    const t = await r.text()
-    if (!t.trim()) throw new Error(`${f} 内容为空`)
-    bodies.push(t)
-  }
-  // Back up only the four code files; never touch credentials or other local files.
-  const previous: (string | null)[] = []
-  for (const file of FILES) {
-    const path = Script.directory + "/" + file
-    previous.push(FileManager.existsSync(path) ? await FileManager.readAsString(path) : null)
-  }
-  let attempted = -1
-  try {
-    for (let i = 0; i < FILES.length; i++) {
-      attempted = i
-      await FileManager.writeAsString(Script.directory + "/" + FILES[i], bodies[i])
-    }
-  } catch {
-    let restored = true
-    for (let i = attempted; i >= 0; i--) {
-      try {
-        const path = Script.directory + "/" + FILES[i]
-        if (previous[i] == null) { if (FileManager.existsSync(path)) await FileManager.remove(path) }
-        else await FileManager.writeAsString(path, previous[i]!)
-      } catch { restored = false }
-    }
-    throw new Error(restored ? "更新写入失败，已恢复原文件" : "更新写入失败，部分文件未恢复；请重新导入完整脚本")
-  }
-  return remote
-}
-
+const VERSION = "1.9.15"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -208,7 +153,6 @@ function SettingsView() {
   const [status, setStatus] = useState(hasKey ? "已配置，可点“测试连接”" : "未配置：填写后点“保存并测试”")
   const [browserError, setBrowserError] = useState("")
   const [lines, setLines] = useState<string[]>([])
-  const [updateMsg, setUpdateMsg] = useState("")
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
@@ -342,23 +286,6 @@ function SettingsView() {
         setStatus(e.message)
       }
     } finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
-  }
-
-  async function checkUpdate(force: boolean) {
-    setBusy(true)
-    setUpdateMsg("检查中…")
-    try {
-      const v = await updateFromGitHub(force)
-      if (v) {
-        setUpdateMsg(`✅ 已更新到 ${v}，点“完成”退出后重新运行生效`)
-        await Widget.reloadAll()
-      } else {
-        setUpdateMsg(`已是最新版本 ${VERSION}`)
-      }
-    } catch (e: any) {
-      setUpdateMsg("❌ " + String(e?.message ?? e))
-    }
-    setBusy(false)
   }
 
   async function test() {
@@ -536,12 +463,6 @@ function SettingsView() {
         <Button title="预览小组件" action={() => Widget.preview({ family: "systemSmall" })} />
       </Section>
 
-      <Section header={<Text>更新</Text>} footer={<Text>从 GitHub 拉取最新版本覆盖当前脚本，配置和密钥保留。</Text>}>
-        <LabeledContent title={"当前版本"} value={VERSION} />
-        <Button title={"检查更新"} action={() => checkUpdate(false)} disabled={busy} />
-        <Button title={"强制重新下载"} action={() => checkUpdate(true)} disabled={busy} />
-        {updateMsg ? <Text>{updateMsg}</Text> : null}
-      </Section>
 
     </Form>
   </NavigationStack>

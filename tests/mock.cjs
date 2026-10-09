@@ -24,7 +24,7 @@ function load(name) {
   let code = fs.readFileSync(name === 'background-baseline-api.ts' ? path.join(path.dirname(process.env.BACKGROUND_BASELINE_PATH),'api.ts') : name === 'background-baseline.tsx' ? process.env.BACKGROUND_BASELINE_PATH : name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'pre-accessory-widget.tsx' ? process.env.PRE_ACCESSORY_WIDGET_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
   if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout, run as runWidget }')
   if (name === 'background-baseline.tsx' || name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx' || name === 'pre-accessory-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
-  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari, presentIsolatedAuthorization, updateFromGitHub }')
+  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari, presentIsolatedAuthorization }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
   const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : name === 'background-baseline.tsx' && n === './api' ? load('background-baseline-api.ts') : load(n.replace('./','') + (fs.existsSync(path.join(root,n.replace('./','')+'.tsx'))?'.tsx':'.ts'))
@@ -693,12 +693,12 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.14')
+  assert.equal(api.VERSION,'1.9.15')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
-  // Syntax-only compilation of settings, plus version/updater integration.
+  // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
-  assert.ok(index.includes('const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
+  assert.ok(!index.includes("updateFromGitHub")); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
   // Local widget aliases: never modify account records, stable-ID/source scoped, preserve all input except trim.
   const alias='🦜 工作@local · '+ '名字'.repeat(80)
   api.saveWidgetName('p0','  '+alias+'  ','parrot');api.saveWidgetName('p0','官方🐻','official')
@@ -1184,11 +1184,6 @@ async function main() {
   context.clearTimeout=id=>claudeTimers.delete(id)
   const binary=buf=>({size:buf.length,toHexString:()=>Buffer.from(buf).toString('hex'),toBase64String:()=>Buffer.from(buf).toString('base64'),toRawString:()=>Buffer.from(buf).toString(),bytes:Buffer.from(buf)})
   context.Data.fromRawString=value=>binary(Buffer.from(value))
-  function resourceFS(initial=[]){
-    const files=new Map(initial),writes=[],removes=[]
-    return {files,writes,removes,existsSync:p=>files.has(p),createDirectory:async()=>{},readAsDataSync:p=>binary(files.get(p)),readAsData:async p=>binary(files.get(p)),readAsString:async p=>files.get(p).toString(),
-      writeAsData:async(p,d)=>{writes.push(p);files.set(p,Buffer.from(d.bytes))},writeAsString:async(p,s)=>{writes.push(p);files.set(p,Buffer.from(s))},remove:async p=>{removes.push(p);files.delete(p)}}
-  }
   context.Crypto={generateSymmetricKey:bits=>{assert.equal(bits,256);return binary(nodeCrypto.randomBytes(bits/8))},sha256:data=>binary(nodeCrypto.createHash('sha256').update(data.bytes).digest())}
   const htmlBodies=new Set()
   context.HttpResponseBody={text:text=>text,html:html=>{htmlBodies.add(html);return html}};context.HttpResponse={ok:body=>({statusCode:200,reasonPhrase:'OK',body})}
@@ -1232,7 +1227,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.14')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.15')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1466,7 +1461,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.14'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.15'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1773,7 +1768,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.14')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.15')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1783,7 +1778,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.14 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.15 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1884,45 +1879,30 @@ async function main() {
   api.logoutOfficial(targetResetID);releaseReset();await assert.rejects(()=>lateReset,/已退出/)
   kc.set('ai_usage_claude_oauth_v1',queryCredentials);handler=claudeHandler
   console.log('PASS: official cedar_ember schema/grants resets_left sum (missing unknown/explicit zero/positive/invalid/overflow); inline or one optional GET only; HTTP/network/JSON failures do not block quota; no reset/claim POST; logout late-query guard; RE>0 existing layout rules preserved')
-  // Four-code updater only; installed image leftovers/metadata/unrelated files remain untouched.
-  const savedFileManager=context.FileManager,savedScript=scripting.Script,updateReads=[]
-  scripting.Script={directory:'/mock-script'}
-  const names=['api.ts','app_intents.tsx','widget.tsx','index.tsx']
-  const oldResources=names.map(f=>['/mock-script/'+f,Buffer.from('old '+f)])
-  oldResources.push(['/mock-script/script.json',Buffer.from('old metadata')],['/mock-script/unrelated.txt',Buffer.from('keep')],['/mock-script/assets/glass-1.jpg',Buffer.from('installed leftover')])
-  let updateFS=resourceFS(oldResources),failDownload='',emptyDownload=''
-  context.FileManager=updateFS
-  const downloadHandler=async(u,o)=>{
-    assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/main/'));assert.equal(o.timeout,20);assert.equal(o.headers,undefined)
-    const name=u.replace(/^.*\/main\//,'').split('?')[0];updateReads.push(name)
-    assert.ok(name==='script.json'||names.includes(name))
-    if(name===failDownload)return resp(404)
-    if(name==='script.json')return resp(200,{version:'1.9.14'})
-    return {status:200,text:async()=>name===emptyDownload?'':fs.readFileSync(path.join(root,name),'utf8')}
+  // App has no updater; native script-list remote-resource metadata stays configured.
+  {
+    const source=api.getSource(),beforeCalls=calls.length,beforeCreds=JSON.stringify([...kc.entries()])
+    for(const selected of ['parrot','official','sub2api']){
+      api.saveSource(selected);states.length=0;const beforeStore=JSON.stringify([...storage.entries()]),ui=render()
+      for(const title of ['更新','检查更新','强制重新下载','当前版本']){
+        assert.ok(!ui.some(x=>typeof x==='string'&&x===title));assert.ok(!ui.some(x=>x.props?.title===title))
+      }
+      assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('从 GitHub 拉取')))
+      assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='预览小组件'))
+      assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='账号来源'))
+      assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='刷新间隔'))
+      if(selected==='official')assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='刷新官方额度'))
+      assert.equal(JSON.stringify([...storage.entries()]),beforeStore)
+    }
+    assert.equal(calls.length,beforeCalls);assert.equal(JSON.stringify([...kc.entries()]),beforeCreds)
+    const code=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
+    assert.ok(!/updateFromGitHub|checkUpdate|updateMsg|setUpdateMsg|const RAW|const FILES|FileManager|raw\.githubusercontent\.com/.test(code))
+    assert.ok(code.includes('Script.exit()'));assert.equal(load('index.tsx').updateFromGitHub,undefined)
+    const meta=JSON.parse(fs.readFileSync(path.join(root,'script.json'),'utf8'))
+    assert.deepEqual(meta.remoteResource,{url:'https://github.com/Wangsc1/ai-usage',autoUpdateInterval:86400})
+    api.saveSource(source);states.length=0
+    console.log('PASS: all sources have no App update section/current-version/check/force-download labels or helpers; no updater requests/writes; preview/refresh/settings retained; native remoteResource URL/interval unchanged; no external update invoked')
   }
-  handler=downloadHandler
-  await load('index.tsx').updateFromGitHub(true)
-  assert.deepEqual(updateReads,['script.json',...names]);assert.equal(updateFS.writes.length,4)
-  for(const f of names)assert.deepEqual(updateFS.files.get('/mock-script/'+f),fs.readFileSync(path.join(root,f)))
-  assert.ok(updateFS.writes.indexOf('/mock-script/app_intents.tsx')<updateFS.writes.indexOf('/mock-script/widget.tsx'))
-  assert.equal(updateFS.files.get('/mock-script/assets/glass-1.jpg').toString(),'installed leftover');assert.equal(updateFS.removes.length,0)
-  const snapshot=m=>JSON.stringify([...m].map(([p,b])=>[p,b.toString('hex')]).sort())
-  for(const failed of names){
-    updateFS=resourceFS(oldResources);context.FileManager=updateFS;failDownload=failed
-    await assert.rejects(()=>load('index.tsx').updateFromGitHub(true));assert.equal(updateFS.writes.length,0);assert.equal(snapshot(updateFS.files),snapshot(new Map(oldResources)))
-  }
-  failDownload='';emptyDownload='widget.tsx';updateFS=resourceFS(oldResources);context.FileManager=updateFS
-  await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/内容为空/);assert.equal(updateFS.writes.length,0)
-  emptyDownload=''
-  for(const failed of ['app_intents.tsx','index.tsx']){
-    updateFS=resourceFS(oldResources);context.FileManager=updateFS
-    const original=updateFS.writeAsString;let failedOnce=false
-    updateFS.writeAsString=async(p,b)=>{await original(p,b);if(p.endsWith(failed)&&!failedOnce){failedOnce=true;throw Error('mock partial write')}}
-    await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/已恢复原文件/)
-    assert.equal(snapshot(updateFS.files),snapshot(new Map(oldResources)))
-  }
-  scripting.Script=savedScript;context.FileManager=savedFileManager
-  console.log('PASS: updater requests only metadata+four code files; each missing/empty code writes nothing; partial code writes roll back; installed image leftovers/metadata/unrelated files untouched; intent installed before widget')
   // 1.8.14 request budget: one plain usage per refresh, hourly card selector, 429 cooldown per account, in-flight sharing.
   storage.delete('ai_usage_claude_reset_cards_v1');storage.delete('ai_usage_claude_usage_cooldown_v1')
   const usageURL='https://api.anthropic.com/api/oauth/usage',budgetRows=JSON.parse(kc.get('ai_usage_claude_oauth_v1'))
@@ -2389,6 +2369,6 @@ async function main() {
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
   console.log('PASS: Safari dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
   console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude exact-zero account gray title+SVG/LCD/percent/lit bars; enabled/available/stale not gray triggers; App foreground unchanged')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/native-update metadata; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude exact-zero account gray title+SVG/LCD/percent/lit bars; enabled/available/stale not gray triggers; App foreground unchanged')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
