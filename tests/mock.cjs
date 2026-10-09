@@ -693,7 +693,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.8')
+  assert.equal(api.VERSION,'1.9.9')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1218,7 +1218,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.8')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.9')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1452,7 +1452,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.8'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.9'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1756,7 +1756,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.8')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.9')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1766,7 +1766,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.8 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.9 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1873,14 +1873,14 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.9.8'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.9.9'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.8'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.9'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
@@ -2264,24 +2264,27 @@ async function main() {
     }
     api.saveWidgetBackgroundStyle('gradient');states.length=0;let settings=render();let reloads=0;scripting.Widget.reloadAll=async()=>{reloads++}
     const picker=settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式');assert.equal(picker.props.value,'gradient')
-    const labels=expand(picker);assert.ok(labels.includes('渐变背景'));assert.ok(labels.includes('玻璃背景'));assert.ok(labels.includes('去除背景'));assert.ok(!labels.some(x=>typeof x==='string'&&x.includes('实验')))
+    const labels=expand(picker);assert.ok(labels.includes('渐变背景'));assert.ok(labels.includes('玻璃背景'));assert.ok(!labels.includes('去除背景'));assert.deepEqual(expand(picker).filter(x=>x?.type==='Text').map(x=>x.props.tag),['gradient','glass']);assert.ok(!labels.some(x=>typeof x==='string'&&x.includes('实验')))
     assert.ok(!settings.some(x=>typeof x==='string'&&(x.includes('UIGlass')||x.includes('实验'))))
     before=calls.length;const creds=JSON.stringify([...kc.entries()]),sources=[api.getSource(),api.getStatisticsSource()]
     await picker.props.onChanged('glass');assert.equal(api.getWidgetBackgroundStyle(),'glass');assert.equal(reloads,1);assert.equal(calls.length,before)
     assert.equal(JSON.stringify([...kc.entries()]),creds);assert.deepEqual([api.getSource(),api.getStatisticsSource()],sources)
     states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'glass')
     const bgFooter=expand(settings.find(x=>x.type==='Section'&&expand(x.props.header).includes('小组件背景')).props.footer).join('');assert.ok(bgFooter.includes('尚未证实能透出壁纸')&&bgFooter.includes('不更改系统全局外观')&&!bgFooter.includes('UIGlass')&&!bgFooter.includes('实验'))
-    await settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.onChanged('none');assert.equal(reloads,2);assert.equal(api.getWidgetBackgroundStyle(),'none')
-    states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'none')
-    assert.ok(bgFooter.includes('仅去掉脚本绘制的背景')&&bgFooter.includes('系统仍可能保留底色')&&bgFooter.includes('不保证透明'))
+    storage.set('ai_usage_widget_background_v1','none');const storedBefore=JSON.stringify([...storage.entries()])
+    states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'gradient')
+    assert.equal(JSON.stringify([...storage.entries()]),storedBefore);assert.equal(storage.get('ai_usage_widget_background_v1'),'none')
+    assert.ok(!bgFooter.includes('去除背景'));assert.ok(bgFooter.includes('不保证透明'))
     assert.equal(calls.length,before);assert.equal(JSON.stringify([...kc.entries()]),creds)
+    await settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.onChanged('glass');assert.equal(reloads,2);assert.equal(api.getWidgetBackgroundStyle(),'glass')
+    states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'glass')
     await settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.onChanged('gradient');assert.equal(reloads,3);api.saveWidgetBackgroundStyle('bad');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
     storage.set('ai_usage_widget_background_v1','unknown');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
     if(oldStyle==null)storage.delete('ai_usage_widget_background_v1');else storage.set('ai_usage_widget_background_v1',oldStyle)
     scripting.Widget.reloadAll=oldReload;api.saveSource(oldSource);scripting.Widget.family=oldFamily;scripting.Widget.parameter=oldParameter;states.length=0
   }
   console.log('PASS: Glass compatibility trial = clear widgetBackground + native ultraThinMaterial RoundedRectangle in ordinary background; white highlight fill removed, gradient hairline unchanged; no UIGlass dependency; default gradient identical to pre-Dock baseline; only background differs; accessory unchanged; Picker labels/persistence/reload/no network or credential change; NOT native visual proof')
-  // No-background option removes only script decoration; host transparency is not claimed.
+  // Removed none setting safely falls back without migration or deletion; retained backgrounds stay identical.
   {
     const oldSource=api.getSource(),oldFamily=scripting.Widget.family,oldParameter=scripting.Widget.parameter,oldSize=scripting.Widget.displaySize,oldStyle=storage.get('ai_usage_widget_background_v1')
     const baseline=process.env.BACKGROUND_BASELINE_PATH?load('background-baseline.tsx').Root:null
@@ -2296,12 +2299,9 @@ async function main() {
         api.saveWidgetBackgroundStyle(style);const current=Root({data,stale:false,error:null})
         if(baseline){const previous=baseline({data,stale:false,error:null});assert.equal(serialize(current),serialize(previous));assert.equal(background(current),background(previous))}
       }
-      api.saveWidgetBackgroundStyle('none');const empty=Root({data,stale:false,error:null}),tree=expand(empty)
-      assert.equal(empty.props.widgetBackground,'clear');assert.equal(empty.props.background,undefined)
-      assert.ok(!JSON.stringify(tree).includes('ultraThinMaterial'));assert.ok(!JSON.stringify(tree).includes('gradient'))
-      assert.ok(!tree.some(n=>n?.props?.stroke||n?.type?.name==='DockBackgroundLayers'))
-      const restored={...empty,props:{...empty.props,widgetBackground:normal.props.widgetBackground}}
-      assert.equal(serialize(restored),serialize(normal),source+' '+family+' '+parameter+' '+remaining+' content/zero rule unchanged')
+      storage.set('ai_usage_widget_background_v1','none');const fallback=Root({data,stale:false,error:null})
+      assert.equal(api.getWidgetBackgroundStyle(),'gradient');assert.equal(storage.get('ai_usage_widget_background_v1'),'none')
+      assert.equal(serialize(fallback),serialize(normal),source+' '+family+' '+parameter+' '+remaining+' legacy none => gradient unchanged')
       cases++
     }
     // Error, empty-list and accessory paths share the same style-independent content.
@@ -2309,16 +2309,16 @@ async function main() {
       api.saveSource(source);scripting.Widget.family=family;scripting.Widget.parameter='1';scripting.Widget.displaySize=sizes[family]||{width:160,height:60}
       api.saveWidgetBackgroundStyle('gradient');const original=Root({data,stale:true,error:'mock error'})
       for(const style of ['glass','none']){
-        api.saveWidgetBackgroundStyle(style);const current=Root({data,stale:true,error:'mock error'})
+        storage.set('ai_usage_widget_background_v1',style);const current=Root({data,stale:true,error:'mock error'})
         if(family.startsWith('accessory'))assert.equal(serialize(current),serialize(original))
         else {const restored={...current,props:{...current.props,widgetBackground:original.props.widgetBackground}};delete restored.props.background;assert.equal(serialize(restored),serialize(original))}
       }
     }
-    api.saveWidgetBackgroundStyle('none');api.saveWidgetBackgroundStyle('bad');assert.equal(api.getWidgetBackgroundStyle(),'none')
+    api.saveWidgetBackgroundStyle('glass');api.saveWidgetBackgroundStyle('none');api.saveWidgetBackgroundStyle('bad');assert.equal(api.getWidgetBackgroundStyle(),'glass')
     storage.set('ai_usage_widget_background_v1','unrecognized');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
     api.saveSource(oldSource);scripting.Widget.family=oldFamily;scripting.Widget.parameter=oldParameter;scripting.Widget.displaySize=oldSize
     if(oldStyle==null)storage.delete('ai_usage_widget_background_v1');else storage.set('ai_usage_widget_background_v1',oldStyle)
-    console.log('PASS: none clear-only without background/Material/gradient/stroke; '+cases+' source/family/parameter/zero-null-fraction cases preserve all content; '+(baseline?'1.9.7 gradient/glass output and decoration byte-identical; ':'')+'accessory/error/empty paths unchanged; unknown enum defaults and invalid-save guards')
+    console.log('PASS: removed none safely defaults to gradient without storage migration/deletion; '+cases+' source/family/parameter/zero-null-fraction cases preserve all content; '+(baseline?'1.9.8 gradient/glass output and decoration byte-identical; ':'')+'accessory/error/empty paths unchanged; unknown enum defaults and invalid-save guards')
   }
   // Removal is UI-only: opening App in every source performs no storage/credential deletions.
   {
