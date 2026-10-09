@@ -6,7 +6,7 @@ import {
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.39"
+const VERSION = "1.7.40"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -258,22 +258,28 @@ function SettingsView() {
   }
 
   async function test() {
+    const requestSource = getSource()
     setBusy(true)
     setStatus("连接中…")
     setLines([])
     try {
       const r = await loadUsage()
+      // A late refresh from the previous source must not replace this source's account list/status.
+      if (!auth.alive || getSource() !== requestSource) return
       if (r.data) {
         setAccounts(r.data.accounts)
       }
-      if (r.data && !r.stale) {
+      if (r.data) {
         const d = r.data
-        setStatus("✅ 连接成功")
+        setStatus(r.stale ? "❌ 额度使用缓存：" + (r.error ?? "读取失败") : d.statistics?.error ? "⚠️ 额度已刷新；Parrot统计独立读取失败" : "✅ 连接成功")
         setLines([
+          `统计：Parrot全部账号汇总；额度：${requestSource === "official" ? "Codex官方OAuth" : "Parrot"}`,
+          ...(d.statistics ? [d.statistics.fetchedAt == null ? "Parrot统计未提供" : `Parrot统计${d.statistics.stale ? "缓存" : "更新时间"}：${new Date(d.statistics.fetchedAt).toLocaleString()}`,
+            ...(d.statistics.error ? [`Parrot统计错误：${d.statistics.error}`] : [])] : []),
           ...(d.today && d.month ? [
             `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
             `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
-          ] : ["官方额度接口未提供今日/本月Token及花费"]),
+          ] : ["Parrot今日/本月Token及花费统计未提供"]),
           ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "Codex"} ${a.name}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
         ])
         await Widget.reloadAll()

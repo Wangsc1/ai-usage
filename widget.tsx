@@ -165,9 +165,16 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
   </HStack>
 }
 
+function statsAge(at: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - at) / 60000))
+  return minutes < 60 ? `${minutes}分前` : minutes < 1440 ? `${Math.floor(minutes / 60)}小时前` : `${Math.floor(minutes / 1440)}天前`
+}
 function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   return <HStack spacing={3}>
     <Image systemName={stale ? "wifi.slash" : "arrow.triangle.2.circlepath"} font={6.3} foregroundStyle={stale ? ORANGE : SUB} />
+    {data.statistics ? <Text font={7} foregroundStyle={data.statistics.error ? ORANGE : SUB}>
+      {data.statistics.fetchedAt == null ? "统计P未提供" : `统计P${data.statistics.stale ? "缓存" : ""} ${data.statistics.stale ? statsAge(data.statistics.fetchedAt) : fmtTime(data.statistics.fetchedAt)}`}
+    </Text> : null}
     <Text font={9} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
   </HStack>
 }
@@ -386,7 +393,7 @@ function MediumTwo({ data }: { data: UsageData }) {
         modifiers={modifiers().padding({ bottom: 4 }).frame({ height: half }).frame({ maxWidth: "infinity", alignment: "topLeading" })}>
         {columns ? <PeriodStats columns={columns} labelFont={7 * statsScale} valueFont={8 * statsScale}
           gap={2} verticalGap={0} contentWidth={width} />
-          : <Text font={7} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
+          : <Text font={7} foregroundStyle={SUB}>Parrot今日/本月统计未提供</Text>}
       </VStack>
       <HStack spacing={0} modifiers={modifiers().frame({ height: half }).frame({ maxWidth: "infinity" })}>
         {data.accounts.map((acc, i) => <VStack
@@ -432,7 +439,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
     modifiers={modifiers().fixedSize({ horizontal: false, vertical: true })
       .frame({ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" })}>
     {m && month ? <PeriodStats labelFont={9} valueFont={11} sizingValueFont={12} gap={4} verticalGap={3} contentWidth={contentWidth}
-      columns={columns!} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
+      columns={columns!} /> : <Text font={10} foregroundStyle={SUB}>Parrot今日/本月统计未提供</Text>}
     <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} />
     <VStack alignment="leading" spacing={2} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
       {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={1}

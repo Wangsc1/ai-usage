@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.7.39"
+export const VERSION = "1.7.40"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -24,6 +24,7 @@ const KEY_BASE = "parrot_base_url"
 const KEY_MGMT = "parrot_management_key"
 const KEY_SESSION = "parrot_session_credential"
 const KEY_CACHE = "ai_usage_cache_v1"
+const KEY_STATS = "ai_usage_parrot_stats_v1"
 
 const TICKS_PER_USD = 10_000_000_000
 
@@ -61,8 +62,11 @@ export type UsageData = {
   monthByFamily: Record<string, Metric>
   accounts: Account[]
   fetchedAt: number
+  // Separate from quota freshness; only composed results carry this Parrot statistics status.
+  statistics?: { fetchedAt: number | null; stale: boolean; error: string | null }
 }
 
+type ParrotStats = Pick<UsageData, "today" | "month" | "todayByFamily" | "monthByFamily" | "fetchedAt">
 export type LoadResult = { data: UsageData | null; stale: boolean; error: string | null }
 
 const KEY_REFRESH = "ai_usage_refresh_minutes_v1"
@@ -136,6 +140,7 @@ export function clearConfig() {
   Keychain.remove(KEY_MGMT)
   Keychain.remove(KEY_SESSION)
   Storage.remove(KEY_CACHE)
+  Storage.remove(KEY_STATS)
   Storage.remove(KEY_CREDITS)
   Storage.remove("ai_usage_selected_accounts_v1")
   Storage.remove(KEY_REFRESH)
@@ -246,18 +251,59 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
   accounts.sort((x, y) =>
     x.provider === y.provider ? x.name.localeCompare(y.name) : x.provider === "claude" ? -1 : y.provider === "claude" ? 1 : x.provider.localeCompare(y.provider)
   )
-  return {
-    today: toMetric(today?.overall),
-    month: toMetric(month?.overall),
-    todayByFamily: toFamilies(today?.families),
-    monthByFamily: toFamilies(month?.families),
-    accounts,
-    fetchedAt: Date.now(),
+  return { ...parseStats(today, month), accounts }
+}
+
+function parseStats(today: any, month: any): ParrotStats {
+  const valid = (m: any) => m && ["total", "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "costTicks"]
+    .some(k => typeof m[k] === "number" && Number.isFinite(m[k]))
+  if (!valid(today?.overall) || !valid(month?.overall)) throw new Error("Parrot今日/本月统计未提供")
+  return { today: toMetric(today.overall), month: toMetric(month.overall),
+    todayByFamily: toFamilies(today.families), monthByFamily: toFamilies(month.families), fetchedAt: Date.now() }
+}
+function statsOnly(data: ParrotStats): ParrotStats {
+  return { today: data.today, month: data.month, todayByFamily: data.todayByFamily,
+    monthByFamily: data.monthByFamily, fetchedAt: data.fetchedAt }
+}
+async function loadParrotStats(): Promise<{ data: ParrotStats | null; error: string | null }> {
+  const { baseUrl, managementKey } = getConfig()
+  // Older Parrot full cache can seed statistics, but its accounts never enter the composed result.
+  const cached = Storage.get<ParrotStats>(KEY_STATS) ?? Storage.get<UsageData>(KEY_CACHE)
+  if (!baseUrl || !managementKey) return { data: null, error: "Parrot统计未配置" }
+  try {
+    let cred = Keychain.get(KEY_SESSION) || await login(baseUrl, managementKey)
+    const fetchStats = async () => {
+      const [today, month] = await Promise.all([
+        apiGet(baseUrl, "/stats/summary?period=today", cred),
+        apiGet(baseUrl, "/stats/summary?period=month", cred),
+      ])
+      return parseStats(today, month)
+    }
+    let data: ParrotStats
+    try { data = await fetchStats() }
+    catch (e) {
+      if (!(e instanceof HttpError) || e.status !== 401) throw e
+      Keychain.remove(KEY_SESSION)
+      cred = await login(baseUrl, managementKey)
+      data = await fetchStats()
+    }
+    Storage.set(KEY_STATS, data)
+    return { data, error: null }
+  } catch (e: any) {
+    return { data: cached?.today && cached?.month ? statsOnly(cached) : null, error: String(e?.message ?? "Parrot统计读取失败") }
   }
 }
 
 export async function loadUsage(): Promise<LoadResult> {
-  if (getSource() === "official") return loadOfficialUsage()
+  if (getSource() === "official") {
+    const [quota, stats] = await Promise.all([loadOfficialUsage(), loadParrotStats()])
+    if (!quota.data) return quota
+    return { ...quota, data: { ...quota.data,
+      today: stats.data?.today ?? null, month: stats.data?.month ?? null,
+      todayByFamily: stats.data?.todayByFamily ?? {}, monthByFamily: stats.data?.monthByFamily ?? {},
+      statistics: { fetchedAt: stats.data?.fetchedAt ?? null, stale: !!stats.error && !!stats.data, error: stats.error },
+    } }
+  }
   const { baseUrl, managementKey } = getConfig()
   const rawCache = Storage.get<UsageData>(KEY_CACHE)
   const cached = rawCache ? { ...rawCache, accounts: sortAccounts(rawCache.accounts, "parrot") } : null
@@ -280,6 +326,7 @@ export async function loadUsage(): Promise<LoadResult> {
     }
     data.accounts = syncAccountOrder(data.accounts, "parrot")
     Storage.set(KEY_CACHE, data)
+    Storage.set(KEY_STATS, statsOnly(data))
     return { data, stale: false, error: null }
   } catch (e: any) {
     const msg = e instanceof HttpError

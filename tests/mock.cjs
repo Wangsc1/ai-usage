@@ -19,7 +19,7 @@ function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
   let code = fs.readFileSync(name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
-  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout }')
+  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout, run as runWidget }')
   if (name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari, presentIsolatedAuthorization }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
@@ -111,7 +111,7 @@ async function main() {
   assert.ok(!storage.get('ai_usage_official_order_v1').includes('removed-id'))
    assert.equal(result.stale,false); assert.equal(result.data.today,null); assert.equal(result.data.month,null); assert.equal(refreshes,1)
   assert.equal(JSON.parse(kc.get('ai_usage_official_oauth_v1'))[0].refresh,'mock-rotated')
-  assert.ok(reads.every(k=>!k.startsWith('parrot_')))
+  assert.ok(reads.includes('parrot_base_url'));assert.ok(reads.includes('ai_usage_official_oauth_v1'))
   // 401 recovery once and absent refresh-token replacement retention.
   let denied=false; refreshes=0
   handler=async(u,o)=>{ if(u.endsWith('/oauth/token')) {refreshes++;return resp(200,{access_token:token()})} if(!denied){denied=true;return resp(401)}return resp(200,usage) }
@@ -175,7 +175,7 @@ async function main() {
     for(let i=0;i<(family==='systemSmall'?2:4);i++)assert.ok(allTexts.includes('匿名'+i))
     if(family==='systemSmall')assert.ok(!allTexts.includes('匿名2'))
     if(family==='systemLarge'){
-      assert.ok(texts.includes('官方未提供今日/本月Token与花费'));assert.ok(!texts.includes('$0.00'))
+      assert.ok(texts.includes('Parrot今日/本月统计未提供'));assert.ok(!texts.includes('$0.00'))
       const labels=tree.filter(x=>x.type==='HStack' && x.props.spacing===1 && Array.isArray(x.props.children) && x.props.children[0]?.props?.frame?.width===20)
       assert.equal(labels.length,8);assert.ok(labels.every(x=>x.props.children[1].props.frame.width===65))
     }
@@ -532,7 +532,7 @@ async function main() {
     scripting.Widget.family='systemMedium'
     for(const missing of [{...input,today:null},{...input,month:null},{...input,today:null,month:null}]){
       const absent=findTwo(expand(Root({data:missing,stale:false,error:null})))
-      assert.equal(absent.upper.props.children.props.children,'官方未提供今日/本月Token与花费')
+      assert.equal(absent.upper.props.children.props.children,'Parrot今日/本月统计未提供')
       assert.deepEqual(Array.from(absent.lower.props.children,c=>c.props.children.props.acc.id),selected)
       assert.ok(!expand(absent.upper).some(x=>x.type==='GeometryReader'))
     }
@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.39')
+  assert.equal(api.VERSION,'1.7.40')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -995,6 +995,111 @@ async function main() {
     if(mode!=='expired')assert.ok(!render().some(x=>x.type==='Text'&&x.props.contextMenu))
     else assert.equal(expand(render().find(x=>x.type==='Text'&&x.props.contextMenu).props.contextMenu.menuItems).find(x=>x.type==='Button').props.disabled,true)
   }
+  // Real loadUsage + widget run + App refresh: aggregate is always Parrot; quota source stays independent.
+  api.clearConfig();api.saveConfig('mock-base','mock-management');api.saveSource('official')
+  const seed=JSON.parse(kc.get('ai_usage_official_oauth_v1'))[0]
+  const quotaItems=[0,1,2].map(i=>({...seed,id:'combined-official-'+i,accountId:'combined-account-'+i,subject:'combined-user-'+i,
+    access:token('combined-account-'+i,'combined-user-'+i),expiresAt:now+3600000}))
+  kc.set('ai_usage_official_oauth_v1',JSON.stringify(quotaItems));storage.delete('ai_usage_official_cache_v1')
+  let statsFailure=false,quotaFailure=false,missingOverall=false,denyStatsOnce=false
+  const combinedHandler=async(u,o)=>{
+    if(u.startsWith('mock-base/api/management/v1/')){
+      assert.ok(!o.headers['ChatGPT-Account-ID']);assert.ok(!String(o.headers.Authorization).includes('mock.'))
+      if(u.endsWith('/auth/sessions')){assert.equal(JSON.parse(o.body).managementKey,'mock-management');return resp(201,{data:{credential:'combined-session'}})}
+      assert.equal(o.headers.Authorization,'Bearer combined-session')
+      if(u.includes('/stats/summary')){
+        if(denyStatsOnce){denyStatsOnce=false;return resp(401,{error:{code:'EXPIRED'}})}
+        if(statsFailure)return resp(503,{error:{code:'UNAVAILABLE'}})
+        return resp(200,{data:missingOverall?{overall:{}}:{overall:{total:u.includes("period=month")?46:23,inputTokens:u.includes("period=month")?2400:1200,outputTokens:3400,cacheReadTokens:500,cacheCreationTokens:600,costTicks:78000000000},families:{all:{total:23,inputTokens:1200}}}})
+      }
+      if(u.includes('/oauth/accounts?pageSize'))return resp(200,{data:{items:[{accountId:'combined-parrot',enabled:true,provider:'claude',displayName:'only-parrot',available:true}]}})
+      if(u.endsWith('/oauth/accounts/combined-parrot'))return resp(200,{data:{usageWindows:[],resetCreditCount:0}})
+      throw new Error('unexpected Parrot path')
+    }
+    assert.ok(u.startsWith('https://chatgpt.com/backend-api/wham/'))
+    assert.ok(o.headers.Authorization.startsWith('Bearer mock.'));assert.ok(o.headers['ChatGPT-Account-ID'].startsWith('combined-account-'))
+    return quotaFailure?resp(503):resp(200,{...usage,rate_limit_reset_credits:{available_count:1}})
+  }
+  handler=combinedHandler;before=calls.length
+  let combined=await api.loadUsage(),batch=calls.slice(before)
+  assert.equal(combined.stale,false);assert.equal(combined.data.today.totalTokens,5700);assert.equal(combined.data.today.requests,23);assert.equal(combined.data.today.costUsd,7.8);assert.equal(combined.data.month.requests,46);assert.equal(combined.data.month.totalTokens,6900)
+  assert.equal(combined.data.accounts.length,3);assert.ok(combined.data.accounts.every(a=>a.id.startsWith('combined-official-')))
+  assert.equal(batch.filter(c=>c.url.includes('/stats/summary')).length,2);assert.equal(batch.filter(c=>c.url.endsWith('/auth/sessions')).length,1)
+  assert.equal(batch.filter(c=>c.url.includes('/oauth/accounts')).length,0)
+  assert.equal(batch.filter(c=>c.url.endsWith('/usage')).length,3)
+  assert.equal(storage.get('ai_usage_official_cache_v1').today,null);assert.equal(storage.get('ai_usage_cache_v1'),undefined)
+  assert.equal(storage.get('ai_usage_parrot_stats_v1').accounts,undefined)
+  const statsTimestamp=combined.data.statistics.fetchedAt,quotaTimestamp=combined.data.fetchedAt
+  // Every layout that owns statistics uses the actual combined load result, not filtered account values.
+  for(const [family,param] of [['systemSmall','1'],['systemMedium','1,2'],['systemMedium','1,2,3'],['systemLarge','']]){
+    scripting.Widget.family=family;scripting.Widget.parameter=param
+    const tree=expand(Root({data:combined.data,stale:false,error:null})),texts=tree.filter(x=>x.type==='Text').map(x=>[].concat(x.props.children).join(''))
+    assert.ok(texts.includes(api.fmtTokens(5700)));assert.ok(texts.includes(api.fmtTokens(6900)));assert.ok(texts.includes(api.fmtUsd(7.8)))
+    assert.ok(!tree.includes('only-parrot'));assert.ok(texts.some(x=>x.startsWith('统计P ')))
+  }
+  // The executable widget entry itself must call the composed loader.
+  let presented;scripting.Widget.present=(tree,options)=>{presented={tree,options}}
+  before=calls.length;await load('widget.tsx').runWidget()
+  assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
+  assert.equal(presented.tree.props.data.today.requests,23);assert.ok(presented.tree.props.data.accounts.every(a=>a.id.startsWith('combined-official-')))
+  assert.equal(presented.options.reloadPolicy.policy,'after')
+  // App uses the same composed path and reports source/freshness independently.
+  states.length=0;authUI=render();before=calls.length
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  authUI=render();assert.ok(authUI.includes('统计：Parrot全部账号汇总；额度：Codex官方OAuth'))
+  assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('23 次')))
+  assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
+  // Only statistics fails: quota refresh is still current; stats cache has its OWN unchanged time.
+  now+=60000;statsFailure=true;combined=await api.loadUsage()
+  assert.equal(combined.stale,false);assert.equal(combined.error,null);assert.equal(combined.data.today.totalTokens,5700)
+  assert.equal(combined.data.statistics.stale,true);assert.equal(combined.data.statistics.fetchedAt,statsTimestamp)
+  assert.ok(combined.data.fetchedAt>quotaTimestamp);assert.ok(combined.data.statistics.error)
+  assert.ok(expand(Root({data:combined.data,stale:false,error:null})).some(x=>typeof x==='string'&&x.startsWith('统计P缓存 ')))
+  for(const [minutes,label] of [[1,'1分前'],[120,'2小时前'],[2880,'2天前']]){
+    const ageData={...combined.data,statistics:{...combined.data.statistics,fetchedAt:now-minutes*60000}}
+    assert.ok(expand(Root({data:ageData,stale:false,error:null})).includes('统计P缓存 '+label))
+  }
+  states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  assert.ok(render().includes('⚠️ 额度已刷新；Parrot统计独立读取失败'))
+  // No statistics cache, malformed response, and no config all yield unknown, never fabricated zero.
+  storage.delete('ai_usage_parrot_stats_v1');combined=await api.loadUsage();assert.equal(combined.data.today,null);assert.equal(combined.data.month,null);assert.equal(combined.data.statistics.fetchedAt,null)
+  assert.ok(expand(Root({data:combined.data,stale:false,error:null})).includes('统计P未提供'))
+  statsFailure=false;missingOverall=true;combined=await api.loadUsage();assert.equal(combined.data.today,null);assert.equal(combined.data.statistics.error,'Parrot今日/本月统计未提供');missingOverall=false
+  kc.delete('parrot_base_url');before=calls.length;combined=await api.loadUsage()
+  assert.equal(combined.data.today,null);assert.equal(combined.data.statistics.error,'Parrot统计未配置');assert.equal(combined.data.accounts.length,3)
+  assert.equal(calls.slice(before).filter(c=>c.url.startsWith('mock-base')).length,0)
+  api.saveConfig('mock-base','mock-management')
+  // Only official quota fails: current stats + official cached accounts, NOT Parrot accounts.
+  quotaFailure=true;combined=await api.loadUsage()
+  assert.equal(combined.stale,true);assert.equal(combined.data.statistics.stale,false);assert.equal(combined.data.today.totalTokens,5700)
+  assert.ok(combined.data.accounts.every(a=>a.id.startsWith('combined-official-')))
+  storage.delete('ai_usage_official_cache_v1');combined=await api.loadUsage();assert.equal(combined.data,null);assert.ok(combined.error)
+  // Stats 401 refresh retries once without interfering with official credentials.
+  quotaFailure=false;denyStatsOnce=true;before=calls.length;const credsBefore=kc.get('ai_usage_official_oauth_v1');combined=await api.loadUsage();batch=calls.slice(before)
+  assert.equal(combined.data.statistics.error,null);assert.equal(batch.filter(c=>c.url.endsWith('/auth/sessions')).length,1)
+  assert.equal(batch.filter(c=>c.url.includes('/stats/summary')).length,4);assert.equal(kc.get('ai_usage_official_oauth_v1'),credsBefore)
+  // Switching to Parrot follows original full loader with exactly two summaries, no extra stats pass.
+  api.saveSource('parrot');before=calls.length;combined=await api.loadUsage();batch=calls.slice(before)
+  assert.equal(combined.data.accounts[0].id,'combined-parrot');assert.equal(batch.filter(c=>c.url.includes('/stats/summary')).length,2)
+  assert.ok(batch.every(c=>c.url.startsWith('mock-base')));assert.equal(combined.data.today.requests,23)
+  assert.equal(api.cachedAccounts()[0].id,'combined-parrot')
+  api.saveSource('official');assert.ok(api.cachedAccounts().every(a=>a.id.startsWith('combined-official-')))
+  // A delayed official App refresh must not replace the newly selected Parrot account list.
+  states.length=0;authUI=render();let finishOldQuota;let held=false
+  handler=async(u,o)=>{if(u.endsWith('/usage')&&!held){held=true;await new Promise(resolve=>finishOldQuota=resolve)}return combinedHandler(u,o)}
+  const delayedRefresh=authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  for(let i=0;i<8&&!finishOldQuota;i++)await Promise.resolve();assert.ok(finishOldQuota)
+  await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+  const beforeOldReturns=JSON.stringify(render().filter(x=>typeof x==='string'))
+  finishOldQuota();await delayedRefresh
+  assert.equal(JSON.stringify(render().filter(x=>typeof x==='string')),beforeOldReturns)
+  assert.ok(render().some(x=>typeof x==='string'&&x.includes('only-parrot')))
+  handler=combinedHandler;api.saveSource('official')
+  // Full Parrot cache can seed legacy stats fallback but its account IDs never leak.
+  storage.delete('ai_usage_parrot_stats_v1');statsFailure=true;combined=await api.loadUsage()
+  assert.equal(combined.data.today.requests,23);assert.equal(combined.data.statistics.stale,true);assert.ok(combined.data.accounts.every(a=>a.id.startsWith('combined-official-')))
+  api.clearConfig();assert.equal(storage.get('ai_usage_parrot_stats_v1'),undefined);assert.ok(api.officialCached())
+  console.log('PASS: real composed loader/App/widget entry; Parrot aggregate unfiltered; stats-only 2 requests official/no account fetch; Parrot no duplicate; isolated headers/caches/accounts; missing/failure/cache times/401; quota failure independent; all statistics layouts preserve source')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
