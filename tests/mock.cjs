@@ -450,7 +450,7 @@ async function main() {
     assert.ok(small)
     assert.equal(JSON.stringify(cells[0].props.children.type(cells[0].props.children.props).props.columns),JSON.stringify(small.type(small.props).props.columns))
     assert.ok(!statsTree.some(x=>x.type==='GeometryReader'))
-    assert.equal(cells[0].props.padding.bottom,4)
+    assert.equal(cells[0].props.padding.bottom,7)
     assert.equal(statsTree[0].props.frame.width,155)
     scripting.Widget.family='systemMedium';scripting.Widget.parameter=parameter
     for(const missing of [{...input,today:null},{...input,month:null},{...input,today:null,month:null}]){
@@ -512,10 +512,18 @@ async function main() {
     const cells=findCells(expand(Root({data:singleData,stale:false,error:null}))).cells
     const stats=expand(cells[0].props.children)
     checkStatsLayout(stats,4,layout.labelFont,layout.valueFont,2,0)
+    assert.equal(grid.props.children[2].props.children[0].props.alignment,'bottom')
+    for(const cell of cells.slice(0,2)){
+      assert.equal(cell.props.padding.bottom,7);assert.equal(cell.props.frame.alignment,'bottomLeading')
+    }
+    const upperQuad=cells[1].props.children.type(cells[1].props.children.props)
+    assert.equal(upperQuad.props.frame.maxHeight,undefined)
+    assert.equal(upperQuad.props.fixedSize.vertical,true) // no expanded center-aligned Quad between bar and shared bottom anchor
+    assert.ok(layout.half-7-natural>=-1) // conservative line model may extend 1pt into existing Root12 top inset, not towards divider
     assert.equal(cells[1].props.padding.bottom,7)
     assert.equal(cells[2].props.padding.top,7);assert.equal(cells[3].props.padding.top,7)
     assert.equal(grid.props.children[1].props.frame.height,1)
-    console.log('MODEL: Medium3 height='+height+', stats='+natural+', divider='+layout.half+', bottom clearance='+(layout.half-natural)+'; NOT pixel proof')
+    console.log('MODEL: Medium3 height='+height+', stats='+natural+', divider='+layout.half+', shared bottom anchor='+(layout.half-7)+', divider clearance=7'+'; NOT pixel proof')
   }
   scripting.Widget.displaySize={width:358,height:376}
   // Direct pre-change baseline: ALL other sizes and Medium selections 1/2/4 remain byte-identical component trees.
@@ -529,7 +537,12 @@ async function main() {
     scripting.Widget.family='systemMedium';scripting.Widget.parameter='3,1,4'
     const currentCells=findCells(expand(Root({data:singleData,stale:false,error:null}))).cells
     const oldCells=findCells(expand(baseline({data:singleData,stale:false,error:null}))).cells
-    assert.equal(JSON.stringify(currentCells.slice(1)),JSON.stringify(oldCells.slice(1))) // upper-right and both lower accounts untouched
+    assert.equal(JSON.stringify(currentCells.slice(2)),JSON.stringify(oldCells.slice(2))) // both lower accounts untouched
+    assert.equal(JSON.stringify(expand(currentCells[0].props.children)),JSON.stringify(expand(oldCells[0].props.children))) // statistics fonts/gaps/data unchanged
+    const nowQuad=currentCells[1].props.children.type(currentCells[1].props.children.props)
+    const oldQuad=oldCells[1].props.children.type(oldCells[1].props.children.props)
+    assert.equal(JSON.stringify(expand(nowQuad.props.children)),JSON.stringify(expand(oldQuad.props.children))) // title/reset/quota labels/LCD/bar internal tree unchanged
+    assert.equal(JSON.stringify(currentCells[1].props.padding),JSON.stringify(oldCells[1].props.padding)) // right insets unchanged
     const currentGrid=findCells(expand(Root({data:singleData,stale:false,error:null}))).grid
     const previousGrid=findCells(expand(baseline({data:singleData,stale:false,error:null}))).grid
     assert.equal(JSON.stringify(currentGrid.props.children.slice(0,2)),JSON.stringify(previousGrid.props.children.slice(0,2))) // line positions untouched
@@ -543,7 +556,7 @@ async function main() {
       const input={...singleData,accounts:accounts.slice(0,count)}
       assert.equal(JSON.stringify(expand(Root({data:input,stale:false,error:null}))),JSON.stringify(expand(baseline({data:input,stale:false,error:null}))))
     }
-    console.log('PASS: Medium exactly2 full-width compact six-column stats and lower-only vertical divider; exactly3 final selection (default/parameters/dedup) shared SmallStats top-left, Quads in selected order, missing statistics truthful; Medium1/2/4 and Small/Large exact pre-change trees; Medium3 only stats compacted, all other cells and dividers unchanged')
+    console.log('PASS: Medium exactly2 full-width compact six-column stats and lower-only vertical divider; exactly3 final selection (default/parameters/dedup) shared SmallStats top-left, Quads in selected order, missing statistics truthful; Medium1/2/4 and Small/Large exact pre-change trees; Medium3 top cells share bottom anchor/padding7, intrinsic right Quad; fonts/data/window contents and lower cells/dividers unchanged')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -630,7 +643,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.18')
+  assert.equal(api.VERSION,'1.7.19')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')

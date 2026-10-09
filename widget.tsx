@@ -306,9 +306,11 @@ function QuadWindow({ label, w, fmt, s, fixedLcd = false, rowToBarGap = s.gap }:
   </VStack>
 }
 
-function Quad({ acc, s, fixedLcd = false }: { acc?: Account; s: Scale; fixedLcd?: boolean }) {
+function Quad({ acc, s, fixedLcd = false, intrinsic = false }: { acc?: Account; s: Scale; fixedLcd?: boolean; intrinsic?: boolean }) {
   if (!acc) return <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}><Spacer /></VStack>
-  return <VStack alignment="leading" spacing={s.gap + 1} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
+  return <VStack alignment="leading" spacing={s.gap + 1}
+    fixedSize={intrinsic ? { horizontal: false, vertical: true } : undefined}
+    frame={intrinsic ? { maxWidth: "infinity", alignment: "leading" as any } : { maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
     {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} fixedLcd={fixedLcd} />)}
   </VStack>
@@ -320,16 +322,17 @@ function QuadGrid({ accounts, s, fixedLcd = false, statsData }: { accounts: Acco
   const pad = s.gap * 2 + 3
   const cell = (acc?: Account, top = false, left = false, statistics = false) =>
     <VStack
-      padding={{ top: top ? 0 : pad, bottom: top ? (statistics ? 4 : pad) : 0, leading: left ? 0 : 10, trailing: left ? 10 : 0 }}
-      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
+      padding={{ top: top ? 0 : pad, bottom: top ? pad : 0, leading: left ? 0 : 10, trailing: left ? 10 : 0 }}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: statsData && top ? "bottomLeading" as any : "topLeading" as any }}
     >
-      {statistics && statsData ? <SmallStats data={statsData} medium /> : <Quad acc={acc} s={s} fixedLcd={fixedLcd} />}
+      {statistics && statsData ? <SmallStats data={statsData} medium />
+        : statsData && top ? <Quad acc={acc} s={s} fixedLcd={fixedLcd} intrinsic /> : <Quad acc={acc} s={s} fixedLcd={fixedLcd} />}
     </VStack>
   return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
     <Rectangle fill={DIVIDER} frame={{ width: 1, maxHeight: "infinity" }} />
     <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
     <VStack spacing={0}>
-      <HStack spacing={0}>{statsData ? cell(undefined, true, true, true) : cell(a[0], true, true)}{cell(a[statsData ? 0 : 1], true, false)}</HStack>
+      <HStack alignment={statsData ? "bottom" : undefined} spacing={0}>{statsData ? cell(undefined, true, true, true) : cell(a[0], true, true)}{cell(a[statsData ? 0 : 1], true, false)}</HStack>
       <HStack spacing={0}>{cell(a[statsData ? 1 : 2], false, true)}{cell(a[statsData ? 2 : 3], false, false)}</HStack>
     </VStack>
   </ZStack>
