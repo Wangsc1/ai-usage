@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, getWidgetBackgroundStyle, createWidgetGlass } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, getWidgetBackgroundStyle } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -494,6 +494,19 @@ function AccessoryRoot({ data, error, family }: { data: UsageData | null; error:
   return <AccessoryRectangular acc={acc} />
 }
 
+const DOCK_MATERIAL = "ultraThinMaterial"
+// Rounded-rect layers do not intercept taps. Highlight gets brighter at the top edge; stroke is a top-bright gradient hairline.
+function DockBackgroundLayers() {
+  return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
+    <RoundedRectangle cornerRadius={22}
+      fill={{ gradient: [{ color: "rgba(255,255,255,0.16)", location: 0 }, { color: "rgba(255,255,255,0.04)", location: 1 }], startPoint: { x: 0.5, y: 0 }, endPoint: { x: 0.5, y: 1 } } as any}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }} />
+    <RoundedRectangle cornerRadius={22}
+      stroke={{ shapeStyle: { gradient: [{ color: "rgba(255,255,255,0.75)", location: 0 }, { color: "rgba(255,255,255,0.18)", location: 1 }], startPoint: { x: 0.5, y: 0 }, endPoint: { x: 0.5, y: 1 } } as any, strokeStyle: { lineWidth: 1 } }}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity" }} />
+  </ZStack>
+}
+
 function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; error: string | null }) {
   if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} />
   let body: VirtualNode
@@ -508,13 +521,11 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />
   }
-  const glass = getWidgetBackgroundStyle() === "glass" ? createWidgetGlass().glass : null
-  // background accepts VirtualNode. Only the clear background shape receives glassEffect;
-  // the content never receives opacity/glass foreground modifiers. Shape tracks host bounds.
-  const backgroundProps = glass ? {
-    widgetBackground: "clear",
-    background: <Rectangle fill="clear" frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      glassEffect={{ glass, shape: "containerRelative" }} />,
+  // Dock-style optional background: documented system Material as widgetBackground (hidden by the system in accented mode),
+  // plus non-text decorative layers. Content nodes and their colors/layout are untouched.
+  const backgroundProps = getWidgetBackgroundStyle() === "glass" ? {
+    widgetBackground: { style: DOCK_MATERIAL, shape: "containerRelative" },
+    background: <DockBackgroundLayers />,
   } : { widgetBackground: BG }
   return <ZStack
     padding={{ horizontal: 14, vertical: 12 }}

@@ -8,9 +8,9 @@
 
 默认浅色/深色自适应渐变背景（日间左上近白，右下冰蓝渐变）、数码管剩余百分比、分段进度条与重置倒计时。
 
-App“小组件背景”可选 **渐变背景 / 玻璃背景（实验）**，选择仅保存在此脚本并请求重载主屏小组件，不改系统全局外观，锁屏不受影响。实验分支只在检测到iOS/iPadOS 26及以上、且Scripting原生`UIGlass.clear().interactive(false)`可构造时应用：合法背景Shape使用`glassEffect`与`containerRelative`，移除原渐变，不对文字/图标/整个内容应用透明度或玻璃效果。不使用低alpha色块或磨砂Material冒充玻璃；旧系统或API明确不可用时完整保留原渐变，App显示原因。
+App“小组件背景”可选 **渐变背景（默认） / 玻璃背景（Dock样式）**。选择仅保存在此脚本并请求重载主屏小组件，不更改系统全局外观，锁屏不受影响。Dock样式使用Scripting文档支持的系统`ultraThinMaterial`作为`widgetBackground`（形状`containerRelative`），再叠加极轻白色渐变提亮与顶部更亮的细白色渐变描边；不使用UIGlass，不改文字、图标、颜色、字号或布局。
 
-**玻璃为局部Widget宿主兼容试验，尚未证实能透出壁纸。** 一般View支持原生玻璃不等于Widget宿主支持；系统着色、宿主底色和背景移除行为可能影响结果。若选中后仍有底色或效果不明显，需在iOS26真机验收，不会自动偷换材质；可随时切回渐变。依据Scripting公开[Liquid Glass](https://scriptingapp.github.io/guide/View%20Modifiers/Liquid%20Glass/Liquid%20Glass%20Effect/index.md)、[background VirtualNode](https://scriptingapp.github.io/guide/View%20Modifiers/foregroundStyle%20%26%20background.md)与[Shape](https://scriptingapp.github.io/guide/Types/Shape.md)契约。
+Material是否透出壁纸、透明程度以及系统着色模式下的背景显示由iOS决定，不保证完全透明；深色壁纸或深色模式下的可读性需真机确认。切回渐变即可恢复默认外观。依据Scripting公开[ShapeStyle Material](https://scriptingapp.github.io/guide/Types/ShapeStyle.md)、[widgetBackground](https://scriptingapp.github.io/guide/View%20Modifiers/widgetBackground.md)与[Shapes](https://scriptingapp.github.io/guide/Views/Shapes/index.md)契约。
 
 | 尺寸 | 内容 |
 | --- | --- |

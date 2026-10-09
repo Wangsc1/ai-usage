@@ -3,11 +3,11 @@ import {
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, clearConfig, getWidgetBackgroundStyle, saveWidgetBackgroundStyle, WidgetBackgroundStyle, createWidgetGlass, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, clearConfig, getWidgetBackgroundStyle, saveWidgetBackgroundStyle, WidgetBackgroundStyle, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.3"
+const VERSION = "1.9.4"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
@@ -190,7 +190,6 @@ function SettingsView() {
   const [lines, setLines] = useState<string[]>([])
   const [updateMsg, setUpdateMsg] = useState("")
   const [backgroundStyle, setBackgroundStyle] = useState<WidgetBackgroundStyle>(getWidgetBackgroundStyle())
-  const glassSupport = backgroundStyle === "glass" ? createWidgetGlass() : null
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
@@ -504,13 +503,12 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>
 
-      <Section header={<Text>小组件背景</Text>} footer={<Text>仅改变此脚本主屏小组件，不更改系统全局外观；锁屏不受影响。默认保留渐变。玻璃背景为iOS/iPadOS 26原生UIGlass.clear兼容实验，实际能否透出壁纸由Widget宿主决定，须真机验收；不使用半透明颜色或磨砂材质模拟。不支持时保留渐变。</Text>}>
+      <Section header={<Text>小组件背景</Text>} footer={<Text>仅改变此脚本主屏小组件，不更改系统全局外观；锁屏不受影响。默认保留渐变。Dock样式使用系统磨砂材质并叠加细高光描边；是否透出壁纸、透明度及着色模式下的显示由系统决定，不保证完全透明。</Text>}>
         <Picker title="背景样式" value={backgroundStyle} onChanged={async (value: string) => {
           saveWidgetBackgroundStyle(value as WidgetBackgroundStyle); setBackgroundStyle(getWidgetBackgroundStyle()); await Widget.reloadAll()
         }}>
-          <Text tag="gradient">渐变背景</Text><Text tag="glass">玻璃背景（实验）</Text>
+          <Text tag="gradient">渐变背景</Text><Text tag="glass">玻璃背景（Dock样式）</Text>
         </Picker>
-        {glassSupport?.error ? <Text font={12} foregroundStyle="secondaryLabel">{glassSupport.error}</Text> : null}
       </Section>
 
       <Section header={<Text>小组件刷新</Text>} footer={<Text>这是请求刷新间隔，实际时间由iOS调度，可能延后。更短间隔会增加网络请求与耗电。</Text>}>
