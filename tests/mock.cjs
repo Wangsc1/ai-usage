@@ -693,7 +693,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.6')
+  assert.equal(api.VERSION,'1.9.7')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1218,7 +1218,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.6')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.7')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1452,7 +1452,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.6'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.7'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1756,7 +1756,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.6')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.7')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1766,7 +1766,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.6 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.7 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1873,14 +1873,14 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.9.6'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.9.7'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.6'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.7'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
@@ -2276,6 +2276,32 @@ async function main() {
     scripting.Widget.reloadAll=oldReload;api.saveSource(oldSource);scripting.Widget.family=oldFamily;scripting.Widget.parameter=oldParameter;states.length=0
   }
   console.log('PASS: Glass compatibility trial = clear widgetBackground + native ultraThinMaterial RoundedRectangle in ordinary background; white highlight fill removed, gradient hairline unchanged; no UIGlass dependency; default gradient identical to pre-Dock baseline; only background differs; accessory unchanged; Picker labels/persistence/reload/no network or credential change; NOT native visual proof')
+  // Removal is UI-only: opening App in every source performs no storage/credential deletions.
+  {
+    const source=api.getSource(),oldRemove=context.Storage.remove,oldKeyRemove=context.Keychain.remove
+    let storageDeletes=0,keyDeletes=0
+    context.Storage.remove=k=>{storageDeletes++;return oldRemove(k)}
+    context.Keychain.remove=k=>{keyDeletes++;return oldKeyRemove(k)}
+    const cfg=JSON.stringify(api.getConfig()),credentials=JSON.stringify([...kc.entries()])
+    for(const selected of ['parrot','official','sub2api']){
+      api.saveSource(selected);states.length=0;const ui=render()
+      assert.ok(!ui.some(x=>x.type==='Button'&&x.props.title==='清除Parrot配置'))
+      assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('清除Parrot配置')))
+      assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='账号来源'))
+      assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='背景样式'))
+      assert.equal(JSON.stringify(api.getConfig()),cfg)
+    }
+    assert.equal(storageDeletes,0);assert.equal(keyDeletes,0);assert.equal(JSON.stringify([...kc.entries()]),credentials)
+    const original=api.getConfig(),session=kc.get('parrot_session_credential'),beforeStore=JSON.stringify([...storage.entries()])
+    api.saveConfig(original.baseUrl,original.managementKey)
+    assert.equal(JSON.stringify(api.getConfig()),cfg);assert.equal(storageDeletes,0);assert.equal(JSON.stringify([...storage.entries()]),beforeStore)
+    if(session!=null)kc.set('parrot_session_credential',session)
+    // Shared low-level helper retained, but App no longer imports or invokes it.
+    assert.equal(typeof api.clearConfig,'function')
+    assert.ok(!fs.readFileSync(path.join(root,'index.tsx'),'utf8').includes('clearConfig'))
+    context.Storage.remove=oldRemove;context.Keychain.remove=oldKeyRemove;api.saveSource(source);states.length=0
+  }
+  console.log('PASS: clear-Parrot entry absent in all App source selections; rendering deletes no Storage/Keychain state; Parrot config load/save intact and unchanged credentials preserved; low-level helper retained but not reachable from App')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

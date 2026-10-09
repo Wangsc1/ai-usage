@@ -3,11 +3,11 @@ import {
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, clearConfig, getWidgetBackgroundStyle, saveWidgetBackgroundStyle, WidgetBackgroundStyle, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, getWidgetBackgroundStyle, saveWidgetBackgroundStyle, WidgetBackgroundStyle, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.6"
+const VERSION = "1.9.7"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
@@ -534,20 +534,6 @@ function SettingsView() {
         {updateMsg ? <Text>{updateMsg}</Text> : null}
       </Section>
 
-      {source === "parrot" ? <Section>
-        <Button
-          title={"清除Parrot配置"}
-          action={async () => {
-            clearConfig()
-            setHasKey(false)
-            setLines([])
-            setAccounts([])
-            setRefreshMinutes("15")
-            setStatus("已清除配置")
-            await Widget.reloadAll()
-          }}
-        />
-      </Section> : null}
     </Form>
   </NavigationStack>
 }
