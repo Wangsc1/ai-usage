@@ -6,7 +6,7 @@ import {
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.31"
+const VERSION = "1.7.32"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -234,7 +234,7 @@ function SettingsView() {
             `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
             `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
           ] : ["官方额度接口未提供今日/本月Token及花费"]),
-          ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "Codex"} ${getSource() === "official" ? a.name : a.name.replace(/@.*$/, "")}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
+          ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "Codex"} ${a.name.replace(/@.*$/, "")}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
         ])
         await Widget.reloadAll()
       } else {
