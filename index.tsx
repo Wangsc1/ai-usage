@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.1"
+const VERSION = "1.9.2"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
@@ -399,7 +399,7 @@ function SettingsView() {
     >
       <Section header={<Text>数据来源</Text>} footer={<Text>切换不删除另一来源的配置、账号或选择。普通 API Key 不能查询 Parrot 管理接口。</Text>}>
         <LabeledContent title="当前脚本版本" value={VERSION} />
-        <Picker title={"来源"} value={source} onChanged={changeSource} disabled={busy}>
+        <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot密钥</Text>
           <Text tag={"official"}>官方OAuth（Codex/Claude）</Text>
           <Text tag="sub2api">Sub2API</Text>

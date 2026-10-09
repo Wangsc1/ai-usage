@@ -695,7 +695,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.1')
+  assert.equal(api.VERSION,'1.9.2')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -864,7 +864,7 @@ async function main() {
     await authUI.find(x=>x.type==='Button'&&x.props.title==='检查授权').props.action();assert.equal(calls.length,before) // busy lock blocks competing checks
     if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
-    else await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    else await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
     browserClose();await action;assert.equal(calls.length,before);api.saveSource('official')
   }
   states.length=0;namedFlow({},'ui-pending');context.Safari.present=async()=>{}
@@ -943,7 +943,7 @@ async function main() {
     assert.ok(closeBrowser);before=calls.length
     if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
-    else await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    else await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
     const afterControl=calls.length
     await pendingAction;assert.equal(calls.length,afterControl);assert.equal(instances.at(-1).disposed,1)
     assert.equal(browserTimers.size,0);closeBrowser() // native dismiss may settle later; cancellation already released and completed
@@ -990,7 +990,7 @@ async function main() {
     const beforeCopies=copied.length, beforeStorage=storageWrites.length
     await copy.props.action();assert.equal(copied.length,beforeCopies+1);assert.equal(copied.at(-1),codeText.props.children[1]);assert.ok(!copied.at(-1).includes('一次性代码'));assert.equal(storageWrites.length,beforeStorage)
     if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
-    else if(mode==='source')await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    else if(mode==='source')await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
     else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
     else if(mode==='expired')now+=15*60*1000
     else await authUI.find(x=>x.type==='Button'&&x.props.title==='检查授权').props.action()
@@ -1167,7 +1167,7 @@ async function main() {
   handler=async(u,o)=>{if(u.endsWith('/usage')&&!held){held=true;await new Promise(resolve=>finishOldQuota=resolve)}return combinedHandler(u,o)}
   const delayedRefresh=authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
   for(let i=0;i<8&&!finishOldQuota;i++)await Promise.resolve();assert.ok(finishOldQuota)
-  await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+  await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
   const beforeOldReturns=JSON.stringify(render().filter(x=>typeof x==='string'))
   finishOldQuota();await delayedRefresh
   assert.equal(JSON.stringify(render().filter(x=>typeof x==='string')),beforeOldReturns)
@@ -1220,7 +1220,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.1')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.2')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1369,7 +1369,7 @@ async function main() {
     const credentialSnapshot=kc.get('ai_usage_claude_oauth_v1'),pending=authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
     for(let i=0;i<12&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
     if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
-    else if(mode==='source')await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    else if(mode==='source')await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
     else if(mode==='provider')authUI.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('codex')
     else authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
     releaseClaudeRequest();holdToken=false;await pending
@@ -1454,7 +1454,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.1'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.2'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1664,7 +1664,7 @@ async function main() {
     for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
     authUI=render()
     if(stop==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
-    else authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    else authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
     assert.ok(!render().includes('正在交换Claude令牌（不重复提交）'))
     stageServer.handlers['/callback'](actualCallback)
     releaseClaudeRequest();holdToken=false;releaseClaudeRequest=null
@@ -1758,7 +1758,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.1')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.2')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1768,7 +1768,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.1 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.2 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1875,14 +1875,14 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.9.1'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.9.2'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.1'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.2'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
@@ -2134,7 +2134,7 @@ async function main() {
     scripting.Widget.reloadAll=reload;scripting.Widget.present=present
     // App exposes independent selectors, saved-key redaction, Sub2API save/reload, and does not modify quota when choosing stats.
     states.length=0;let ui=render();const selectors=ui.filter(x=>x.type==='Picker');assert.ok(selectors.some(x=>x.props.title==='统计来源'))
-    const quotaSelector=selectors.find(x=>x.props.title==='来源');assert.ok(expand(quotaSelector).some(x=>x==='Sub2API'))
+    const quotaSelector=selectors.find(x=>x.props.title==='账号来源');assert.ok(expand(quotaSelector).some(x=>x==='Sub2API'));assert.ok(!selectors.some(x=>x.props.title==='来源'))
     assert.ok(ui.some(x=>x.type==='SecureField'&&x.props.title==='Sub2API管理员密钥'&&x.props.value===''))
     assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('mock-admin')))
     ui.find(x=>x.type==='TextField'&&x.props.title==='Sub2API地址').props.onChanged('https://sub.example.test/')
@@ -2144,7 +2144,7 @@ async function main() {
     assert.ok(render().some(x=>x.type==='SecureField'&&x.props.title==='Sub2API管理员密钥'&&x.props.value===''))
     await selectors.find(x=>x.props.title==='统计来源').props.onChanged('parrot');assert.equal(api.getSource(),'sub2api');assert.equal(api.getStatisticsSource(),'parrot')
     ui=render();assert.ok(ui.some(x=>x.type==='TextField'&&x.props.title==='地址')) // Parrot config visible for selected stats
-    await ui.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('official');assert.equal(api.getStatisticsSource(),'parrot');assert.equal(api.getSub2APIConfig().adminKey,'mock-admin')
+    await ui.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('official');assert.equal(api.getStatisticsSource(),'parrot');assert.equal(api.getSub2APIConfig().adminKey,'mock-admin')
     // Config changes erase only Sub2API caches, and pending old reads cannot repopulate them.
     api.saveSource('sub2api');api.saveStatisticsSource('sub2api');holdStats=true;releaseStats=[];const oldFlight=api.loadUsage()
     for(let i=0;i<40&&releaseStats.length<2;i++)await Promise.resolve();assert.equal(releaseStats.length,2)
