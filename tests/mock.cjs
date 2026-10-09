@@ -21,7 +21,7 @@ function load(name) {
   let code = fs.readFileSync(name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
   if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout }')
   if (name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
-  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari }')
+  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari, presentIsolatedAuthorization }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
   const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : load(n.replace('./','') + '.ts')
@@ -674,7 +674,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.33')
+  assert.equal(api.VERSION,'1.7.34')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -830,7 +830,7 @@ async function main() {
   states.length=0;context.Safari.present=async()=>{};namedFlow({name:'自动授权名称',email:'automatic@example.test'},'automatic-user')
   let reloadCount=0;scripting.Widget.reloadAll=async()=>{reloadCount++}
   let authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
   authUI=render();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('automatic@example.test')))
   assert.ok(api.officialCached().accounts.some(a=>a.name==='automatic@example.test'));assert.ok(reloadCount>0)
   assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
@@ -838,7 +838,7 @@ async function main() {
   for(const mode of ['cancel','dismiss','source']){
     states.length=0;namedFlow({},'abandoned-'+mode);context.Safari.present=()=>new Promise(r=>browserClose=r)
     authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
-    authUI=render();const action=authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+    authUI=render();const action=authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
     await Promise.resolve();before=calls.length
     await authUI.find(x=>x.type==='Button'&&x.props.title==='检查授权').props.action();assert.equal(calls.length,before) // busy lock blocks competing checks
     if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
@@ -849,11 +849,62 @@ async function main() {
   states.length=0;namedFlow({},'ui-pending');context.Safari.present=async()=>{}
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
   handler=async()=>resp(403)
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
   authUI=render();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.ok(authUI.some(x=>typeof x==='string'&&x.startsWith('等待授权')))
   context.Safari.present=async()=>{throw new Error('mock failure')}
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
   authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
+  // Documented-shape WebViewController: each attempt has its own non-persistent store and finally disposal.
+  const instances=[];let presentBrowser=async()=>{},loadBrowser=async()=>true
+  scripting.WebViewController=class {
+    constructor(options){this.options=options;this.disposed=0;this.urls=[];instances.push(this)}
+    async loadURL(url){this.urls.push(url);return loadBrowser(this)}
+    async present(options){this.presentation=options;await presentBrowser(this)}
+    dispose(){this.disposed++}
+  }
+  const {presentIsolatedAuthorization}=load('index.tsx')
+  for(let i=0;i<2;i++)await presentIsolatedAuthorization()
+  assert.notEqual(instances[0],instances[1])
+  for(const b of instances){assert.equal(b.options.ephemeral,true);assert.deepEqual(b.urls,['https://auth.openai.com/codex/device']);assert.equal(b.disposed,1)}
+  for(const failure of ['loadFalse','loadThrow','presentThrow']){
+    loadBrowser=async()=>{if(failure==='loadThrow')throw new Error('mock-load');return failure!=='loadFalse'}
+    presentBrowser=async()=>{if(failure==='presentThrow')throw new Error('mock-present')}
+    await assert.rejects(()=>presentIsolatedAuthorization());assert.equal(instances.at(-1).disposed,1)
+  }
+  loadBrowser=async()=>true;presentBrowser=async()=>{}
+  api.saveSource('official');namedFlow({},'isolated-interval')
+  const intervalDevice=await api.beginDeviceLogin();intervalDevice.nextPoll=now+3000
+  handler=async()=>resp(403);before=calls.length;waited=[]
+  assert.equal(await checkAfterSafari(intervalDevice,()=>true,async ms=>{waited.push(ms);now+=ms},presentIsolatedAuthorization),'pending')
+  assert.deepEqual(waited,[3000]);assert.equal(calls.length,before+1);assert.equal(intervalDevice.cancelled,false);assert.equal(instances.at(-1).disposed,1)
+  api.saveSource('official');states.length=0;namedFlow({email:'isolated@example.test'},'isolated-user')
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='Safari备用授权页'))
+  assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('外部无痕授权网址')))
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  assert.equal(instances.at(-1).disposed,1)
+  assert.ok(api.officialCached().accounts.some(a=>a.name==='isolated@example.test'))
+  // Default temporary-browser action remains inert after cancel, source change or settings dismissal.
+  for(const mode of ['cancel','source','dismiss']){
+    api.saveSource('official');states.length=0;namedFlow({},'isolated-abandoned-'+mode)
+    let closeBrowser;presentBrowser=()=>new Promise(resolve=>closeBrowser=resolve)
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+    authUI=render();const pendingAction=authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+    for(let i=0;i<8&&!closeBrowser;i++)await Promise.resolve()
+    assert.ok(closeBrowser);before=calls.length
+    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+    else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
+    else await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    const afterControl=calls.length
+    closeBrowser();await pendingAction;assert.equal(calls.length,afterControl);assert.equal(instances.at(-1).disposed,1)
+  }
+  api.saveSource('official');states.length=0;namedFlow({},'isolated-failure');presentBrowser=async()=>{throw new Error('blocked identity provider')}
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();before=calls.length
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  assert.equal(calls.length,before);assert.equal(instances.at(-1).disposed,1)
+  authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='Safari备用授权页'))
+  console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
   console.log('PASS: Safari dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
   console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
   console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 widget families, App foreground always normal, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')

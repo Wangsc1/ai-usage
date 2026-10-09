@@ -1,12 +1,12 @@
 import {
   Button, Form, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
-  ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
+  ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable, WebViewController,
 } from "scripting"
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.33"
+const VERSION = "1.7.34"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -109,10 +109,20 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
   </Form>
 }
 
-// One foreground check after the documented Safari dismissal Promise, no polling loop.
+const DEVICE_URL = "https://auth.openai.com/codex/device"
+async function presentIsolatedAuthorization() {
+  // A fresh non-persistent cookie store for every attempt; never touch the system browser's cookies.
+  const browser = new WebViewController({ ephemeral: true })
+  try {
+    if (!await browser.loadURL(DEVICE_URL)) throw new Error("授权页面加载失败")
+    await browser.present({ navigationTitle: "官方授权（临时会话）" })
+  } finally { browser.dispose() }
+}
+// One foreground check after either browser closes, no polling loop.
 async function checkAfterSafari(d: DeviceLogin, active: () => boolean,
-  wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms))) {
-  try { await Safari.present("https://auth.openai.com/codex/device") }
+  wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  present: () => Promise<void> = () => Safari.present(DEVICE_URL)) {
+  try { await present() }
   catch { throw new Error("无法打开官方授权页，请稍后重试") }
   if (!active() || d.cancelled) return null
   const remaining = Math.max(0, d.nextPoll - Date.now())
@@ -170,7 +180,7 @@ function SettingsView() {
     finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
   }
 
-  async function checkOfficial(browser = false) {
+  async function checkOfficial(browser: boolean | "safari" = false) {
     const d = auth.device
     if (!d || auth.running) return
     auth.running = true
@@ -178,7 +188,8 @@ function SettingsView() {
     const epoch = auth.epoch
     const active = () => auth.alive && auth.device === d && auth.epoch === epoch && getSource() === "official"
     try {
-      const result = browser ? await checkAfterSafari(d, active) : await checkDeviceLogin(d)
+      const result = browser ? await checkAfterSafari(d, active, undefined,
+        browser === "safari" ? () => Safari.present(DEVICE_URL) : presentIsolatedAuthorization) : await checkDeviceLogin(d)
       if (!active() || result == null) return
       if (result === "pending") setStatus("等待授权：请完成官方页面操作后再次检查（15分钟内有效）")
       else {
@@ -273,11 +284,13 @@ function SettingsView() {
         </Picker>
       </Section>
 
-      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>在官方页面登录你要添加的账号，可先退出浏览器的其他账号。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
+      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>默认临时会话不保留登录Cookie，便于添加不同账号；仅支持独立Codex登录。Google/Apple等可能限制嵌入登录，可用Safari备用（可能复用旧会话），或在外部无痕窗口打开下方网址，输入本次代码后返回手动检查。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
         {!device ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy} /> : <>
           <Text>一次性代码：{device.code}</Text>
           <Text>仅输入你自己在此脚本发起的代码，有效期15分钟。</Text>
           <Button title={"打开官方授权页"} action={() => checkOfficial(true)} disabled={busy} />
+          <Button title={"Safari备用授权页"} action={() => checkOfficial("safari")} disabled={busy} />
+          <Text font={12} foregroundStyle="secondaryLabel">外部无痕授权网址：https://auth.openai.com/codex/device；输入本次代码后返回点“检查授权”。无需退出已授权账号。</Text>
           <Button title={"检查授权"} action={() => checkOfficial()} disabled={busy} />
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />
         </>}
