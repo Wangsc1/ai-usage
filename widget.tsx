@@ -1,5 +1,7 @@
-import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
+import { Button, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
 import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName } from "./api"
+
+import { RefreshUsageIntent } from "./app_intents"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
 type DC = { light: string; dark: string }
@@ -167,7 +169,9 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
 
 function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   return <HStack spacing={3}>
-    <Image systemName={stale ? "wifi.slash" : "arrow.triangle.2.circlepath"} font={6.3} foregroundStyle={stale ? ORANGE : SUB} />
+    <Button intent={RefreshUsageIntent(undefined)} buttonStyle="plain">
+      <Image systemName="arrow.triangle.2.circlepath" font={6.3} foregroundStyle={SUB} />
+    </Button>
     <Text font={9} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
   </HStack>
 }

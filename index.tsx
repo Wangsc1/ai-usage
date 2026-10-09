@@ -7,10 +7,10 @@ import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPc
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.8.12"
+const VERSION = "1.8.13"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
-const FILES = ["api.ts", "widget.tsx", "index.tsx"]
+const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
 
 function newer(a: string, b: string) {
   const pa = a.split(".").map(Number), pb = b.split(".").map(Number)

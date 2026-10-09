@@ -1,4 +1,6 @@
-# ai-usage
+# AI 用量小组件
+
+**Codex / Claude 官方 OAuth 额度 + Parrot 今日 / 本月汇总统计**
 
 基于 [Scripting](https://apps.apple.com/app/id6479691128) 的 iPhone 桌面小组件。App 可选择 **Parrot密钥** 或 **官方OAuth（Codex/Claude）** 作为账号额度来源；账号配置、缓存与排序独立保存，切换不会删除另一来源的数据。今日/本月统计始终读取已配置的Parrot全部账号汇总，与额度来源无关。
 
@@ -22,12 +24,12 @@
 - 小组件中账号停用时，Codex/Claude 标题与图标置灰；App 账号列表保持正常颜色。不显示“已停用”文字，也不修改远端账号状态。
 - 剩余额度 >60% 绿色、21%–60% 橙色、≤20% 红色；未知显示 `--`。
 - 重置卡位于账号标题行右端，右边对齐百分比，与用户名同字号、垂直居中对齐；有无重置卡时标题均保持相同的垂直对齐。只有明确有效数量大于0时显示 `RE:N`；0、未知或未提供时隐藏。所有尺寸保持一致，不兑换或消耗重置卡。
-- 底部显示账号额度最后成功刷新时间和双箭头循环图标；额度请求失败时保留当前来源缓存并显示断网图标。小组件底栏仅保留图标及这一刷新时间；App状态区显示独立统计错误与完整更新时间。
+- 底部保留唯一额度刷新时间与可点击的双箭头刷新按钮，不显示Wi-Fi图标。点击按钮通过AppIntent直接读取当前来源额度及Parrot汇总统计并重载小组件，不打开设置、不改变小组件其他区域的点击行为；失败沿用缓存及原成功时间。App状态区继续显示独立统计错误与完整更新时间。
 - 默认每15分钟刷新，可选5、15、30、60分钟；两个来源共用此设置，实际刷新由 iOS 调度，可能延后。
 
 ## 安装与 Parrot 配置
 
-在 iPhone 上导入：
+在 iPhone 上导入（交互按钮需要iOS 17+及支持AppIntent的Scripting）：
 
 ```
 https://scripting.fun/import_scripts?urls=["https%3A%2F%2Fgithub.com%2FWangsc1%2Fai-usage"]
@@ -91,7 +93,7 @@ Claude协议依据：官方npm发行包 [@anthropic-ai/claude-code](https://www.
 
 ## 更新与安全
 
-App“更新” → “检查更新”，从本仓库下载 `api.ts`、`widget.tsx`、`index.tsx`，全部下载成功后写入。配置与凭据不在代码中。更新后退出并重新运行。本机 `script.json` 不覆盖，以保留导入元数据。
+App“更新” → “检查更新”，从本仓库下载 `api.ts`、`app_intents.tsx`、`widget.tsx`、`index.tsx`，全部下载成功后写入。AppIntent必须定义于`app_intents.tsx`，由Scripting在`app_intents`环境执行；旧三文件更新器首次升级后退出并重新运行，再点一次“强制重新下载”，或直接重新导入完整脚本，确保新增文件齐全。配置与凭据不在代码中。更新后退出并重新运行。本机 `script.json` 不覆盖，以保留导入元数据。交互执行受iOS后台时长与网络调度限制，点击后的真机刷新及钥匙串可用性需要设备验收。
 
 - 地址、Parrot 管理密钥/会话以及独立官方 token 都只存本机脚本隔离 Keychain，默认不开启 iCloud 同步。Codex与Claude使用分别隔离的钥匙串条目；排序只存账号ID；额度缓存仅保存显示所需的邮箱或未提供提示，不缓存token。Codex解析已授权token中的邮箱声明；Claude使用官方profile获取真实账号UUID、组织UUID和邮箱。授权码、state与PKCE只在本次内存流程中使用，不写日志或持久存储。
 - 不向 Parrot、GitHub 或第三方发送官方 token，不将凭据写入日志/源码。Parrot 管理密钥具有完整管理权限，勿分享填好凭据的脚本或钥匙串数据。

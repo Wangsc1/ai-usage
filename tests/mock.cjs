@@ -8,6 +8,9 @@ class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])) 
 const modules = {}
 const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { if(k==='WebViewController')return undefined;return o[k] || k } })
 scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
+const registeredIntents=new Map()
+scripting.AppIntentProtocol={AppIntent:0}
+scripting.AppIntentManager={register:options=>{registeredIntents.set(options.name,options);return params=>({script:'mock-script',name:options.name,protocol:options.protocol,params})}}
 const jsx = (type, props, key) => key === undefined ? ({type, props}) : ({type, props, key})
 const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise, setTimeout: (fn,ms)=>{now+=ms;Promise.resolve().then(fn)}, Safari: {present: async()=>{}},
   Keychain: { get(k) { reads.push(k); return kc.get(k) ?? null }, set(k,v) { kc.set(k,v); return true }, remove(k) { kc.delete(k); return true } },
@@ -21,10 +24,10 @@ function load(name) {
   let code = fs.readFileSync(name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
   if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout, run as runWidget }')
   if (name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
-  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari, presentIsolatedAuthorization }')
+  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari, presentIsolatedAuthorization, updateFromGitHub }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
-  const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : load(n.replace('./','') + '.ts')
+  const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : load(n.replace('./','') + (fs.existsSync(path.join(root,n.replace('./','')+'.tsx'))?'.tsx':'.ts'))
   vm.runInContext(`(function(require,module,exports){${out.outputText}\n})`,context)(req,m,m.exports)
   return m.exports
 }
@@ -254,8 +257,8 @@ async function main() {
     scripting.Widget.family=family
     for(const stale of [false,true]) {
       const images=expand(Root({data:result.data,stale,error:null})).filter(x=>x.type==='Image')
-      const icon=images.find(x=>x.props.systemName===(stale?'wifi.slash':'arrow.triangle.2.circlepath'))
-      assert.ok(icon);assert.equal(icon.props.font,6.3);assert.ok(!images.some(x=>x.props.systemName==='arrow.clockwise'))
+      const icon=images.find(x=>x.props.systemName===('arrow.triangle.2.circlepath'))
+      assert.ok(icon);assert.equal(icon.props.font,6.3);assert.ok(!images.some(x=>x.props.systemName==='arrow.clockwise'||x.props.systemName==='wifi.slash'))
     }
   }
   // Provider title AND explicit SVG fill respect enabled, never infer disabled from 0%/available/stale.
@@ -692,12 +695,12 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.12')
+  assert.equal(api.VERSION,'1.8.13')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
-  assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
+  assert.ok(index.includes('const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
   // Local widget aliases: never modify account records, stable-ID/source scoped, preserve all input except trim.
   const alias='🦜 工作@local · '+ '名字'.repeat(80)
   api.saveWidgetName('p0','  '+alias+'  ','parrot');api.saveWidgetName('p0','官方🐻','official')
@@ -1031,17 +1034,17 @@ async function main() {
   assert.equal(storage.get('ai_usage_parrot_stats_v1').accounts,undefined)
   function assertOriginalRefreshFooter(data,stale){
     const tree=expand(Root({data,stale,error:null}))
-    const footers=tree.filter(x=>x.type==='HStack'&&x.props.spacing===3&&Array.isArray(x.props.children)&&x.props.children[0]?.type==='Image'&&x.props.children[0]?.props.font===6.3)
+    const footers=tree.filter(x=>x.type==='HStack'&&x.props.spacing===3&&Array.isArray(x.props.children)&&x.props.children[0]?.type==='Button'&&x.props.children[0]?.props.children?.type==='Image')
     assert.equal(footers.length,1)
-    const children=Array.from(footers[0].props.children);assert.deepEqual(children.map(x=>x.type),['Image','Text'])
-    assert.equal(children[0].props.systemName,stale?'wifi.slash':'arrow.triangle.2.circlepath');assert.equal(children[0].props.font,6.3)
-    assert.equal(children[0].props.foregroundStyle.light,stale?'#D9770B':'#5E6068');assert.equal(children[0].props.foregroundStyle.dark,stale?'#FF9F0A':'#8E8E93')
+    const children=Array.from(footers[0].props.children);assert.deepEqual(children.map(x=>x.type),['Button','Text']);assert.equal(children[0].props.intent.name,'RefreshUsageIntent');assert.equal(children[0].props.action,undefined);assert.equal(children[0].props.buttonStyle,'plain')
+    assert.equal(children[0].props.children.props.systemName,'arrow.triangle.2.circlepath');assert.equal(children[0].props.children.props.font,6.3)
+    assert.equal(children[0].props.children.props.foregroundStyle.light,'#5E6068');assert.equal(children[0].props.children.props.foregroundStyle.dark,'#8E8E93')
     assert.equal(children[1].props.children,api.fmtTime(data.fetchedAt));assert.equal(children[1].props.font,9);assert.equal(children[1].props.monospacedDigit,true)
     assert.equal(children[1].props.foregroundStyle.light,'#5E6068');assert.equal(children[1].props.foregroundStyle.dark,'#8E8E93')
     assert.ok(!tree.some(x=>typeof x==='string'&&x.includes('统计P')))
   }
   assert.ok(!fs.readFileSync(path.join(root,'widget.tsx'),'utf8').includes('statsAge'))
-  const statsTimestamp=combined.data.statistics.fetchedAt,quotaTimestamp=combined.data.fetchedAt
+  let statsTimestamp=combined.data.statistics.fetchedAt;const quotaTimestamp=combined.data.fetchedAt
   // Every layout that owns statistics uses the actual combined load result, not filtered account values.
   for(const [family,param] of [['systemSmall','1'],['systemMedium','1,2'],['systemMedium','1,2,3'],['systemLarge','']]){
     scripting.Widget.family=family;scripting.Widget.parameter=param
@@ -1056,7 +1059,34 @@ async function main() {
       for(const stale of [false,true])assertOriginalRefreshFooter(footerData,stale)
     }
   }
-  console.log('PASS: restored footer in all families: ONLY original icon+data.fetchedAt time; spacing3/font6.3/font9/monospaced/color and stale wifi unchanged; no 统计P/cache-age/unavailable extra Text; statistics composition retained')
+  console.log('PASS: interactive footer all families: ONLY refresh Button+data.fetchedAt time; spacing3/font6.3/font9/monospaced/SUB unchanged; stale shows refresh not wifi; no 统计P/extra Text')
+  const clickableTree=expand(Root({data:combined.data,stale:false,error:null}))
+  const refreshButton=clickableTree.find(x=>x.type==='Button'&&x.props.intent?.name==='RefreshUsageIntent')
+  assert.ok(refreshButton);assert.equal(refreshButton.props.intent.params,undefined)
+  assert.equal(clickableTree.filter(x=>x.type==='Button'&&x.props.intent?.name==='RefreshUsageIntent').length,1)
+  assert.equal(registeredIntents.get('RefreshUsageIntent').protocol,0)
+  const performRefresh=()=>registeredIntents.get(refreshButton.props.intent.name).perform(refreshButton.props.intent.params)
+  const previousReload=scripting.Widget.reloadAll;let intentReloads=0
+  scripting.Widget.reloadAll=async()=>{intentReloads++}
+  now+=1000;before=calls.length;await performRefresh()
+  assert.equal(intentReloads,1);assert.equal(calls.slice(before).filter(x=>x.url.includes('/stats/summary')).length,2)
+  assert.equal(calls.slice(before).filter(x=>x.url.endsWith('/usage')).length,3)
+  assert.ok(api.officialCached().fetchedAt>quotaTimestamp)
+  const refreshedAt=api.officialCached().fetchedAt,statsAt=storage.get('ai_usage_parrot_stats_v1').fetchedAt
+  now+=1000;quotaFailure=true;statsFailure=true;before=calls.length
+  await performRefresh();assert.equal(intentReloads,2)
+  assert.equal(api.officialCached().fetchedAt,refreshedAt);assert.equal(storage.get('ai_usage_parrot_stats_v1').fetchedAt,statsAt)
+  assert.equal(calls.slice(before).filter(x=>x.url.includes('/stats/summary')).length,2)
+  const failedIntentResult=await api.loadUsage();assert.equal(failedIntentResult.stale,true)
+  assertOriginalRefreshFooter(failedIntentResult.data,true)
+  // Same registered intent resolves current source at execution, not a serialized token/source parameter.
+  quotaFailure=false;statsFailure=false;api.saveSource('parrot');before=calls.length
+  await performRefresh();assert.equal(intentReloads,3)
+  assert.ok(calls.slice(before).some(x=>x.url.includes('/oauth/accounts?pageSize')))
+  assert.equal(calls.slice(before).filter(x=>x.url.includes('/stats/summary')).length,2)
+  assert.ok(calls.slice(before).every(x=>x.url.startsWith('mock-base')))
+  api.saveSource('official');storage.delete('ai_usage_cache_v1');scripting.Widget.reloadAll=previousReload
+  console.log('PASS: rendered Button.intent executes registered app_intents perform; official quota+Parrot stats real loader requests then Widget.reloadAll; failed requests retain cache timestamps and still reload; Parrot current-source execution; one button/no whole-widget action/no settings')
   // The executable widget entry itself must call the composed loader.
   let presented;scripting.Widget.present=(tree,options)=>{presented={tree,options}}
   before=calls.length;await load('widget.tsx').runWidget()
@@ -1069,6 +1099,7 @@ async function main() {
   authUI=render();assert.ok(authUI.includes('统计：Parrot全部账号汇总；额度：官方OAuth（Codex/Claude）'))
   assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('23 次')))
   assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
+  statsTimestamp=storage.get('ai_usage_parrot_stats_v1').fetchedAt
   // Only statistics fails: quota refresh is still current; stats cache has its OWN unchanged time.
   now+=60000;statsFailure=true;combined=await api.loadUsage()
   assert.equal(combined.stale,false);assert.equal(combined.error,null);assert.equal(combined.data.today.totalTokens,5700)
@@ -1161,7 +1192,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.12')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.13')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1395,7 +1426,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.12'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.13'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1694,7 +1725,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.12')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.13')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1704,7 +1735,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.12 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.13 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1804,6 +1835,23 @@ async function main() {
   api.logoutOfficial(targetResetID);releaseReset();await assert.rejects(()=>lateReset,/已退出/)
   kc.set('ai_usage_claude_oauth_v1',queryCredentials);handler=claudeHandler
   console.log('PASS: official cedar_ember schema/grants resets_left sum (missing unknown/explicit zero/positive/invalid/overflow); inline or one optional GET only; HTTP/network/JSON failures do not block quota; no reset/claim POST; logout late-query guard; RE>0 existing layout rules preserved')
+  // New updater must install the mandatory AppIntent file before its dependent widget.
+  const savedFileManager=context.FileManager,savedScript=scripting.Script,updateWrites=[],updateReads=[]
+  scripting.Script={directory:'/mock-script'};context.FileManager={writeAsString:async(p,b)=>updateWrites.push({p,b})}
+  handler=async(u,o)=>{
+    assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
+    const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
+    return name==='script.json'?resp(200,{version:'1.8.13'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+  }
+  await load('index.tsx').updateFromGitHub(true)
+  assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
+  assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
+  assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
+  updateWrites.length=0
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.8.13'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
+  scripting.Script=savedScript;context.FileManager=savedFileManager
+  console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
