@@ -1,10 +1,24 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.7.28"
+export const VERSION = "1.7.29"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
+
+// Local widget-only names: stable account ID within the explicitly separate data source.
+const widgetNameKey = (source: DataSource) => `ai_usage_widget_names_${source}_v1`
+export function getWidgetName(id: string, source: DataSource = getSource()): string {
+  const names = Storage.get<Record<string, string>>(widgetNameKey(source)) ?? {}
+  return Object.prototype.hasOwnProperty.call(names, id) && typeof names[id] === "string" ? names[id] : ""
+}
+export function saveWidgetName(id: string, value: string, source: DataSource = getSource()) {
+  const names = { ...(Storage.get<Record<string, string>>(widgetNameKey(source)) ?? {}) }
+  const name = value.trim()
+  if (name) Object.defineProperty(names, id, { value: name, enumerable: true, configurable: true, writable: true })
+  else delete names[id]
+  Storage.set(widgetNameKey(source), names)
+}
 
 const KEY_BASE = "parrot_base_url"
 const KEY_MGMT = "parrot_management_key"
@@ -126,6 +140,7 @@ export function clearConfig() {
   Storage.remove("ai_usage_selected_accounts_v1")
   Storage.remove(KEY_REFRESH)
   Storage.remove(orderKey("parrot"))
+  Storage.remove(widgetNameKey("parrot"))
 }
 
 // ---------- 请求 ----------
@@ -368,6 +383,7 @@ export function officialCached(): UsageData | null {
 }
 export function logoutOfficial(id: string) {
   persist(credentials().filter(x => x.id !== id))
+  saveWidgetName(id, "", "official")
   const cache = officialCached()
   if (cache) Storage.set(CACHE, { ...cache, accounts: cache.accounts.filter(a => a.id !== id) })
   const order = Storage.get<string[]>(orderKey("official"))

@@ -3,10 +3,10 @@ import {
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource } from "./api"
+import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.28"
+const VERSION = "1.7.29"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -86,6 +86,27 @@ function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (n
       </LazyVGrid> : <Text>连接成功后显示账号列表</Text>}
     </VStack>
   </ScrollView>
+}
+
+function WidgetNamePage({ account, source, onSaved }: { account: Account; source: DataSource; onSaved: () => void }) {
+  const close = Navigation.useDismiss()
+  const [name, setName] = useState(getWidgetName(account.id, source))
+  const [saved, setSaved] = useState(false)
+  async function save() {
+    saveWidgetName(account.id, name, source)
+    setName(name.trim())
+    setSaved(true)
+    onSaved()
+    await Widget.reloadAll()
+  }
+  return <Form navigationTitle="小组件用户名" navigationBarTitleDisplayMode="inline">
+    <Section header={<Text>{account.name}</Text>} footer={<Text>仅修改本机小组件显示，所有尺寸共用。留空保存恢复原名；不修改远端账号。两种来源独立保存。</Text>}>
+      <TextField title="小组件用户名" value={name} onChanged={value => { setName(value); setSaved(false) }} prompt="留空使用原名" />
+      <Button title="保存" action={save} />
+      {saved ? <Text>已保存</Text> : null}
+    </Section>
+    <Button title="完成" action={close} />
+  </Form>
 }
 
 function SettingsView() {
@@ -255,7 +276,13 @@ function SettingsView() {
       </Section>
 
       <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。点“账号排序”进入单独页面，长按账号卡片拖动排序，松手即保存。默认按此列表顺序显示，小号前2个、中大号前4个，不按启用状态过滤。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。两种来源的排序独立保存。</Text>}>
-        {accounts.map((a, i) => <Text key={a.id}>{accountLabel(a, i)}</Text>)}
+        {accounts.map((a, i) => <NavigationLink key={a.id}
+          destination={<WidgetNamePage account={a} source={source} onSaved={() => setAccounts(cachedAccounts())} />}>
+          <VStack alignment="leading" spacing={3}>
+            <Text>{accountLabel(a, i)}</Text>
+            <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, source) || "使用原名（点此设置）"}</Text>
+          </VStack>
+        </NavigationLink>)}
         {accounts.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} onSaved={setAccounts} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}

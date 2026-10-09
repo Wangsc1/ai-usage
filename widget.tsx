@@ -1,5 +1,5 @@
 import { HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName } from "./api"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
 type DC = { light: string; dark: string }
@@ -141,7 +141,7 @@ function ProviderIcon({ provider, size, muted = false }: { provider: string; siz
 }
 
 function shortName(acc: Account) {
-  return acc.name.replace(/@.*$/, "")
+  return getWidgetName(acc.id) || acc.name.replace(/@.*$/, "")
 }
 
 function providerName(p: string) {

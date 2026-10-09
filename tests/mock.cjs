@@ -21,7 +21,7 @@ function load(name) {
   let code = fs.readFileSync(name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
   if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout }')
   if (name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
-  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView }')
+  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
   const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : load(n.replace('./','') + '.ts')
@@ -125,7 +125,11 @@ async function main() {
   handler=async()=>resp(500,{error:'private-secret'}); result=await official.loadOfficialUsage(); assert.equal(result.stale,true); assert.ok(!result.error.includes('private-secret'))
   handler=async()=>resp(401); result=await official.loadOfficialUsage(); assert.equal(result.stale,true); assert.match(result.error,/登录已失效/)
   // Logout only this account; cache/order pruned, obsolete selected IDs untouched and ignored.
+  api.saveWidgetName(first.id,'官方退出清除','official');api.saveWidgetName(first.id,'同ID另一来源','parrot')
+  handler=async u=>u.endsWith('/usage')?resp(200,{rate_limit:usage.rate_limit}):resp(404)
+  await official.loadOfficialUsage();assert.equal(api.getWidgetName(first.id,'official'),'官方退出清除') // refresh does not rewrite alias store
   const legacyOfficial=[first.id]; storage.set('ai_usage_official_selected_v1',legacyOfficial); official.logoutOfficial(first.id)
+  assert.equal(api.getWidgetName(first.id,'official'),'');assert.equal(api.getWidgetName(first.id,'parrot'),'同ID另一来源')
   assert.equal(official.officialAccounts().length,1); assert.ok(!official.officialCached().accounts.some(a=>a.id===first.id)); assert.ok(!storage.get('ai_usage_official_order_v1').includes(first.id))
   assert.equal(storage.get('ai_usage_official_selected_v1'),legacyOfficial)
   assert.ok(!api.widgetAccounts(official.officialCached().accounts).some(a=>a.id===first.id))
@@ -157,7 +161,7 @@ async function main() {
       assert.equal(JSON.stringify(expand(current)),JSON.stringify(expand(previous)),family+' '+parameter+' only light BG changed')
     }
     scripting.Widget.parameter=''
-    console.log('PASS: light gradient reversed with blue plateau through .65 / near-white at1; all other colors, dark gradient and 16 layout trees equal 1.7.26')
+    console.log('PASS: gradient stop checks and 16 no-alias layout trees equal supplied pre-change baseline; dark background unchanged')
   }
   for (const family of ['systemSmall','systemMedium','systemLarge']) {
     scripting.Widget.family=family
@@ -618,7 +622,7 @@ async function main() {
   scripting.useObservable=init=>{const i=obsIndex++;if(!(i in obsStore)){const o={value:typeof init==='function'?init():init,setValue(v){o.value=v}};obsStore[i]=o}return obsStore[i]}
   scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
   const ids=()=>Array.from(api.cachedAccounts(),a=>a.id)
-  const link=()=>render().find(x=>x.type==='NavigationLink')
+  const link=()=>render().find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
   assert.ok(link());assert.equal(link().props.children.props.children,'账号排序')
   const openPage=()=>{obsStore=[];obsIndex=0;const d=link().props.destination;assert.equal(d.props.source,'parrot');return d}
   const pageTree=d=>{obsIndex=0;return expand(d.type(d.props))}
@@ -669,12 +673,57 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.28')
+  assert.equal(api.VERSION,'1.7.29')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
   assert.ok(index.includes('const FILES = ["api.ts", "widget.tsx", "index.tsx"]')); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
+  // Local widget aliases: never modify account records, stable-ID/source scoped, preserve all input except trim.
+  const alias='🦜 工作@local · '+ '名字'.repeat(80)
+  api.saveWidgetName('p0','  '+alias+'  ','parrot');api.saveWidgetName('p0','官方🐻','official')
+  assert.equal(api.getWidgetName('p0','parrot'),alias);assert.equal(api.getWidgetName('p0','official'),'官方🐻')
+  assert.equal(api.getWidgetName('toString','parrot'),'')
+  api.saveWidgetName('__proto__','独立ID','parrot');assert.equal(api.getWidgetName('__proto__','parrot'),'独立ID')
+  const remoteAccounts=JSON.stringify(accounts)
+  for(const source of ['parrot','official']){
+    api.saveSource(source)
+    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemMedium','1,2'],['systemMedium','1,2,3'],['systemMedium','1,2,3,4'],['systemLarge','1,2,3,4']]){
+      scripting.Widget.family=family;scripting.Widget.parameter=parameter
+      api.saveAccountOrder(accounts.map(a=>a.id),source)
+      const tree=expand(Root({data:{...singleData,accounts},stale:false,error:null}))
+      const name=api.getWidgetName('p0',source)
+      assert.ok(tree.includes(name),family+parameter+source)
+      const text=tree.find(x=>x.type==='Text'&&x.props.children===name);assert.equal(text.props.lineLimit,1)
+      assert.ok(tree.includes('Codex'))
+    }
+    api.saveAccountOrder(accounts.map(a=>a.id).reverse(),source)
+    const fresh=accounts.map(a=>({...a,name:a.name+' refreshed'}))
+    assert.equal(api.getWidgetName(api.sortAccounts(fresh,source).find(a=>a.id==='p0').id,source),source==='parrot'?alias:'官方🐻')
+  }
+  assert.equal(JSON.stringify(accounts),remoteAccounts)
+  api.saveSource('parrot');api.saveWidgetName('p0',' \n ','parrot');assert.equal(api.getWidgetName('p0','parrot'),'')
+  const email={...accounts[0],name:'real@example.com'}
+  const title=expand(AccountTitle({acc:email,font:12}));assert.ok(title.includes('real'));assert.ok(!title.includes(alias))
+  scripting.Widget.parameter='';assert.ok(expand(Root({data:{...data,accounts:[]},stale:false,error:null})).includes('没有订阅账号'))
+  // Real TextField state/edit/save interaction; editing alone does not persist.
+  const {WidgetNamePage}=load('index.tsx');states.length=0
+  let callbacks=0,reloads=0;scripting.Widget.reloadAll=async()=>{reloads++}
+  const editor=()=>{hook=0;return expand(WidgetNamePage({account:accounts[0],source:'parrot',onSaved:()=>callbacks++}))}
+  let editTree=editor();editTree.find(x=>x.type==='TextField').props.onChanged('  🐈 别名@keep  ')
+  assert.equal(api.getWidgetName('p0','parrot'),'')
+  editTree=editor();await editTree.find(x=>x.type==='Button'&&x.props.title==='保存').props.action()
+  assert.equal(api.getWidgetName('p0','parrot'),'🐈 别名@keep');assert.equal(callbacks,1);assert.equal(reloads,1);assert.ok(editor().includes('已保存'))
+  editor().find(x=>x.type==='TextField').props.onChanged('   ')
+  await editor().find(x=>x.type==='Button'&&x.props.title==='保存').props.action();assert.equal(api.getWidgetName('p0','parrot'),'')
+  api.saveWidgetName('p0',alias,'parrot');storage.set('ai_usage_cache_v1',{...data,accounts});states.length=0
+  const aliasUI=render();assert.ok(aliasUI.some(x=>typeof x==='string'&&x.includes('匿名0')))
+  assert.ok(aliasUI.includes(alias));assert.ok(aliasUI.some(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='WidgetNamePage'))
+  // Logout is explicitly official-scoped even when another source is currently active.
+  api.saveWidgetName('p1','保留官方','official');api.logoutOfficial('p0')
+  assert.equal(api.getWidgetName('p0','official'),'');assert.equal(api.getWidgetName('p1','official'),'保留官方');assert.equal(api.getWidgetName('p0','parrot'),alias)
+  api.clearConfig();assert.equal(api.getWidgetName('p0','parrot'),'');assert.equal(api.getWidgetName('__proto__','parrot'),'');assert.equal(api.getWidgetName('p1','official'),'保留官方')
+  console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
   console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 widget families, App foreground always normal, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
