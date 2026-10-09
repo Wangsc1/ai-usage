@@ -228,7 +228,15 @@ function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap, contentW
 
 // Same Parrot summary scope as Large, not per-account totals.
 
-function SmallStats({ data }: { data: UsageData }) {
+function mediumThreeStatsLayout(height: number) {
+  const half = Math.max(1, height - 38) / 2
+  // 7/9pt, zero inter-heading/period gaps: ceil-line model 60pt; keep 6pt to the divider.
+  let scale = Math.min(1, Math.max(1, half - 6) / 60)
+  // Rounded text-line budget is stepwise: verify it rather than assume a linear font-height reduction.
+  while (scale > 0.1 && 4 * Math.ceil(7 * scale * 1.2) + 2 * Math.ceil(9 * scale * 1.2) + 2 > half - 6) scale -= 0.01
+  return { half, labelFont: 7 * scale, valueFont: 9 * scale, verticalGap: 0 }
+}
+function SmallStats({ data, medium = false }: { data: UsageData; medium?: boolean }) {
   const today = data.today, month = data.month
   if (!today || !month) return <Text font={7} foregroundStyle={SUB} lineLimit={2}>今日/本月统计未提供</Text>
   const values = (m: NonNullable<UsageData["today"]>) => {
@@ -238,7 +246,9 @@ function SmallStats({ data }: { data: UsageData }) {
       fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
   }
   const t = values(today), m = values(month)
-  return <PeriodStats labelFont={7} valueFont={9} gap={2} verticalGap={2}
+  const layout = medium ? mediumThreeStatsLayout(Widget.displaySize.height) : null
+  return <PeriodStats labelFont={layout?.labelFont ?? 7} valueFont={layout?.valueFont ?? 9} gap={2} verticalGap={layout?.verticalGap ?? 2}
+    contentWidth={medium ? (Widget.displaySize.width - 28) / 2 - 10 : undefined}
     columns={["缓存", "缓存率", "Token", "花费"].map((label, i) => ({ label, today: t[i], month: m[i] }))} />
 }
 
@@ -310,10 +320,10 @@ function QuadGrid({ accounts, s, fixedLcd = false, statsData }: { accounts: Acco
   const pad = s.gap * 2 + 3
   const cell = (acc?: Account, top = false, left = false, statistics = false) =>
     <VStack
-      padding={{ top: top ? 0 : pad, bottom: top ? pad : 0, leading: left ? 0 : 10, trailing: left ? 10 : 0 }}
+      padding={{ top: top ? 0 : pad, bottom: top ? (statistics ? 4 : pad) : 0, leading: left ? 0 : 10, trailing: left ? 10 : 0 }}
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}
     >
-      {statistics && statsData ? <SmallStats data={statsData} /> : <Quad acc={acc} s={s} fixedLcd={fixedLcd} />}
+      {statistics && statsData ? <SmallStats data={statsData} medium /> : <Quad acc={acc} s={s} fixedLcd={fixedLcd} />}
     </VStack>
   return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
     <Rectangle fill={DIVIDER} frame={{ width: 1, maxHeight: "infinity" }} />

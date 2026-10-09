@@ -19,7 +19,7 @@ function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
   let code = fs.readFileSync(name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
-  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout }')
+  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout }')
   if (name === 'baseline-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
@@ -131,7 +131,7 @@ async function main() {
   assert.ok(!api.widgetAccounts(official.officialCached().accounts).some(a=>a.id===first.id))
   assert.equal(kc.get('parrot_management_key'),'mock-management'); api.saveSource('parrot'); assert.equal(storage.get('ai_usage_selected_accounts_v1')[0],'parrot-account')
   // JSX tree simulation verifies official stats not rendered as zero and unchanged family geometry.
-  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd,smallRegionLayout,AccountTitle,mediumTwoLayout}=load('widget.tsx')
+  const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd,smallRegionLayout,AccountTitle,mediumTwoLayout,mediumThreeStatsLayout}=load('widget.tsx')
   scripting.Widget.displaySize={width:358,height:376}
   let normalizeLargeBar=false
   let skipAccountTitles=false
@@ -429,6 +429,7 @@ async function main() {
     const rows=grid.props.children[2].props.children
     return {grid,cells:rows.flatMap(row=>row.props.children)}
   }
+  scripting.Widget.displaySize={width:358,height:170}
   for(const [parameter,input] of [['',{...singleData,accounts:accounts.slice(0,3)}],['3,1,4',singleData],['3,3,x,1,9,4',singleData]]){
     scripting.Widget.parameter=parameter;proposedStatsWidth=130
     const tree=expand(Root({data:input,stale:false,error:null})),{cells}=findCells(tree)
@@ -440,13 +441,17 @@ async function main() {
     assert.equal(tree.filter(x=>x.type==='HStack'&&x.props.children?.[0]?.type?.name==='ProviderIcon').length,3)
     assert.equal(new Set(cells.slice(1).map(c=>c.props.children.props.acc.id)).size,3)
     const statsTree=expand(cells[0].props.children)
-    const rows=checkStatsLayout(statsTree,4,7,9,2,2)
+    const rows=checkStatsLayout(statsTree,4,7,9,2,0)
     assert.deepEqual(Array.from(rows[0].props.children,c=>c.props.children[0].props.children),['缓存','缓存率','Token','花费'])
     assert.deepEqual(Array.from(rows[0].props.children,c=>c.props.children[1].props.children),['70','17.6%','370','$0.1'])
     // Identical shared statistics component rendering at identical available width, not native pixel proof.
     scripting.Widget.family='systemSmall';scripting.Widget.parameter='1'
     const small=expand(Root({data:input,stale:false,error:null})).find(x=>x.props?.children?.type?.name==='SmallStats')?.props.children
-    assert.ok(small);assert.equal(JSON.stringify(statsTree),JSON.stringify(expand(small)))
+    assert.ok(small)
+    assert.equal(JSON.stringify(cells[0].props.children.type(cells[0].props.children.props).props.columns),JSON.stringify(small.type(small.props).props.columns))
+    assert.ok(!statsTree.some(x=>x.type==='GeometryReader'))
+    assert.equal(cells[0].props.padding.bottom,4)
+    assert.equal(statsTree[0].props.frame.width,155)
     scripting.Widget.family='systemMedium';scripting.Widget.parameter=parameter
     for(const missing of [{...input,today:null},{...input,month:null},{...input,today:null,month:null}]){
       const missingTree=expand(Root({data:missing,stale:false,error:null})),missingCells=findCells(missingTree).cells
@@ -497,33 +502,48 @@ async function main() {
     assert.ok(61.4<=budget.half)
     console.log('MODEL: Medium two-account height='+height+', half='+budget.half+', compact stats=58+4, quota=61.4; NOT native pixel proof')
   }
+  for(const height of [162,166,170,180]){
+    const layout=mediumThreeStatsLayout(height)
+    const natural=4*Math.ceil(layout.labelFont*1.2)+2*Math.ceil(layout.valueFont*1.2)+2
+    assert.ok(natural+4<=layout.half);assert.ok(layout.half-natural>=6)
+    assert.ok(61.4<=layout.half) // unchanged lower quota model still fits
+    scripting.Widget.displaySize={width:358,height};scripting.Widget.family='systemMedium';scripting.Widget.parameter='3,1,4'
+    const grid=findCells(expand(Root({data:singleData,stale:false,error:null}))).grid
+    const cells=findCells(expand(Root({data:singleData,stale:false,error:null}))).cells
+    const stats=expand(cells[0].props.children)
+    checkStatsLayout(stats,4,layout.labelFont,layout.valueFont,2,0)
+    assert.equal(cells[1].props.padding.bottom,7)
+    assert.equal(cells[2].props.padding.top,7);assert.equal(cells[3].props.padding.top,7)
+    assert.equal(grid.props.children[1].props.frame.height,1)
+    console.log('MODEL: Medium3 height='+height+', stats='+natural+', divider='+layout.half+', bottom clearance='+(layout.half-natural)+'; NOT pixel proof')
+  }
   scripting.Widget.displaySize={width:358,height:376}
-  // Direct pre-change baseline: ALL other sizes and Medium selections 1/3/4 remain byte-identical component trees.
+  // Direct pre-change baseline: ALL other sizes and Medium selections 1/2/4 remain byte-identical component trees.
   if(process.env.BASELINE_WIDGET_PATH){
     const baseline=load('baseline-widget.tsx').Root
     scripting.Widget.family='systemMedium';scripting.Widget.parameter='4,2';scripting.Widget.displaySize={width:358,height:170}
     const newTwo=findTwo(expand(Root({data:singleData,stale:false,error:null})))
-    const originalTwo=findCells(expand(baseline({data:singleData,stale:false,error:null}))).cells
-    for(let i=0;i<2;i++){
-      assert.equal(JSON.stringify(expand(newTwo.lower.props.children[i].props.children)),JSON.stringify(expand(originalTwo[i].props.children)))
-      assert.equal(JSON.stringify(newTwo.lower.props.children[i].props.padding),JSON.stringify(originalTwo[i+2].props.padding))
-    }
+    const originalTwo=findTwo(expand(baseline({data:singleData,stale:false,error:null})))
+    assert.equal(JSON.stringify(newTwo),JSON.stringify(originalTwo)) // existing two-account safe-gap layout remains identical
     scripting.Widget.displaySize={width:358,height:376}
     scripting.Widget.family='systemMedium';scripting.Widget.parameter='3,1,4'
     const currentCells=findCells(expand(Root({data:singleData,stale:false,error:null}))).cells
     const oldCells=findCells(expand(baseline({data:singleData,stale:false,error:null}))).cells
-    assert.equal(JSON.stringify(currentCells),JSON.stringify(oldCells))
-    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemSmall','3,1,4'],['systemLarge',''],['systemLarge','3,1,4'],['systemMedium','1'],['systemMedium','3,1,4'],['systemMedium',''],['systemMedium','4,2,3,1']]){
+    assert.equal(JSON.stringify(currentCells.slice(1)),JSON.stringify(oldCells.slice(1))) // upper-right and both lower accounts untouched
+    const currentGrid=findCells(expand(Root({data:singleData,stale:false,error:null}))).grid
+    const previousGrid=findCells(expand(baseline({data:singleData,stale:false,error:null}))).grid
+    assert.equal(JSON.stringify(currentGrid.props.children.slice(0,2)),JSON.stringify(previousGrid.props.children.slice(0,2))) // line positions untouched
+    for(const [family,parameter] of [['systemSmall','1'],['systemSmall','1,2'],['systemSmall','3,1,4'],['systemLarge',''],['systemLarge','3,1,4'],['systemMedium','1'],['systemMedium','1,2'],['systemMedium',''],['systemMedium','4,2,3,1']]){
       scripting.Widget.family=family;scripting.Widget.parameter=parameter
       assert.equal(JSON.stringify(expand(Root({data:singleData,stale:false,error:null}))),JSON.stringify(expand(baseline({data:singleData,stale:false,error:null}))),family+' '+parameter+' unchanged pre-change tree')
     }
-    // Default final counts 1/3/4: same statistics insertion as before, identical original slot padding/Quads.
-    for(const count of [1,3,4]){
+    // Default final counts 1/2/4: same statistics insertion as before, identical original slot padding/Quads.
+    for(const count of [1,2,4]){
       scripting.Widget.family='systemMedium';scripting.Widget.parameter=''
       const input={...singleData,accounts:accounts.slice(0,count)}
       assert.equal(JSON.stringify(expand(Root({data:input,stale:false,error:null}))),JSON.stringify(expand(baseline({data:input,stale:false,error:null}))))
     }
-    console.log('PASS: Medium exactly2 full-width compact six-column stats and lower-only vertical divider; exactly3 final selection (default/parameters/dedup) shared SmallStats top-left, Quads in selected order, missing statistics truthful; Medium1/3/4 and Small/Large exact pre-change trees')
+    console.log('PASS: Medium exactly2 full-width compact six-column stats and lower-only vertical divider; exactly3 final selection (default/parameters/dedup) shared SmallStats top-left, Quads in selected order, missing statistics truthful; Medium1/2/4 and Small/Large exact pre-change trees; Medium3 only stats compacted, all other cells and dividers unchanged')
   }
   scripting.Widget.parameter=''
   scripting.Widget.family='systemLarge'
@@ -610,7 +630,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.17')
+  assert.equal(api.VERSION,'1.7.18')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
