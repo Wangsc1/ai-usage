@@ -6,7 +6,7 @@ import {
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.35"
+const VERSION = "1.7.36"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -110,20 +110,41 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
 }
 
 const DEVICE_URL = "https://auth.openai.com/codex/device"
-async function presentIsolatedAuthorization() {
-  // A fresh non-persistent cookie store for every attempt; never touch the system browser's cookies.
+async function presentIsolatedAuthorization(register?: (release: (() => void) | null) => void) {
+  // loadURL resolves on navigation completion, not on initiating the load. Present BEFORE waiting
+  // for a login/redirect page, otherwise its pending navigation can hide the modal indefinitely.
   const browser = new WebViewController({ ephemeral: true })
+  let released = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let stop!: () => void
+  const cancelled = new Promise<void>(resolve => { stop = resolve })
+  const release = () => { if (!released) { released = true; stop(); browser.dispose() } }
+  register?.(release)
   try {
-    if (!await browser.loadURL(DEVICE_URL)) throw new Error("授权页面加载失败")
-    await browser.present({ navigationTitle: "官方授权（临时会话）" })
-  } finally { browser.dispose() }
+    const failure = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("授权页面加载超时，请使用Safari备用或外部无痕浏览器")), 20000)
+    })
+    const shown = browser.present({ fullscreen: true, navigationTitle: "官方授权（临时会话）" })
+    const loading = browser.loadURL(DEVICE_URL).then(ok => {
+      if (timer != null) clearTimeout(timer)
+      if (!ok && !released) throw new Error("授权页面加载失败，请使用Safari备用或外部无痕浏览器")
+      return new Promise<void>(() => {}) // Loading success is NOT dismissal or authorization success.
+    })
+    await Promise.race([shown, loading, failure, cancelled])
+  } finally {
+    if (timer != null) clearTimeout(timer)
+    release()
+    register?.(null)
+  }
 }
 // One foreground check after either browser closes, no polling loop.
 async function checkAfterSafari(d: DeviceLogin, active: () => boolean,
   wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
   present: () => Promise<void> = () => Safari.present(DEVICE_URL)) {
   try { await present() }
-  catch { throw new Error("无法打开官方授权页，请稍后重试") }
+  catch (e: any) {
+    throw new Error(e?.message?.startsWith("授权页面加载") ? e.message : "无法打开官方授权页，请稍后重试")
+  }
   if (!active() || d.cancelled) return null
   const remaining = Math.max(0, d.nextPoll - Date.now())
   if (remaining) await wait(Math.min(remaining, Math.max(0, d.expiresAt - Date.now())))
@@ -135,8 +156,8 @@ function SettingsView() {
   const [source, setSource] = useState<DataSource>(getSource())
   const [device, setDevice] = useState<DeviceLogin | null>(null)
   const [logins, setLogins] = useState(officialAccounts())
-  const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0 })
-  const stopAuth = () => { auth.epoch++; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null) }
+  const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, releaseBrowser: null as (() => void) | null })
+  const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null) }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const cur = getConfig()
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
@@ -153,7 +174,7 @@ function SettingsView() {
     if (getSource() === "official" || cur.managementKey) test()
   }, [])
 
-  useEffect(() => () => { auth.alive = false; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; auth.epoch++ }, [])
+  useEffect(() => () => { auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
     stopAuth()
@@ -187,9 +208,10 @@ function SettingsView() {
     setBusy(true)
     const epoch = auth.epoch
     const active = () => auth.alive && auth.device === d && auth.epoch === epoch && getSource() === "official"
+    if (browser) setStatus("正在打开官方授权页…；加载失败时可改用Safari备用")
     try {
       const result = browser ? await checkAfterSafari(d, active, undefined,
-        browser === "safari" ? () => Safari.present(DEVICE_URL) : presentIsolatedAuthorization) : await checkDeviceLogin(d)
+        browser === "safari" ? () => Safari.present(DEVICE_URL) : () => presentIsolatedAuthorization(release => { auth.releaseBrowser = release })) : await checkDeviceLogin(d)
       if (!active() || result == null) return
       if (result === "pending") setStatus("等待授权：请完成官方页面操作后再次检查（15分钟内有效）")
       else {
@@ -201,7 +223,7 @@ function SettingsView() {
     } catch (e: any) {
       if (active()) {
         // A browser presentation failure is retryable; it says nothing about the device authorization.
-        if (e.message !== "无法打开官方授权页，请稍后重试") {
+        if (e.message !== "无法打开官方授权页，请稍后重试" && !e.message.startsWith("授权页面加载")) {
           cancelDeviceLogin(d)
           auth.device = null
           setDevice(null)

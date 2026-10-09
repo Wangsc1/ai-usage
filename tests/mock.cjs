@@ -674,7 +674,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.35')
+  assert.equal(api.VERSION,'1.7.36')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -855,6 +855,9 @@ async function main() {
   await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
   authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
   // Documented-shape WebViewController: each attempt has its own non-persistent store and finally disposal.
+  const browserTimers=new Map();let timerId=0
+  context.setTimeout=(fn,ms)=>{if(ms===20000){const id=++timerId;browserTimers.set(id,fn);return id}now+=ms;Promise.resolve().then(fn);return 0}
+  context.clearTimeout=id=>browserTimers.delete(id)
   const instances=[];let presentBrowser=async()=>{},loadBrowser=async()=>true
   scripting.WebViewController=class {
     constructor(options){this.options=options;this.disposed=0;this.urls=[];instances.push(this)}
@@ -868,9 +871,28 @@ async function main() {
   for(const b of instances){assert.equal(b.options.ephemeral,true);assert.deepEqual(b.urls,['https://auth.openai.com/codex/device']);assert.equal(b.disposed,1)}
   for(const failure of ['loadFalse','loadThrow','presentThrow']){
     loadBrowser=async()=>{if(failure==='loadThrow')throw new Error('mock-load');return failure!=='loadFalse'}
-    presentBrowser=async()=>{if(failure==='presentThrow')throw new Error('mock-present')}
+    presentBrowser=async()=>{if(failure==='presentThrow')throw new Error('mock-present');await new Promise(()=>{})}
     await assert.rejects(()=>presentIsolatedAuthorization());assert.equal(instances.at(-1).disposed,1)
   }
+  // Real delayed navigation: the former await-load-before-present would NEVER invoke present in this test.
+  let finishLoad,closeDelayed;loadBrowser=()=>new Promise(resolve=>finishLoad=resolve)
+  presentBrowser=b=>{assert.equal(b.urls.length,0);return new Promise(resolve=>closeDelayed=resolve)}
+  let settled=false
+  const delayed=presentIsolatedAuthorization().then(()=>{settled=true})
+  assert.ok(closeDelayed);assert.ok(finishLoad);assert.equal(instances.at(-1).disposed,0)
+  assert.equal(browserTimers.size,1)
+  finishLoad(true);for(let i=0;i<8;i++)await Promise.resolve();assert.equal(settled,false);assert.equal(browserTimers.size,0)
+  closeDelayed();await delayed;assert.equal(instances.at(-1).disposed,1)
+  // Hung navigation has a bounded failure, not an invisible indefinitely-busy button.
+  loadBrowser=()=>new Promise(()=>{});presentBrowser=()=>new Promise(()=>{})
+  const hung=presentIsolatedAuthorization();assert.equal(browserTimers.size,1)
+  Array.from(browserTimers.values())[0]()
+  await assert.rejects(()=>hung,/加载超时/);assert.equal(instances.at(-1).disposed,1);assert.equal(browserTimers.size,0)
+  // Dismiss before load settles: no unhandled rejection/false-success from later navigation completion.
+  let rejectLate,closeEarly
+  loadBrowser=()=>new Promise((_,reject)=>rejectLate=reject);presentBrowser=()=>new Promise(resolve=>closeEarly=resolve)
+  const early=presentIsolatedAuthorization();closeEarly();await early;rejectLate(new Error('late navigation failure'))
+  await Promise.resolve();assert.equal(instances.at(-1).disposed,1);assert.equal(browserTimers.size,0)
   loadBrowser=async()=>true;presentBrowser=async()=>{}
   api.saveSource('official');namedFlow({},'isolated-interval')
   const intervalDevice=await api.beginDeviceLogin();intervalDevice.nextPoll=now+3000
@@ -896,7 +918,8 @@ async function main() {
     else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
     else await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
     const afterControl=calls.length
-    closeBrowser();await pendingAction;assert.equal(calls.length,afterControl);assert.equal(instances.at(-1).disposed,1)
+    await pendingAction;assert.equal(calls.length,afterControl);assert.equal(instances.at(-1).disposed,1)
+    assert.equal(browserTimers.size,0);closeBrowser() // native dismiss may settle later; cancellation already released and completed
   }
   api.saveSource('official');states.length=0;namedFlow({},'isolated-failure');presentBrowser=async()=>{throw new Error('blocked identity provider')}
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
@@ -904,6 +927,19 @@ async function main() {
   await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
   assert.equal(calls.length,before);assert.equal(instances.at(-1).disposed,1)
   authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='Safari备用授权页'))
+  states.length=0;api.saveSource('official');namedFlow({},'ui-navigation-hung')
+  loadBrowser=()=>new Promise(()=>{});presentBrowser=()=>new Promise(()=>{})
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();before=calls.length
+  const hungUI=authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  assert.ok(render().some(x=>typeof x==='string'&&x.startsWith('正在打开官方授权页')))
+  Array.from(browserTimers.values())[0]();await hungUI
+  authUI=render();assert.equal(calls.length,before)
+  assert.ok(authUI.some(x=>typeof x==='string'&&x.startsWith('授权页面加载超时')))
+  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.disabled,false)
+  assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
+  assert.equal(instances.at(-1).disposed,1);assert.equal(browserTimers.size,0)
+  console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
   console.log('PASS: Safari dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
   console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
