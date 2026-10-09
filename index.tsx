@@ -6,7 +6,7 @@ import {
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 
-const VERSION = "1.7.29"
+const VERSION = "1.7.30"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -109,12 +109,25 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
   </Form>
 }
 
+// One foreground check after the documented Safari dismissal Promise, no polling loop.
+async function checkAfterSafari(d: DeviceLogin, active: () => boolean,
+  wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms))) {
+  try { await Safari.present("https://auth.openai.com/codex/device") }
+  catch { throw new Error("无法打开官方授权页，请稍后重试") }
+  if (!active() || d.cancelled) return null
+  const remaining = Math.max(0, d.nextPoll - Date.now())
+  if (remaining) await wait(Math.min(remaining, Math.max(0, d.expiresAt - Date.now())))
+  if (!active() || d.cancelled) return null
+  return checkDeviceLogin(d)
+}
 function SettingsView() {
   const close = Navigation.useDismiss()
   const [source, setSource] = useState<DataSource>(getSource())
   const [device, setDevice] = useState<DeviceLogin | null>(null)
   const [logins, setLogins] = useState(officialAccounts())
-  const dismiss = () => { if (device) cancelDeviceLogin(device); close() }
+  const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0 })
+  const stopAuth = () => { auth.epoch++; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null) }
+  const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const cur = getConfig()
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
   const [key, setKey] = useState("")
@@ -130,11 +143,10 @@ function SettingsView() {
     if (getSource() === "official" || cur.managementKey) test()
   }, [])
 
-  useEffect(() => () => { if (device) cancelDeviceLogin(device) }, [device])
+  useEffect(() => () => { auth.alive = false; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
-    if (device) cancelDeviceLogin(device)
-    setDevice(null)
+    stopAuth()
     saveSource(value as DataSource)
     setSource(value as DataSource)
     setAccounts(cachedAccounts())
@@ -144,32 +156,48 @@ function SettingsView() {
   }
 
   async function addOfficial() {
+    if (auth.running) return
+    auth.running = true
+    const epoch = auth.epoch
     setBusy(true)
     try {
       const d = await beginDeviceLogin()
+      if (!auth.alive || epoch !== auth.epoch || getSource() !== "official") { cancelDeviceLogin(d); return }
+      auth.device = d
       setDevice(d)
-      setStatus("请打开官方授权页输入下方一次性代码；完成后返回点“检查授权”")
-    } catch (e: any) { setStatus(e.message) }
-    setBusy(false)
+      setStatus("请打开官方授权页输入一次性代码；关闭网页后自动检查，也可手动检查")
+    } catch (e: any) { if (auth.alive) setStatus(e.message) }
+    finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
   }
 
-  async function checkOfficial() {
-    if (!device) return
+  async function checkOfficial(browser = false) {
+    const d = auth.device
+    if (!d || auth.running) return
+    auth.running = true
     setBusy(true)
+    const epoch = auth.epoch
+    const active = () => auth.alive && auth.device === d && auth.epoch === epoch && getSource() === "official"
     try {
-      const result = await checkDeviceLogin(device)
+      const result = browser ? await checkAfterSafari(d, active) : await checkDeviceLogin(d)
+      if (!active() || result == null) return
       if (result === "pending") setStatus("等待授权：请完成官方页面操作后再次检查（15分钟内有效）")
       else {
+        auth.device = null
         setDevice(null)
         setLogins(officialAccounts())
         await test()
       }
     } catch (e: any) {
-      cancelDeviceLogin(device)
-      setDevice(null)
-      setStatus(e.message)
-    }
-    setBusy(false)
+      if (active()) {
+        // A browser presentation failure is retryable; it says nothing about the device authorization.
+        if (e.message !== "无法打开官方授权页，请稍后重试") {
+          cancelDeviceLogin(d)
+          auth.device = null
+          setDevice(null)
+        }
+        setStatus(e.message)
+      }
+    } finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
   }
 
   async function checkUpdate(force: boolean) {
@@ -245,13 +273,13 @@ function SettingsView() {
         </Picker>
       </Section>
 
-      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>在官方页面登录你要添加的账号，可先退出浏览器的其他账号。Token仅存本机钥匙串；列表使用匿名编号，不展示邮箱。退出只移除此账号的本机登录。</Text>}>
+      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>在官方页面登录你要添加的账号，可先退出浏览器的其他账号。Token仅存本机钥匙串；账号名称取官方授权信息，仅本机显示。退出只移除此账号的本机登录。</Text>}>
         {!device ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy} /> : <>
           <Text>一次性代码：{device.code}</Text>
           <Text>仅输入你自己在此脚本发起的代码，有效期15分钟。</Text>
-          <Button title={"打开官方授权页"} action={async () => { try { await Safari.present("https://auth.openai.com/codex/device") } catch { setStatus("无法打开官方授权页，请稍后重试") } }} disabled={busy} />
-          <Button title={"检查授权"} action={checkOfficial} disabled={busy} />
-          <Button title={"取消登录"} action={() => { cancelDeviceLogin(device); setDevice(null); setStatus("已取消登录") }} />
+          <Button title={"打开官方授权页"} action={() => checkOfficial(true)} disabled={busy} />
+          <Button title={"检查授权"} action={() => checkOfficial()} disabled={busy} />
+          <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />
         </>}
         {logins.map(a => <Button title={`退出 ${a.name}`} disabled={busy || !!device} action={async () => {
           try {

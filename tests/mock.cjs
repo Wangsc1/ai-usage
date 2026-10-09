@@ -9,7 +9,7 @@ const modules = {}
 const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { return o[k] || k } })
 scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
 const jsx = (type, props, key) => key === undefined ? ({type, props}) : ({type, props, key})
-const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise,
+const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise, setTimeout: (fn,ms)=>{now+=ms;Promise.resolve().then(fn)}, Safari: {present: async()=>{}},
   Keychain: { get(k) { reads.push(k); return kc.get(k) ?? null }, set(k,v) { kc.set(k,v); return true }, remove(k) { kc.delete(k); return true } },
   Storage: { get(k) { return storage.has(k) ? JSON.parse(JSON.stringify(storage.get(k))) : null }, set(k,v) { storageWrites.push(k); storage.set(k,JSON.parse(JSON.stringify(v))) }, remove(k) { storage.delete(k) } },
   Data: { fromBase64String(s) { return { toRawString: () => Buffer.from(s,'base64').toString() } } },
@@ -21,7 +21,7 @@ function load(name) {
   let code = fs.readFileSync(name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
   if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout }')
   if (name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
-  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage }')
+  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
   const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : load(n.replace('./','') + '.ts')
@@ -83,7 +83,7 @@ async function main() {
   official.cancelDeviceLogin(inflight); resolve(resp(200,{authorization_code:'unused',code_verifier:'unused'}))
   await assert.rejects(()=>pending,/取消/); assert.equal(official.officialAccounts().length,0)
   authFlow(); const success=await official.beginDeviceLogin(); assert.equal(await official.checkDeviceLogin(success),'complete')
-  const first=official.officialAccounts()[0]; assert.equal(first.name,'官方账号 1'); assert.ok(!JSON.stringify(storage).includes('mock-refresh'))
+  const first=official.officialAccounts()[0]; assert.equal(first.name,'账号 1'); assert.ok(!JSON.stringify(storage).includes('mock-refresh'))
   await assert.rejects(()=>official.checkDeviceLogin(success),/取消/)
   authFlow(); await official.checkDeviceLogin(await official.beginDeviceLogin()); assert.equal(official.officialAccounts().length,1)
   authFlow('account-B','user-B'); await official.checkDeviceLogin(await official.beginDeviceLogin()); assert.equal(official.officialAccounts().length,2)
@@ -673,7 +673,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.29')
+  assert.equal(api.VERSION,'1.7.30')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -723,6 +723,93 @@ async function main() {
   api.saveWidgetName('p1','保留官方','official');api.logoutOfficial('p0')
   assert.equal(api.getWidgetName('p0','official'),'');assert.equal(api.getWidgetName('p1','official'),'保留官方');assert.equal(api.getWidgetName('p0','parrot'),alias)
   api.clearConfig();assert.equal(api.getWidgetName('p0','parrot'),'');assert.equal(api.getWidgetName('__proto__','parrot'),'');assert.equal(api.getWidgetName('p1','official'),'保留官方')
+  // Latest official names derive only from legal local OAuth claims; ID/order/aliases survive duplicate login.
+  const namedToken=(nameClaims,account='named-A',user='named-user')=>{
+    const parts=token(account,user).split('.'),payload=JSON.parse(Buffer.from(parts[1],'base64url').toString())
+    return 'mock.'+Buffer.from(JSON.stringify({...payload,...nameClaims})).toString('base64url')+'.mock'
+  }
+  const namedFlow=(nameClaims,account='named-A',idClaims=null)=>{
+    handler=async (u,o)=>{
+      if(u.endsWith('/usercode'))return resp(200,{device_auth_id:'mock',user_code:'MOCK',interval:5})
+      if(u.endsWith('/deviceauth/token'))return resp(200,{authorization_code:'mock-code',code_verifier:'mock'})
+      if(u.endsWith('/oauth/token'))return resp(200,{access_token:namedToken(nameClaims,account),id_token:idClaims?namedToken(idClaims,account):undefined,refresh_token:'mock-named-refresh'})
+      if(u.endsWith('/usage'))return resp(200,{rate_limit:usage.rate_limit})
+      return resp(404)
+    }
+  }
+  api.saveSource('official');namedFlow({name:'测试名',preferred_username:'测试用户名',email:'mock@example.invalid'})
+  await api.checkDeviceLogin(await api.beginDeviceLogin())
+  const named=api.officialAccounts().find(a=>a.name==='测试名');assert.ok(named)
+  api.saveWidgetName(named.id,'保留别名','official');api.saveAccountOrder([named.id],'official')
+  namedFlow({preferred_username:'更新用户名',email:'mock@example.invalid'})
+  await api.checkDeviceLogin(await api.beginDeviceLogin())
+  assert.equal(api.officialAccounts().find(a=>a.id===named.id).name,'更新用户名');assert.equal(api.getWidgetName(named.id,'official'),'保留别名')
+  assert.equal(api.officialAccounts().filter(a=>a.id===named.id).length,1)
+  namedFlow({email:'mock@example.invalid'},'named-B');await api.checkDeviceLogin(await api.beginDeviceLogin())
+  assert.ok(api.officialAccounts().some(a=>a.name==='mock@example.invalid'))
+  namedFlow({name:'访问令牌姓名'},'named-C',{email:'id@example.invalid'});await api.checkDeviceLogin(await api.beginDeviceLogin())
+  assert.ok(api.officialAccounts().some(a=>a.name==='访问令牌姓名')) // name wins over email across tokens
+  const stored=JSON.parse(kc.get('ai_usage_official_oauth_v1'))
+  const migrate=stored.find(a=>a.id===named.id);migrate.name='官方账号 9';migrate.access=namedToken({name:'迁移名称'})
+  kc.set('ai_usage_official_oauth_v1',JSON.stringify(stored))
+  assert.equal(api.officialAccounts().find(a=>a.id===named.id).name,'迁移名称');assert.equal(api.getWidgetName(named.id,'official'),'保留别名')
+  storage.set('ai_usage_official_cache_v1',{...data,accounts:[{...accounts[0],id:named.id,name:'官方账号 9'}]})
+  assert.equal(api.officialCached().accounts[0].name,'迁移名称')
+  // Safari Promise closes before exactly one check. Early-close interval is respected with one bounded wait.
+  const {checkAfterSafari}=load('index.tsx')
+  namedFlow({},'pending-test');let autoDevice=await api.beginDeviceLogin(),browserClose
+  context.Safari.present=()=>new Promise(r=>browserClose=r)
+  let active=true,before=calls.length
+  const afterClose=checkAfterSafari(autoDevice,()=>active);await Promise.resolve();assert.equal(calls.length,before)
+  handler=async()=>resp(403);browserClose();assert.equal(await afterClose,'pending');assert.equal(autoDevice.cancelled,false)
+  before=calls.length;let waited=[]
+  context.Safari.present=async()=>{}
+  assert.equal(await checkAfterSafari(autoDevice,()=>true,async ms=>{waited.push(ms);now+=ms}),'pending')
+  assert.deepEqual(waited,[5000]);assert.equal(calls.length,before+1)
+  for(const mode of ['cancel','source','dismiss']){
+    context.Safari.present=()=>new Promise(r=>browserClose=r);active=true
+    const promise=checkAfterSafari(autoDevice,()=>active&&api.getSource()==='official')
+    await Promise.resolve();before=calls.length
+    if(mode==='cancel')api.cancelDeviceLogin(autoDevice)
+    else if(mode==='source')api.saveSource('parrot')
+    else active=false
+    browserClose();assert.equal(await promise,null);assert.equal(calls.length,before)
+    api.saveSource('official');namedFlow({},'pending-test');autoDevice=await api.beginDeviceLogin()
+  }
+  context.Safari.present=async()=>{};autoDevice.nextPoll=now+5000;before=calls.length
+  assert.equal(await checkAfterSafari(autoDevice,()=>true,async ms=>{api.cancelDeviceLogin(autoDevice);now+=ms}),null)
+  assert.equal(calls.length,before)
+  namedFlow({},'expired-auto');autoDevice=await api.beginDeviceLogin();autoDevice.expiresAt=now
+  await assert.rejects(()=>checkAfterSafari(autoDevice,()=>true),/过期/)
+  // Full Settings action: browser closes, check succeeds, quota cache/list and widget refresh follow.
+  states.length=0;context.Safari.present=async()=>{};namedFlow({name:'自动授权名称'},'automatic-user')
+  let reloadCount=0;scripting.Widget.reloadAll=async()=>{reloadCount++}
+  let authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  authUI=render();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('自动授权名称')))
+  assert.ok(api.officialCached().accounts.some(a=>a.name==='自动授权名称'));assert.ok(reloadCount>0)
+  assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
+  // Cancel/dismiss during open Safari makes the captured UI action inert, no token save or request.
+  for(const mode of ['cancel','dismiss','source']){
+    states.length=0;namedFlow({},'abandoned-'+mode);context.Safari.present=()=>new Promise(r=>browserClose=r)
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+    authUI=render();const action=authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+    await Promise.resolve();before=calls.length
+    await authUI.find(x=>x.type==='Button'&&x.props.title==='检查授权').props.action();assert.equal(calls.length,before) // busy lock blocks competing checks
+    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+    else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
+    else await authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    browserClose();await action;assert.equal(calls.length,before);api.saveSource('official')
+  }
+  states.length=0;namedFlow({},'ui-pending');context.Safari.present=async()=>{}
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  handler=async()=>resp(403)
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  authUI=render();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.ok(authUI.some(x=>typeof x==='string'&&x.startsWith('等待授权')))
+  context.Safari.present=async()=>{throw new Error('mock failure')}
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
+  console.log('PASS: Safari dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
   console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
   console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 widget families, App foreground always normal, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')
 }

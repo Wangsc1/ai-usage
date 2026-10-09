@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.7.29"
+export const VERSION = "1.7.30"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -369,7 +369,19 @@ export type DeviceLogin = { deviceId: string; code: string; interval: number; ex
 function credentials(): Credential[] {
   const raw = Keychain.get(KEY)
   if (!raw) return []
-  try { return JSON.parse(raw) } catch { throw new Error("官方登录记录损坏，请重新添加账号") }
+  try {
+    const items: Credential[] = JSON.parse(raw)
+    let changed = false
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (!item.name || /^官方账号 \d+$/.test(item.name)) {
+        item.name = officialName(claims(item.access)) || item.name?.replace(/^官方账号 /, "账号 ") || `账号 ${i + 1}`
+        changed = true
+      }
+    }
+    if (changed) persist(items)
+    return items
+  } catch { throw new Error("官方登录记录损坏，请重新添加账号") }
 }
 function persist(items: Credential[]) {
   if (!Keychain.set(KEY, JSON.stringify(items))) throw new Error("钥匙串保存失败")
@@ -379,7 +391,9 @@ export function officialAccounts(): { id: string; name: string }[] {
 }
 export function officialCached(): UsageData | null {
   const cache = Storage.get<UsageData>(CACHE)
-  return cache ? { ...cache, accounts: sortAccounts(cache.accounts, "official") } : null
+  if (!cache) return null
+  const names = new Map(credentials().map(a => [a.id, a.name]))
+  return { ...cache, accounts: sortAccounts(cache.accounts.map(a => ({ ...a, name: names.get(a.id) ?? a.name })), "official") }
 }
 export function logoutOfficial(id: string) {
   persist(credentials().filter(x => x.id !== id))
@@ -420,6 +434,13 @@ function claims(token: string): any {
     return JSON.parse(Data.fromBase64String(base)?.toRawString() ?? "{}")
   } catch { return {} }
 }
+function officialName(...tokens: any[]): string {
+  for (const field of ["name", "preferred_username", "email"]) for (const c of tokens) {
+    const value = c?.[field] ?? c?.["https://api.openai.com/profile"]?.[field]
+    if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return ""
+}
 function credential(b: any, previous?: Credential): Credential {
   if (typeof b.access_token !== "string" || !b.access_token) throw new Error("官方未返回访问令牌")
   const c = claims(b.id_token ?? b.access_token)
@@ -431,7 +452,7 @@ function credential(b: any, previous?: Credential): Credential {
   const refresh = b.refresh_token ?? previous?.refresh
   if (!accountId || !subject || !refresh) throw new Error("官方未提供账号路由或续期信息，无法保存登录")
   const exp = a.exp
-  return { id: previous?.id ?? "", accountId, subject, name: previous?.name ?? "", access: b.access_token, refresh,
+  return { id: previous?.id ?? "", accountId, subject, name: officialName(c, a) || previous?.name || "", access: b.access_token, refresh,
     expiresAt: typeof exp === "number" ? exp * 1000 : Date.now() + (Number(b.expires_in) || 3600) * 1000 }
 }
 // Explicit foreground checks avoid losing a polling loop when iOS suspends the browser/app.
@@ -462,7 +483,7 @@ export async function checkDeviceLogin(d: DeviceLogin): Promise<"pending" | "com
   const items = credentials()
   const old = items.find(x => x.accountId === item.accountId && x.subject === item.subject)
   item.id = old?.id ?? `official-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  item.name = old?.name ?? `官方账号 ${Math.max(0, ...items.map(x => Number(x.name.match(/\d+$/)?.[0]) || 0)) + 1}`
+  item.name = item.name || old?.name || `账号 ${Math.max(0, ...items.map(x => Number(x.name.match(/\d+$/)?.[0]) || 0)) + 1}`
   persist(old ? items.map(x => x.id === item.id ? item : x) : [...items, item])
   d.cancelled = true // One-time authorization codes must not be exchanged twice.
   return "complete"
@@ -526,7 +547,7 @@ async function fetchAccount(item: Credential): Promise<Account> {
       if (cards.status === 200) mapped.resetCredits = resetCount(await json(cards))
     } catch { /* keep unknown */ }
   }
-  return { id: item.id, name: item.name, provider: "openai", enabled: true, available: true, ...mapped }
+  return { id: item.id, name: token.name, provider: "openai", enabled: true, available: true, ...mapped }
 }
 export async function loadOfficialUsage(): Promise<LoadResult> {
   const cached = officialCached()
