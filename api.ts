@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.8"
+export const VERSION = "1.8.9"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -824,7 +824,16 @@ function tokenBody(b: any, old?: Credential) {
   return { access: b.access_token, refresh: b.refresh_token || old!.refresh,
     expiresAt: Date.now() + b.expires_in * 1000, scope: typeof b.scope === "string" ? b.scope : old?.scope || SCOPE }
 }
-const post = (body: any) => request(TOKEN, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+const post = (body: any) => {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  // Controlled compatibility: standard JSON negotiation and this script's honest identity, not browser/CLI spoofing.
+  // Limit the change to initial exchange; existing credential refresh keeps its original wire headers.
+  if (body.grant_type === "authorization_code") {
+    headers.Accept = "application/json"
+    headers["User-Agent"] = `ai-usage/${VERSION}`
+  }
+  return request(TOKEN, { method: "POST", headers, body: JSON.stringify(body) })
+}
 export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive: () => boolean = () => true): Promise<string> {
   active(d)
   if (d.consumed) throw new Error("Claude本次授权码已使用，请重新开始")
