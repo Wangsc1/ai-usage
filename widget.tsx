@@ -458,6 +458,12 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   </VStack>
 }
 
+// Normalize only account setup empty states; statistics and network errors keep their real text.
+function accountEmptyText(error: string | null): string {
+  return error === "未配置：请在 Scripting 中运行本脚本进行设置" || error === "Sub2API额度未配置" || error === "请在脚本中添加官方账号" || error === "未配置"
+    ? "账号未配置" : error ?? "无数据"
+}
+
 function Message({ text }: { text: string }) {
   return <VStack spacing={6}>
     <Spacer />
@@ -491,7 +497,7 @@ function AccessoryInline({ acc }: { acc: Account }) {
 function AccessoryRoot({ data, error, family }: { data: UsageData | null; error: string | null; family: string }) {
   const acc = data ? widgetAccounts(data.accounts, Widget.parameter ?? "")[0] : undefined
   if (!acc) return <Text font={11} lineLimit={2} multilineTextAlignment="center">
-    {!data ? error ?? "无数据" : data.accounts.length ? "请检查小组件参数" : "没有订阅账号"}
+    {!data ? accountEmptyText(error) : data.accounts.length ? "请检查小组件参数" : "账号未配置"}
   </Text>
   if (family === "accessoryCircular") return <AccessoryCircular acc={acc} />
   if (family === "accessoryInline") return <AccessoryInline acc={acc} />
@@ -501,8 +507,8 @@ function AccessoryRoot({ data, error, family }: { data: UsageData | null; error:
 function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; error: string | null }) {
   if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} />
   let body: VirtualNode
-  if (!data) body = <Message text={error ?? "无数据"} />
-  else if (data.accounts.length === 0) body = <Message text="没有订阅账号" />
+  if (!data) body = <Message text={accountEmptyText(error)} />
+  else if (data.accounts.length === 0) body = <Message text="账号未配置" />
   else {
     const selected = widgetAccounts(data.accounts, Widget.parameter ?? "")
     const sorted = { ...data, accounts: selected }
