@@ -499,11 +499,13 @@ function AccessoryRoot({ data, error, family }: { data: UsageData | null; error:
 }
 
 const DOCK_MATERIAL = "ultraThinMaterial"
-// Rounded-rect layers do not intercept taps. Highlight gets brighter at the top edge; stroke is a top-bright gradient hairline.
+// Native Material is placed in the ordinary background view, not the widgetBackground style.
+// A clear widgetBackground removes this script's decorative fill; no white highlight fill covers the material.
+// This is a host compatibility trial, not proof that WidgetKit exposes the wallpaper to local materials.
 function DockBackgroundLayers() {
   return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
     <RoundedRectangle cornerRadius={22}
-      fill={{ gradient: [{ color: "rgba(255,255,255,0.16)", location: 0 }, { color: "rgba(255,255,255,0.04)", location: 1 }], startPoint: { x: 0.5, y: 0 }, endPoint: { x: 0.5, y: 1 } } as any}
+      fill={DOCK_MATERIAL}
       frame={{ maxWidth: "infinity", maxHeight: "infinity" }} />
     <RoundedRectangle cornerRadius={22}
       stroke={{ shapeStyle: { gradient: [{ color: "rgba(255,255,255,0.75)", location: 0 }, { color: "rgba(255,255,255,0.18)", location: 1 }], startPoint: { x: 0.5, y: 0 }, endPoint: { x: 0.5, y: 1 } } as any, strokeStyle: { lineWidth: 1 } }}
@@ -525,10 +527,11 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />
   }
-  // Dock-style optional background: documented system Material as widgetBackground (hidden by the system in accented mode),
-  // plus non-text decorative layers. Content nodes and their colors/layout are untouched.
+  // Public background accepts a VirtualNode; ShapeProps.fill accepts system Material.
+  // Explicit clear decorative background + separate native Material layer avoids assigning Material to widgetBackground.
+  // No private containerBackground/removal API or assumed default host fill. Content is untouched.
   const backgroundProps = getWidgetBackgroundStyle() === "glass" ? {
-    widgetBackground: { style: DOCK_MATERIAL, shape: "containerRelative" },
+    widgetBackground: "clear",
     background: <DockBackgroundLayers />,
   } : { widgetBackground: BG }
   return <ZStack
