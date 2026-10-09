@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, getWidgetBackgroundStyle, createWidgetGlass } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -508,10 +508,18 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />
   }
+  const glass = getWidgetBackgroundStyle() === "glass" ? createWidgetGlass().glass : null
+  // background accepts VirtualNode. Only the clear background shape receives glassEffect;
+  // the content never receives opacity/glass foreground modifiers. Shape tracks host bounds.
+  const backgroundProps = glass ? {
+    widgetBackground: "clear",
+    background: <Rectangle fill="clear" frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      glassEffect={{ glass, shape: "containerRelative" }} />,
+  } : { widgetBackground: BG }
   return <ZStack
     padding={{ horizontal: 14, vertical: 12 }}
     frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-    widgetBackground={BG}
+    {...backgroundProps}
   >
     <ZStack padding={{ bottom: data ? 14 : 0 }} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>{body}</ZStack>
     {data ? <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>

@@ -1,7 +1,8 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
+import * as Scripting from "scripting"
 
 
-export const VERSION = "1.9.2"
+export const VERSION = "1.9.3"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -87,6 +88,27 @@ export type UsageData = {
 
 type ParrotStats = Pick<UsageData, "today" | "month" | "todayByFamily" | "monthByFamily" | "fetchedAt">
 export type LoadResult = { data: UsageData | null; stale: boolean; error: string | null }
+
+// Local, opt-in home-screen background. Does not change the system appearance or accessory widgets.
+export type WidgetBackgroundStyle = "gradient" | "glass"
+const KEY_WIDGET_BACKGROUND = "ai_usage_widget_background_v1"
+export function getWidgetBackgroundStyle(): WidgetBackgroundStyle { return Storage.get<string>(KEY_WIDGET_BACKGROUND) === "glass" ? "glass" : "gradient" }
+export function saveWidgetBackgroundStyle(style: WidgetBackgroundStyle) { if (style === "gradient" || style === "glass") Storage.set(KEY_WIDGET_BACKGROUND, style) }
+// Scripting Device.systemVersion/systemName + iOS26 UIGlass.clear().interactive(false), no alpha/material simulation.
+export function createWidgetGlass(): { glass: Scripting.UIGlass | null; error: string | null } {
+  try {
+    // Namespace lookup allows older Scripting versions without an exported UIGlass to fall back safely.
+    const { Device, UIGlass } = Scripting
+    if (!["iOS", "iPadOS"].includes(Device.systemName) || Device.isiOSAppOnMac || !/^\d+(?:\.\d+)*$/.test(Device.systemVersion) || Number(Device.systemVersion.split(".")[0]) < 26)
+      return { glass: null, error: "玻璃背景实验需要iOS/iPadOS 26及以上；当前使用渐变背景" }
+    if (typeof UIGlass?.clear !== "function") return { glass: null, error: "当前Scripting缺少UIGlass.clear；使用渐变背景" }
+    const material = UIGlass.clear()
+    if (!material || typeof material.interactive !== "function") return { glass: null, error: "当前Scripting缺少完整玻璃接口；使用渐变背景" }
+    const glass = material.interactive(false)
+    if (!glass) return { glass: null, error: "玻璃接口未返回有效材质；使用渐变背景" }
+    return { glass, error: null }
+  } catch { return { glass: null, error: "当前玻璃接口不可用；使用渐变背景" } }
+}
 
 const KEY_REFRESH = "ai_usage_refresh_minutes_v1"
 export const REFRESH_OPTIONS = [5, 15, 30, 60]

@@ -3,11 +3,11 @@ import {
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, clearConfig, getWidgetBackgroundStyle, saveWidgetBackgroundStyle, WidgetBackgroundStyle, createWidgetGlass, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.2"
+const VERSION = "1.9.3"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
@@ -189,6 +189,8 @@ function SettingsView() {
   const [browserError, setBrowserError] = useState("")
   const [lines, setLines] = useState<string[]>([])
   const [updateMsg, setUpdateMsg] = useState("")
+  const [backgroundStyle, setBackgroundStyle] = useState<WidgetBackgroundStyle>(getWidgetBackgroundStyle())
+  const glassSupport = backgroundStyle === "glass" ? createWidgetGlass() : null
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
@@ -400,7 +402,7 @@ function SettingsView() {
       <Section header={<Text>数据来源</Text>} footer={<Text>切换不删除另一来源的配置、账号或选择。普通 API Key 不能查询 Parrot 管理接口。</Text>}>
         <LabeledContent title="当前脚本版本" value={VERSION} />
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
-          <Text tag={"parrot"}>Parrot密钥</Text>
+          <Text tag={"parrot"}>Parrot</Text>
           <Text tag={"official"}>官方OAuth（Codex/Claude）</Text>
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
@@ -500,6 +502,15 @@ function SettingsView() {
           <Text>账号排序</Text>
         </NavigationLink> : null}
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
+      </Section>
+
+      <Section header={<Text>小组件背景</Text>} footer={<Text>仅改变此脚本主屏小组件，不更改系统全局外观；锁屏不受影响。默认保留渐变。玻璃背景为iOS/iPadOS 26原生UIGlass.clear兼容实验，实际能否透出壁纸由Widget宿主决定，须真机验收；不使用半透明颜色或磨砂材质模拟。不支持时保留渐变。</Text>}>
+        <Picker title="背景样式" value={backgroundStyle} onChanged={async (value: string) => {
+          saveWidgetBackgroundStyle(value as WidgetBackgroundStyle); setBackgroundStyle(getWidgetBackgroundStyle()); await Widget.reloadAll()
+        }}>
+          <Text tag="gradient">渐变背景</Text><Text tag="glass">玻璃背景（实验）</Text>
+        </Picker>
+        {glassSupport?.error ? <Text font={12} foregroundStyle="secondaryLabel">{glassSupport.error}</Text> : null}
       </Section>
 
       <Section header={<Text>小组件刷新</Text>} footer={<Text>这是请求刷新间隔，实际时间由iOS调度，可能延后。更短间隔会增加网络请求与耗电。</Text>}>

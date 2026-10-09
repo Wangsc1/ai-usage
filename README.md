@@ -2,11 +2,15 @@
 
 **独立选择账号额度与重置卡来源，以及 Parrot / Sub2API 今日与本月汇总统计**
 
-基于 [Scripting](https://apps.apple.com/app/id6479691128) 的 iPhone 桌面小组件。App 的额度来源可选 **Parrot密钥 / 官方OAuth（Codex/Claude）/ Sub2API**，统计来源另选 **Parrot / Sub2API**，二选一不合计。账号配置、缓存、排序与用户名按额度来源隔离；重置卡只属于当前额度来源的该账号，不从统计来源或另一额度来源补齐。切换不删除配置或凭据。旧配置默认继续使用Parrot统计。
+基于 [Scripting](https://apps.apple.com/app/id6479691128) 的 iPhone 桌面小组件。App 的额度来源可选 **Parrot / 官方OAuth（Codex/Claude）/ Sub2API**，统计来源另选 **Parrot / Sub2API**，二选一不合计。账号配置、缓存、排序与用户名按额度来源隔离；重置卡只属于当前额度来源的该账号，不从统计来源或另一额度来源补齐。切换不删除配置或凭据。旧配置默认继续使用Parrot统计。
 
 ## 显示内容
 
-浅色/深色自适应渐变背景（日间左上近白，右下冰蓝渐变）、数码管剩余百分比、分段进度条与重置倒计时。
+默认浅色/深色自适应渐变背景（日间左上近白，右下冰蓝渐变）、数码管剩余百分比、分段进度条与重置倒计时。
+
+App“小组件背景”可选 **渐变背景 / 玻璃背景（实验）**，选择仅保存在此脚本并请求重载主屏小组件，不改系统全局外观，锁屏不受影响。实验分支只在检测到iOS/iPadOS 26及以上、且Scripting原生`UIGlass.clear().interactive(false)`可构造时应用：合法背景Shape使用`glassEffect`与`containerRelative`，移除原渐变，不对文字/图标/整个内容应用透明度或玻璃效果。不使用低alpha色块或磨砂Material冒充玻璃；旧系统或API明确不可用时完整保留原渐变，App显示原因。
+
+**玻璃为局部Widget宿主兼容试验，尚未证实能透出壁纸。** 一般View支持原生玻璃不等于Widget宿主支持；系统着色、宿主底色和背景移除行为可能影响结果。若选中后仍有底色或效果不明显，需在iOS26真机验收，不会自动偷换材质；可随时切回渐变。依据Scripting公开[Liquid Glass](https://scriptingapp.github.io/guide/View%20Modifiers/Liquid%20Glass/Liquid%20Glass%20Effect/index.md)、[background VirtualNode](https://scriptingapp.github.io/guide/View%20Modifiers/foregroundStyle%20%26%20background.md)与[Shape](https://scriptingapp.github.io/guide/Types/Shape.md)契约。
 
 | 尺寸 | 内容 |
 | --- | --- |
@@ -22,7 +26,7 @@
 - 额度与统计完全独立：例如官方OAuth额度＋Sub2API统计、Sub2API额度＋Parrot统计。统计失败不阻止任何来源额度刷新；沿用该统计来源缓存并单独报告错误与时效。未配置、字段缺失或无缓存时显示未提供，不填零。Sub2API单账号查询失败保留该来源账号与可用缓存，不丢整份列表；App明确报告失败账号及请求路径。
 - 小号和中号的 `5 h`、`每周`及剩余时间使用相同字号；倒计时中的数字等宽。
 - 在 App“小组件账号”中点账号，填写“小组件用户名”并保存；所有组件尺寸共用，留空保存恢复原名。仅去除首尾空白，Emoji等内容保留；App及排序页仍显示原名。别名按稳定账号ID和来源分别本机保存，刷新、更新、排序不丢失；官方退出仅清除此账号别名，清除Parrot配置同时清除Parrot别名，不影响另一来源。
-- 小组件中账号停用时，Codex/Claude 标题与图标置灰；App 账号列表保持正常颜色。不显示“已停用”文字，也不修改远端账号状态。
+- 小组件统一按账号的明确停用状态将Codex/Claude标题与图标置灰；App账号列表保持正常颜色。Parrot来自`enabled`，Sub2API来自`status=disabled`。官方OAuth当前公开额度接口及本机凭据没有已确认的账号停用字段，无法据此识别远端禁用；额度耗尽、429、请求失败或暂不可用不会冒充停用。三种来源共用同一标题/图标renderer，不显示“已停用”文字，也不修改远端状态。
 - 剩余额度 >60% 绿色、21%–60% 橙色、≤20% 红色；未知显示 `--`。
 - 重置卡位于账号标题行右端，右边对齐百分比，与用户名同字号、垂直居中对齐；有无重置卡时标题均保持相同的垂直对齐。只有明确有效数量大于0时显示 `RE:N`；0、未知或未提供时隐藏。所有尺寸保持一致，不兑换或消耗重置卡。
 - 底部保留唯一额度刷新时间与可点击的双箭头刷新按钮（图标字号9、点击框12×12，与旁边时间同字号），不显示Wi-Fi图标。点击按钮通过AppIntent直接读取当前额度来源及所选统计来源的汇总统计并重载小组件，不打开设置、不改变小组件其他区域的点击行为；失败沿用缓存及原成功时间。App状态区继续显示独立统计错误与完整更新时间。
@@ -36,7 +40,7 @@
 https://scripting.fun/import_scripts?urls=["https%3A%2F%2Fgithub.com%2FWangsc1%2Fai-usage"]
 ```
 
-1. 运行脚本，数据来源选择“Parrot密钥”。
+1. 运行脚本，账号来源选择“Parrot”。
 2. 填写你自己的 Parrot 地址（初次留空，不预置私人服务器）和配置里的 **`managementKey`**；已保存的密钥可留空沿用。
 3. 点“保存并测试”。普通 OpenAI API Key **不是** Parrot 管理密钥，不能用来查询管理接口。
 4. 添加 Scripting 桌面小组件，长按 → 编辑 → 选择本脚本。
@@ -67,7 +71,7 @@ Parrot 保留原管理会话登录、账号列表（含已停用账号）、统�
 
 Claude首次令牌交换通过Scripting全局fetch发送JSON，显式使用`Accept: application/json`及诚实的`User-Agent: ai-usage/当前版本`作标准HTTP兼容；不伪装浏览器或官方CLI，不改变OAuth client ID/权限，不复制WebView Cookie，不增加代理或重试。此受控兼容调整尚未证明能消除429；只需一次新授权观察结果，已有凭据续期不改变headers。
 
-Claude令牌交换遇到HTTP429时结束本次流程，不自动重试一次性授权码。只显示响应格式（JSON/HTML/other）与白名单错误类别，不回显body/message/URL；格式与类别不能单独证明限流来源。有有效`Retry-After`秒数或HTTP日期时，按服务截止时间禁用重新发起Claude授权，显示UTC截止时间与剩余秒数；本机仅保存非秘密冷却截止时间，重开设置也有效，到期后需重新授权。缺失或无效等待时间不编造时长，提示稍后再试，勿连续点击。Codex登录及已授权账号不受此登录冷却影响；这不保证恢复官方token服务。
+Claude令牌交换遇到HTTP429时结束本次流程，不自动重试一次性授权码。只显示响应格式（JSON/HTML/other）与白名单错误类别，不回显body/message/URL；格式与类别不能单独证明限流来源。有有效`Retry-After`秒数或HTTP日期时，按服务截止时间禁用重新发起Claude授权，显示北京时间截止时间与剩余秒数；本机仅保存非秘密冷却截止时间，重开设置也有效，到期后需重新授权。缺失或无效等待时间不编造时长，提示稍后再试，勿连续点击。Codex登录及已授权账号不受此登录冷却影响；这不保证恢复官方token服务。
 
 “取消登录”、离开设置页或15分钟超时不会保存该次登录。退出只删除指定账号的**本机登录**、别名、缓存条目与排序，不删除其他Codex/Claude账号、Parrot配置或浏览器登录，也不是全局撤销官方会话。
 

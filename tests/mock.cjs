@@ -695,7 +695,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.2')
+  assert.equal(api.VERSION,'1.9.3')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1220,7 +1220,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.2')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.3')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1454,7 +1454,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.2'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.3'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1758,7 +1758,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.2')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.3')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1768,7 +1768,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.2 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.3 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1875,14 +1875,14 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.9.2'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.9.3'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.2'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.3'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
@@ -2134,7 +2134,7 @@ async function main() {
     scripting.Widget.reloadAll=reload;scripting.Widget.present=present
     // App exposes independent selectors, saved-key redaction, Sub2API save/reload, and does not modify quota when choosing stats.
     states.length=0;let ui=render();const selectors=ui.filter(x=>x.type==='Picker');assert.ok(selectors.some(x=>x.props.title==='统计来源'))
-    const quotaSelector=selectors.find(x=>x.props.title==='账号来源');assert.ok(expand(quotaSelector).some(x=>x==='Sub2API'));assert.ok(!selectors.some(x=>x.props.title==='来源'))
+    const quotaSelector=selectors.find(x=>x.props.title==='账号来源');assert.ok(expand(quotaSelector).some(x=>x==='Sub2API'));assert.ok(!selectors.some(x=>x.props.title==='来源'));assert.ok(expand(quotaSelector).includes('Parrot'));assert.ok(!expand(quotaSelector).includes('Parrot密钥'))
     assert.ok(ui.some(x=>x.type==='SecureField'&&x.props.title==='Sub2API管理员密钥'&&x.props.value===''))
     assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('mock-admin')))
     ui.find(x=>x.type==='TextField'&&x.props.title==='Sub2API地址').props.onChanged('https://sub.example.test/')
@@ -2162,6 +2162,107 @@ async function main() {
     scripting.Widget.family='systemLarge';scripting.Widget.parameter='';scripting.Widget.displaySize={width:358,height:376}
   }
   console.log('PASS: Sub2API upstream admin schema/x-api-key GET-only; unfiltered full-site actual_cost/calendar day+month/timezone; complete pagination/only real Claude+Codex windows; 3 quota x 2 stats/RE no cross-source; partial-account/cache/list/stats failures; aliases/order; defaults; App+widget+intent real selected-source entry; dedup; config changes/redaction/late-read guards; all family layouts unchanged')
+  // Renderer contract only: synthetic equivalent Account states across sources do NOT prove official disabled API support.
+  {
+    const savedSource=api.getSource(),savedParameter=scripting.Widget.parameter,savedFamily=scripting.Widget.family
+    const {AccountTitle}=load('widget.tsx')
+    for(const provider of ['claude','openai'])for(const state of [
+      {enabled:true,available:true,pct:75}, {enabled:false,available:false,pct:75},
+      {enabled:true,available:false,pct:75}, {enabled:true,available:true,pct:0}
+    ]){
+      const a={...accounts[0],id:'renderer-contract-only',name:'same-title',provider,enabled:state.enabled,available:state.available,
+        fiveHour:{remainingPercent:state.pct,usedPercent:100-state.pct,resetsAt:null},sevenDay:{remainingPercent:state.pct,usedPercent:100-state.pct,resetsAt:null},resetCredits:2}
+      let baseline=null
+      for(const source of ['parrot','official','sub2api']){
+        api.saveSource(source)
+        const tree=expand(AccountTitle({acc:a,font:11})),serialized=JSON.stringify(tree)
+        if(baseline==null)baseline=serialized;else assert.equal(serialized,baseline)
+        const title=tree.find(x=>x.type==='Text'&&x.props.fontWeight==='semibold');assert.equal(title.props.foregroundStyle.light,state.enabled?'#1C1C1E':'#5E6068')
+        const icon=tree.find(x=>x.type==='SVG');assert.ok(icon)
+        if(!state.enabled){assert.ok(icon.props.code.light.includes('fill="#5E6068"'));assert.ok(icon.props.code.dark.includes('fill="#8E8E93"'))}
+      }
+      for(const family of ['systemSmall','systemMedium','systemLarge','systemExtraLarge','accessoryRectangular','accessoryCircular','accessoryInline']){
+        scripting.Widget.family=family;scripting.Widget.parameter='1';let base=null
+        for(const source of ['parrot','official','sub2api']){
+          api.saveSource(source);const tree=expand(Root({data:{...singleData,accounts:[a]},stale:false,error:null})),serialized=JSON.stringify(tree)
+          if(base==null)base=serialized;else assert.equal(serialized,base,family+' source-independent rendering')
+        }
+      }
+    }
+    const fixture=JSON.parse(fs.readFileSync(path.join(root,'tests/fixtures/sub2api-admin.json'),'utf8'))
+    assert.equal(api.mapSub2APIAccount({...fixture.accounts[0],status:'disabled'},fixture.claudeUsage,fixture.claudeCredits).enabled,false)
+    const unavailable=api.mapSub2APIAccount({...fixture.accounts[0],status:'error',schedulable:false},fixture.claudeUsage,fixture.claudeCredits)
+    assert.equal(unavailable.enabled,true);assert.equal(unavailable.available,false)
+    api.saveSource(savedSource);scripting.Widget.parameter=savedParameter;scripting.Widget.family=savedFamily
+  }
+  console.log('PASS: renderer contract ONLY (not official disabled API claim): three sources identical enabled/disabled/temporarily-unavailable/zero-percent title+SVG and all-family trees; actual Sub2API status disabled vs error distinct; Parrot option label exact, management credential unchanged')
+  // Native glass background compatibility experiment: documented Device + UIGlass API; no native-host transparency claim.
+  {
+    const oldDevice=scripting.Device,oldGlass=scripting.UIGlass,oldReload=scripting.Widget.reloadAll
+    const oldSource=api.getSource(),oldFamily=scripting.Widget.family,oldParameter=scripting.Widget.parameter
+    const oldStyle=storage.get('ai_usage_widget_background_v1')
+    let clearCalls=0,interactiveCalls=[]
+    const material={testNativeMaterial:'UIGlass.clear',interactive:false}
+    const validGlass={clear:()=>{clearCalls++;return {interactive:value=>{interactiveCalls.push(value);return material}}}}
+    const device={systemName:'iOS',systemVersion:'26.1',isiOSAppOnMac:false}
+    scripting.Device=device;scripting.UIGlass=validGlass
+    storage.delete('ai_usage_widget_background_v1');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
+    assert.equal(api.createWidgetGlass().glass,material)
+    for(const family of ['systemSmall','systemMedium','systemLarge','systemExtraLarge'])for(const parameter of ['','1','1,2','3,1,4']){
+      scripting.Widget.family=family;scripting.Widget.parameter=parameter
+      api.saveWidgetBackgroundStyle('gradient');const defaultRoot=Root({data:singleData,stale:false,error:null}),defaultTree=JSON.stringify(expand(defaultRoot))
+      assert.ok(defaultRoot.props.widgetBackground.light.gradient);assert.equal(defaultRoot.props.background,undefined)
+      api.saveWidgetBackgroundStyle('glass');const glassRoot=Root({data:singleData,stale:false,error:null})
+      assert.equal(glassRoot.props.widgetBackground,'clear')
+      const layer=glassRoot.props.background;assert.equal(layer.type,'Rectangle');assert.equal(layer.props.fill,'clear')
+      assert.equal(layer.props.glassEffect.glass,material);assert.equal(layer.props.glassEffect.shape,'containerRelative')
+      assert.equal(layer.props.frame.maxWidth,'infinity');assert.equal(layer.props.frame.maxHeight,'infinity')
+      assert.equal(glassRoot.props.glassEffect,undefined);assert.equal(glassRoot.props.opacity,undefined)
+      // Only root background properties differ; no child/font/colors/padding/layout/button/stats change.
+      const restored={...glassRoot,props:{...glassRoot.props,widgetBackground:defaultRoot.props.widgetBackground}}
+      delete restored.props.background
+      assert.equal(JSON.stringify(expand(restored)),defaultTree,family+' '+parameter)
+      // Explicit unsupported runtime preserves the entire old gradient output.
+      for(const unsupported of [
+        {device:{...device,systemVersion:'18.6'},glass:validGlass},
+        {device:{...device,systemVersion:'25.9'},glass:validGlass},
+        {device:{...device,systemVersion:''},glass:validGlass},
+        {device:{...device,systemName:'macOS'},glass:validGlass},
+        {device:{...device,isiOSAppOnMac:true},glass:validGlass},
+        {device,glass:{}}, {device,glass:{clear:()=>({})}}, {device,glass:{clear:()=>{throw Error('SECRET-native-error')}}}
+      ]){
+        scripting.Device=unsupported.device;scripting.UIGlass=unsupported.glass
+        const support=api.createWidgetGlass();assert.equal(support.glass,null);assert.ok(support.error.includes('渐变背景'));assert.ok(!support.error.includes('SECRET'))
+        assert.equal(JSON.stringify(expand(Root({data:singleData,stale:false,error:null}))),defaultTree)
+      }
+      scripting.Device=device;scripting.UIGlass=validGlass
+    }
+    assert.ok(interactiveCalls.length>0);assert.ok(interactiveCalls.every(v=>v===false))
+    // Accessory branches return before querying glass capability: native factory is never called.
+    for(const family of ['accessoryRectangular','accessoryCircular','accessoryInline']){
+      scripting.Widget.family=family;scripting.Widget.parameter='1'
+      api.saveWidgetBackgroundStyle('gradient');const original=JSON.stringify(expand(Root({data:singleData,stale:false,error:null})))
+      api.saveWidgetBackgroundStyle('glass');const count=clearCalls
+      assert.equal(JSON.stringify(expand(Root({data:singleData,stale:false,error:null}))),original);assert.equal(clearCalls,count)
+    }
+    // Picker only persists this script's style and requests reload, not network/settings/global theme.
+    api.saveWidgetBackgroundStyle('gradient');states.length=0;let settings=render();let reloads=0;scripting.Widget.reloadAll=async()=>{reloads++}
+    const picker=settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式');assert.equal(picker.props.value,'gradient')
+    assert.ok(expand(picker).includes('玻璃背景（实验）'));before=calls.length
+    const creds=JSON.stringify([...kc.entries()]),sources=[api.getSource(),api.getStatisticsSource()]
+    await picker.props.onChanged('glass');assert.equal(api.getWidgetBackgroundStyle(),'glass');assert.equal(reloads,1);assert.equal(calls.length,before)
+    assert.equal(JSON.stringify([...kc.entries()]),creds);assert.deepEqual([api.getSource(),api.getStatisticsSource()],sources)
+    states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'glass')
+    scripting.Device={...device,systemVersion:'18.0'};states.length=0;settings=render()
+    assert.ok(settings.some(x=>typeof x==='string'&&x.includes('当前使用渐变背景')))
+    await settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.onChanged('gradient');assert.equal(reloads,2);assert.equal(api.getWidgetBackgroundStyle(),'gradient')
+    api.saveWidgetBackgroundStyle('bad-value');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
+    scripting.Device={...device,systemName:'iPadOS'};scripting.UIGlass=validGlass;assert.equal(api.createWidgetGlass().error,null)
+    if(oldStyle==null)storage.delete('ai_usage_widget_background_v1');else storage.set('ai_usage_widget_background_v1',oldStyle)
+    scripting.Device=oldDevice;scripting.UIGlass=oldGlass;scripting.Widget.reloadAll=oldReload
+    api.saveSource(oldSource);scripting.Widget.family=oldFamily;scripting.Widget.parameter=oldParameter;states.length=0
+  }
+  console.log('PASS: glass EXPERIMENT documented iOS26 Device/UIGlass.clear().interactive(false), native shape glassEffect + containerRelative in VirtualNode background; default gradient/invalid config/unsupported APIs identical; only background differs; accessory unchanged/no glass calls; Picker persistence/reload/no network/global-theme/credential/source changes; NOT wallpaper/native-host proof')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
