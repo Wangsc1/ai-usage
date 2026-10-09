@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.10')
+  assert.equal(api.VERSION,'1.8.11')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1029,14 +1029,34 @@ async function main() {
   assert.equal(batch.filter(c=>c.url.endsWith('/usage')).length,3)
   assert.equal(storage.get('ai_usage_official_cache_v1').today,null);assert.equal(storage.get('ai_usage_cache_v1'),undefined)
   assert.equal(storage.get('ai_usage_parrot_stats_v1').accounts,undefined)
+  function assertOriginalRefreshFooter(data,stale){
+    const tree=expand(Root({data,stale,error:null}))
+    const footers=tree.filter(x=>x.type==='HStack'&&x.props.spacing===3&&Array.isArray(x.props.children)&&x.props.children[0]?.type==='Image'&&x.props.children[0]?.props.font===6.3)
+    assert.equal(footers.length,1)
+    const children=Array.from(footers[0].props.children);assert.deepEqual(children.map(x=>x.type),['Image','Text'])
+    assert.equal(children[0].props.systemName,stale?'wifi.slash':'arrow.triangle.2.circlepath');assert.equal(children[0].props.font,6.3)
+    assert.equal(children[0].props.foregroundStyle.light,stale?'#D9770B':'#5E6068');assert.equal(children[0].props.foregroundStyle.dark,stale?'#FF9F0A':'#8E8E93')
+    assert.equal(children[1].props.children,api.fmtTime(data.fetchedAt));assert.equal(children[1].props.font,9);assert.equal(children[1].props.monospacedDigit,true)
+    assert.equal(children[1].props.foregroundStyle.light,'#5E6068');assert.equal(children[1].props.foregroundStyle.dark,'#8E8E93')
+    assert.ok(!tree.some(x=>typeof x==='string'&&x.includes('统计P')))
+  }
+  assert.ok(!fs.readFileSync(path.join(root,'widget.tsx'),'utf8').includes('statsAge'))
   const statsTimestamp=combined.data.statistics.fetchedAt,quotaTimestamp=combined.data.fetchedAt
   // Every layout that owns statistics uses the actual combined load result, not filtered account values.
   for(const [family,param] of [['systemSmall','1'],['systemMedium','1,2'],['systemMedium','1,2,3'],['systemLarge','']]){
     scripting.Widget.family=family;scripting.Widget.parameter=param
     const tree=expand(Root({data:combined.data,stale:false,error:null})),texts=tree.filter(x=>x.type==='Text').map(x=>[].concat(x.props.children).join(''))
     assert.ok(texts.includes(api.fmtTokens(5700)));assert.ok(texts.includes(api.fmtTokens(6900)));assert.ok(texts.includes(api.fmtUsd(7.8)))
-    assert.ok(!tree.includes('only-parrot'));assert.ok(texts.some(x=>x.startsWith('统计P ')))
+    assert.ok(!tree.includes('only-parrot'));assertOriginalRefreshFooter(combined.data,false);assertOriginalRefreshFooter(combined.data,true)
   }
+  for(const family of ['systemSmall','systemMedium','systemLarge']){
+    scripting.Widget.family=family
+    for(const statistics of [undefined,{...combined.data.statistics,fetchedAt:null,error:'stats unavailable',stale:false},{...combined.data.statistics,fetchedAt:now-2880*60000,error:'stats failed',stale:true}]){
+      const footerData={...combined.data,statistics}
+      for(const stale of [false,true])assertOriginalRefreshFooter(footerData,stale)
+    }
+  }
+  console.log('PASS: restored footer in all families: ONLY original icon+data.fetchedAt time; spacing3/font6.3/font9/monospaced/color and stale wifi unchanged; no 统计P/cache-age/unavailable extra Text; statistics composition retained')
   // The executable widget entry itself must call the composed loader.
   let presented;scripting.Widget.present=(tree,options)=>{presented={tree,options}}
   before=calls.length;await load('widget.tsx').runWidget()
@@ -1054,16 +1074,16 @@ async function main() {
   assert.equal(combined.stale,false);assert.equal(combined.error,null);assert.equal(combined.data.today.totalTokens,5700)
   assert.equal(combined.data.statistics.stale,true);assert.equal(combined.data.statistics.fetchedAt,statsTimestamp)
   assert.ok(combined.data.fetchedAt>quotaTimestamp);assert.ok(combined.data.statistics.error)
-  assert.ok(expand(Root({data:combined.data,stale:false,error:null})).some(x=>typeof x==='string'&&x.startsWith('统计P缓存 ')))
-  for(const [minutes,label] of [[1,'1分前'],[120,'2小时前'],[2880,'2天前']]){
+  assertOriginalRefreshFooter(combined.data,false);assertOriginalRefreshFooter(combined.data,true)
+  for(const minutes of [1,120,2880]){
     const ageData={...combined.data,statistics:{...combined.data.statistics,fetchedAt:now-minutes*60000}}
-    assert.ok(expand(Root({data:ageData,stale:false,error:null})).includes('统计P缓存 '+label))
+    assertOriginalRefreshFooter(ageData,false);assertOriginalRefreshFooter(ageData,true)
   }
   states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
   assert.ok(render().includes('⚠️ 额度已刷新；Parrot统计独立读取失败'))
   // No statistics cache, malformed response, and no config all yield unknown, never fabricated zero.
   storage.delete('ai_usage_parrot_stats_v1');combined=await api.loadUsage();assert.equal(combined.data.today,null);assert.equal(combined.data.month,null);assert.equal(combined.data.statistics.fetchedAt,null)
-  assert.ok(expand(Root({data:combined.data,stale:false,error:null})).includes('统计P未提供'))
+  assertOriginalRefreshFooter(combined.data,false);assertOriginalRefreshFooter(combined.data,true)
   statsFailure=false;missingOverall=true;combined=await api.loadUsage();assert.equal(combined.data.today,null);assert.equal(combined.data.statistics.error,'Parrot今日/本月统计未提供');missingOverall=false
   kc.delete('parrot_base_url');before=calls.length;combined=await api.loadUsage()
   assert.equal(combined.data.today,null);assert.equal(combined.data.statistics.error,'Parrot统计未配置');assert.equal(combined.data.accounts.length,3)
@@ -1141,7 +1161,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.10')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.11')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1374,7 +1394,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.10'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.11'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1673,7 +1693,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.10')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.11')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1683,7 +1703,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.10 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.11 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)

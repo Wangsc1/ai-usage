@@ -165,16 +165,9 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
   </HStack>
 }
 
-function statsAge(at: number): string {
-  const minutes = Math.max(0, Math.floor((Date.now() - at) / 60000))
-  return minutes < 60 ? `${minutes}分前` : minutes < 1440 ? `${Math.floor(minutes / 60)}小时前` : `${Math.floor(minutes / 1440)}天前`
-}
 function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   return <HStack spacing={3}>
     <Image systemName={stale ? "wifi.slash" : "arrow.triangle.2.circlepath"} font={6.3} foregroundStyle={stale ? ORANGE : SUB} />
-    {data.statistics ? <Text font={7} foregroundStyle={data.statistics.error ? ORANGE : SUB}>
-      {data.statistics.fetchedAt == null ? "统计P未提供" : `统计P${data.statistics.stale ? "缓存" : ""} ${data.statistics.stale ? statsAge(data.statistics.fetchedAt) : fmtTime(data.statistics.fetchedAt)}`}
-    </Text> : null}
     <Text font={9} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
   </HStack>
 }
