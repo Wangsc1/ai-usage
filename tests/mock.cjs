@@ -693,7 +693,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.12')
+  assert.equal(api.VERSION,'1.9.13')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1190,7 +1190,16 @@ async function main() {
       writeAsData:async(p,d)=>{writes.push(p);files.set(p,Buffer.from(d.bytes))},writeAsString:async(p,s)=>{writes.push(p);files.set(p,Buffer.from(s))},remove:async p=>{removes.push(p);files.delete(p)}}
   }
   context.Crypto={generateSymmetricKey:bits=>{assert.equal(bits,256);return binary(nodeCrypto.randomBytes(bits/8))},sha256:data=>binary(nodeCrypto.createHash('sha256').update(data.bytes).digest())}
-  context.HttpResponseBody={text:text=>text};context.HttpResponse={ok:body=>({statusCode:200,reasonPhrase:'OK',body})}
+  const htmlBodies=new Set()
+  context.HttpResponseBody={text:text=>text,html:html=>{htmlBodies.add(html);return html}};context.HttpResponse={ok:body=>({statusCode:200,reasonPhrase:'OK',body})}
+  function assertCallbackHTML(reply,message,secrets=[]){
+    assert.equal(reply.statusCode,200);assert.equal(reply.reasonPhrase,'OK');assert.equal(typeof reply.then,'undefined');assert.ok(htmlBodies.has(reply.body))
+    assert.ok(reply.body.startsWith('<!doctype html><html><head><meta charset="utf-8">'));assert.ok(reply.body.indexOf('<meta charset="utf-8">')<1024)
+    assert.ok(reply.body.includes('<meta name="viewport" content="width=device-width, initial-scale=1">'));assert.ok(reply.body.includes('<meta name="color-scheme" content="light dark">'))
+    assert.ok(reply.body.includes('<body><p>'+message+'</p></body></html>'));assert.equal(Buffer.from(reply.body,'utf8').toString('utf8'),reply.body)
+    assert.ok(!/https?:|localhost|127\.0\.0\.1|code=|state=|token=|<script/i.test(reply.body))
+    for(const secret of secrets)if(secret)assert.ok(!reply.body.includes(secret))
+  }
   let serverError=false,diagnosticStage=null,startNativeError=null,startThrows=false,startCalls=0,startScenario=null
   context.HttpServer=class {
     constructor(){if(diagnosticStage==='构造')throw new Error('SECRET-native-url-token');this.stops=0;this.port=null;this.state='stopped';this.handlers={};claudeServers.push(this)}
@@ -1223,7 +1232,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.12')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.13')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1457,7 +1466,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.12'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.13'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1625,12 +1634,15 @@ async function main() {
   assert.ok(authUI.includes('等待Claude回调（尚未收到）'))
   const delayedBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
   const invalidReply=stageServer.handlers['/callback'](callback('mock-wrong-current-state'))
-  assert.equal(invalidReply.statusCode,200);assert.equal(typeof invalidReply.then,'undefined')
+  assertCallbackHTML(invalidReply,'本次回调无效或已失效。请返回脚本检查授权。',['mock-wrong-current-state',stageAttempt.state,stageAttempt.verifier])
+  assert.equal(stageAttempt.code,null);assert.equal(stageAttempt.consumed,false)
   assert.ok(render().includes('收到Claude回调，但未通过本次校验'))
   holdToken=true;holdProfile=true;releaseClaudeRequest=null;before=calls.length
   const actualCallback={path:'/callback',target:'/callback?code=mock-stage-code&state='+stageAttempt.state,method:'GET',address:'127.0.0.1',headers:{},queryParams:[{key:'code',value:'mock-stage-code'},{key:'state',value:stageAttempt.state}]}
   const immediateReply=stageServer.handlers['/callback'](actualCallback)
-  assert.equal(immediateReply.statusCode,200);assert.equal(typeof immediateReply.then,'undefined')
+  assertCallbackHTML(immediateReply,'已收到本次授权回调，请返回脚本等待账号保存。此页面不代表授权已完成。',[stageAttempt.state,stageAttempt.verifier,'mock-stage-code',actualCallback.target])
+  assert.equal(stageAttempt.code,'mock-stage-code');assert.equal(stageAttempt.consumed,false)
+  console.log('PASS: valid/invalid callback both synchronous HTTP200 via documented html API; complete UTF8-first meta/viewport/light-dark document and original Chinese messages; no code/state/verifier/token/URL disclosure; validation and delayed token/profile flow unchanged')
   assert.equal(calls.length,before);assert.ok(render().includes('收到Claude回调，已通过本次校验'))
   assert.ok(!immediateReply.body.includes(stageAttempt.state));assert.ok(!immediateReply.body.includes('mock-stage-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
@@ -1761,7 +1773,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.12')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.13')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1771,7 +1783,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.12 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.13 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1885,7 +1897,7 @@ async function main() {
     const name=u.replace(/^.*\/main\//,'').split('?')[0];updateReads.push(name)
     assert.ok(name==='script.json'||names.includes(name))
     if(name===failDownload)return resp(404)
-    if(name==='script.json')return resp(200,{version:'1.9.12'})
+    if(name==='script.json')return resp(200,{version:'1.9.13'})
     return {status:200,text:async()=>name===emptyDownload?'':fs.readFileSync(path.join(root,name),'utf8')}
   }
   handler=downloadHandler

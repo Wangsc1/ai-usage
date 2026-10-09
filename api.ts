@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.9.12"
+export const VERSION = "1.9.13"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -927,13 +927,13 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
           states.length === 1 && states[0] === d.state && codes.length === 1 && typeof codes[0] === "string" && !!codes[0] && !d.code
         if (!ok) {
           if (!d.cancelled && !d.consumed && !d.code) loginProgress(d, "收到Claude回调，但未通过本次校验")
-          return HttpResponse.ok(HttpResponseBody.text("本次回调无效或已失效。请返回脚本检查授权。"))
+          return HttpResponse.ok(HttpResponseBody.html('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>授权回调</title></head><body><p>本次回调无效或已失效。请返回脚本检查授权。</p></body></html>'))
         }
         d.code = codes[0]
         loginProgress(d, "收到Claude回调，已通过本次校验")
         // Return a synchronous response without awaiting exchange. Native socket flush timing is platform-owned.
         Promise.resolve().then(onCode)
-        return HttpResponse.ok(HttpResponseBody.text("已收到本次授权回调，请返回脚本等待账号保存。此页面不代表授权已完成。"))
+        return HttpResponse.ok(HttpResponseBody.html('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>授权回调</title></head><body><p>已收到本次授权回调，请返回脚本等待账号保存。此页面不代表授权已完成。</p></body></html>'))
       })
       stage = "启动"
       let error: string | null
