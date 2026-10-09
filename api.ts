@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.9.7"
+export const VERSION = "1.9.8"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -89,10 +89,13 @@ type ParrotStats = Pick<UsageData, "today" | "month" | "todayByFamily" | "monthB
 export type LoadResult = { data: UsageData | null; stale: boolean; error: string | null }
 
 // Local, opt-in home-screen background (system Material, Dock-like). Does not change system appearance or accessory widgets.
-export type WidgetBackgroundStyle = "gradient" | "glass"
+export type WidgetBackgroundStyle = "gradient" | "glass" | "none"
 const KEY_WIDGET_BACKGROUND = "ai_usage_widget_background_v1"
-export function getWidgetBackgroundStyle(): WidgetBackgroundStyle { return Storage.get<string>(KEY_WIDGET_BACKGROUND) === "glass" ? "glass" : "gradient" }
-export function saveWidgetBackgroundStyle(style: WidgetBackgroundStyle) { if (style === "gradient" || style === "glass") Storage.set(KEY_WIDGET_BACKGROUND, style) }
+export function getWidgetBackgroundStyle(): WidgetBackgroundStyle {
+  const style = Storage.get<string>(KEY_WIDGET_BACKGROUND)
+  return style === "glass" || style === "none" ? style : "gradient"
+}
+export function saveWidgetBackgroundStyle(style: WidgetBackgroundStyle) { if (style === "gradient" || style === "glass" || style === "none") Storage.set(KEY_WIDGET_BACKGROUND, style) }
 const KEY_REFRESH = "ai_usage_refresh_minutes_v1"
 export const REFRESH_OPTIONS = [5, 15, 30, 60]
 export function getRefreshMinutes(): number {

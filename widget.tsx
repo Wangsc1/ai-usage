@@ -530,7 +530,8 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
   // Public background accepts a VirtualNode; ShapeProps.fill accepts system Material.
   // Explicit clear decorative background + separate native Material layer avoids assigning Material to widgetBackground.
   // No private containerBackground/removal API or assumed default host fill. Content is untouched.
-  const backgroundProps = getWidgetBackgroundStyle() === "glass" ? {
+  const backgroundStyle = getWidgetBackgroundStyle()
+  const backgroundProps = backgroundStyle === "none" ? { widgetBackground: "clear" } : backgroundStyle === "glass" ? {
     widgetBackground: "clear",
     background: <DockBackgroundLayers />,
   } : { widgetBackground: BG }
