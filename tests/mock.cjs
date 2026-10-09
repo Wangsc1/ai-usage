@@ -428,7 +428,7 @@ async function main() {
       const titleRows=tree.filter(x=>x.type==='HStack'&&x.props.children?.[0]?.type?.name==='ProviderIcon')
       assert.equal(titleRows.length,titleCount)
       const show=typeof reset==='number'&&Number.isFinite(reset)&&reset>0
-      const texts=tree.filter(x=>x.type==='Text'&&[].concat(x.props.children).join('').startsWith('重置'))
+      const texts=tree.filter(x=>x.type==='Text'&&[].concat(x.props.children).join('').startsWith('RE:'))
       assert.equal(texts.length,show?titleCount:0)
       assert.ok(!tree.some(x=>typeof x==='string'&&x.startsWith('重置:')))
       for(const row of titleRows){
@@ -437,7 +437,7 @@ async function main() {
         if(show){
           assert.equal(row.props.alignment,'bottom');assert.equal(row.props.frame.maxWidth,'infinity')
           const [spacer,text]=children.slice(-2);assert.equal(spacer.type,'Spacer');assert.equal(text.type,'Text')
-          assert.equal([].concat(text.props.children).join(''),`重置：${reset}`)
+          assert.equal([].concat(text.props.children).join(''),`RE:${reset}`)
           assert.equal(JSON.stringify(text.props.foregroundStyle),JSON.stringify({light:'#5E6068',dark:'#8E8E93'}))
           assert.equal(text.props.font,name.props.font);assert.equal(text.props.lineLimit,1)
           assert.equal(text.props.fixedSize.horizontal,true);assert.equal(text.props.fixedSize.vertical,true)
@@ -674,7 +674,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.32')
+  assert.equal(api.VERSION,'1.7.33')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
