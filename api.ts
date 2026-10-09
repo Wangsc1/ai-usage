@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.13"
+export const VERSION = "1.8.14"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -733,7 +733,7 @@ function persist(items: Credential[]) {
 export function claudeAccounts(): { id: string; name: string; email: string; provider: "claude" }[] {
   return credentials().map((a, i) => ({ id: a.id, name: a.email || `Claude账号 ${i + 1}（邮箱未提供）`, email: a.email, provider: "claude" as const }))
 }
-export function logoutClaude(id: string) { persist(credentials().filter(a => a.id !== id)) }
+export function logoutClaude(id: string) { persist(credentials().filter(a => a.id !== id)); forgetClaudeUsageState(id) }
 const base64url = (data: any): string => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 function active(d: ClaudeLogin) {
   if (d.cancelled || Date.now() >= d.expiresAt) throw new Error("Claude本次授权已取消或过期，请重新开始")
@@ -908,6 +908,35 @@ function claudeResetCount(b: any): number | null {
   }
   return total
 }
+// Official 2.1.295 K_: remember a 429/403 per bearer for Retry-After, else 5 min, capped at 1 h; do not ask again meanwhile.
+// Only non-secret account-ID deadlines/counts are stored locally.
+const USAGE_LIMIT = "ai_usage_claude_usage_cooldown_v1", CARDS = "ai_usage_claude_reset_cards_v1"
+const CARD_INTERVAL = 3600000
+type Deadlines = Record<string, number>
+function deadline(key: string, id: string): number {
+  const value = (Storage.get<Deadlines>(key) ?? {})[id]
+  return typeof value === "number" && Number.isFinite(value) && value > Date.now() ? value : 0
+}
+function remember429(key: string, id: string, r: any): number {
+  let retry = ""
+  try { retry = String(r.headers?.get("Retry-After") || "").trim() } catch { /* unreadable header = absent */ }
+  let ms = 0
+  if (/^\d+$/.test(retry)) ms = Number(retry) * 1000
+  else if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retry)) ms = Date.parse(retry) - Date.now()
+  const until = Date.now() + Math.min(Number.isFinite(ms) && ms > 0 ? ms : 300000, 3600000)
+  const all = Storage.get<Deadlines>(key) ?? {}
+  Storage.set(key, { ...all, [id]: Math.max(until, deadline(key, id)) })
+  return until
+}
+const waitText = (until: number) => `冷却至${new Date(until).toISOString()}，剩余${Math.ceil((until - Date.now()) / 1000)}秒`
+type CardCache = Record<string, { count: number | null; at: number }>
+const claudeLoads = new Map<string, Promise<Account>>()
+export function forgetClaudeUsageState(id: string) {
+  for (const key of [USAGE_LIMIT, CARDS]) {
+    const all = { ...(Storage.get<Record<string, unknown>>(key) ?? {}) }
+    if (id in all) { delete all[id]; Storage.set(key, all) }
+  }
+}
 export function mapClaudeUsage(b: any): { fiveHour: QuotaWindow; sevenDay: QuotaWindow; resetCredits: number | null } {
   const window = (w: any): QuotaWindow => {
     const used = typeof w?.utilization === "number" && Number.isFinite(w.utilization) ? Math.max(0, Math.min(100, w.utilization)) : null
@@ -919,25 +948,48 @@ export function mapClaudeUsage(b: any): { fiveHour: QuotaWindow; sevenDay: Quota
   return { fiveHour: window(b?.five_hour), sevenDay: window(b?.seven_day), resetCredits: claudeResetCount(b) }
 }
 export async function loadClaudeAccounts(): Promise<Account[]> {
-  return Promise.all(credentials().map(async item => {
+  // In-process de-duplication: concurrent App/widget loads share one request sequence per account.
+  return Promise.all(credentials().map(item => {
+    const pending = claudeLoads.get(item.id)
+    if (pending) return pending
+    const job = loadClaudeAccount(item).finally(() => { if (claudeLoads.get(item.id) === job) claudeLoads.delete(item.id) })
+    claudeLoads.set(item.id, job)
+    return job
+  }))
+}
+async function loadClaudeAccount(item: Credential): Promise<Account> {
+  {
+    const limited = deadline(USAGE_LIMIT, item.id)
+    if (limited) throw new Error(`Claude额度读取冷却中（此前GET /api/oauth/usage受限），${waitText(limited)}；本次未发送请求`)
     let current = item.expiresAt <= Date.now() + 60000 ? await refresh(item) : item
     const getUsage = () => request(API + "/usage", { headers: { Authorization: `Bearer ${current.access}`,
       "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
     let r = await getUsage()
     if (r.status === 401) { current = await refresh(current); r = await getUsage() }
-    if (r.status !== 200) throw new Error(`Claude额度读取失败（HTTP ${r.status}）`)
+    if (r.status === 429 || r.status === 403) {
+      const until = remember429(USAGE_LIMIT, item.id, r)
+      throw new Error(`Claude额度读取受限（HTTP ${r.status}，GET /api/oauth/usage），${waitText(until)}；不自动重试`)
+    }
+    if (r.status !== 200) throw new Error(`Claude额度读取失败（HTTP ${r.status}，GET /api/oauth/usage）`)
     const mapped = mapClaudeUsage(await json(r))
-    if (mapped.resetCredits == null) {
-      // Official read-only selector; never call the reset_rate_limits POST/claim endpoint.
+    const cards = Storage.get<CardCache>(CARDS) ?? {}, cached = cards[item.id]
+    if (mapped.resetCredits != null) Storage.set(CARDS, { ...cards, [item.id]: { count: mapped.resetCredits, at: Date.now() } })
+    else if (cached && typeof cached.at === "number" && Date.now() - cached.at < CARD_INTERVAL) mapped.resetCredits = cached.count
+    else if (!deadline(CARDS, item.id)) {
+      // Optional same-endpoint selector at most hourly; never the reset_rate_limits POST/claim endpoint.
       try {
-        const cards = await request(API + "/usage?cedar_ember=1&skip_spend=1", { headers: { Authorization: `Bearer ${current.access}`,
+        const cardResponse = await request(API + "/usage?cedar_ember=1&skip_spend=1", { headers: { Authorization: `Bearer ${current.access}`,
           "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
-        if (cards.status === 200) mapped.resetCredits = claudeResetCount(await json(cards))
+        if (cardResponse.status === 429 || cardResponse.status === 403) remember429(CARDS, item.id, cardResponse)
+        else if (cardResponse.status === 200) {
+          mapped.resetCredits = claudeResetCount(await json(cardResponse))
+          Storage.set(CARDS, { ...(Storage.get<CardCache>(CARDS) ?? {}), [item.id]: { count: mapped.resetCredits, at: Date.now() } })
+        }
       } catch { /* optional card lookup must not block the successfully read quota */ }
     }
     if (!credentials().some(a => a.id === item.id)) throw new Error("该Claude账号已退出")
     return { id: current.id, name: current.email || "Claude账号（邮箱未提供）", provider: "claude", enabled: true, available: true, ...mapped }
-  }))
+  }
 }
 }
 

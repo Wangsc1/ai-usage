@@ -695,7 +695,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.13')
+  assert.equal(api.VERSION,'1.8.14')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1192,7 +1192,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.13')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.14')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1426,7 +1426,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.13'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.14'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1725,7 +1725,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.13')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.14')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1735,7 +1735,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.13 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.14 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1811,6 +1811,7 @@ async function main() {
       if(scenario==='malformed')return {status:200,json:async()=>{throw Error('SECRET-json')}}
       return resp(200,scenario==='positive'?resetFixture([resetGrant('a',2),resetGrant('b',3)]):scenario==='zero'?resetFixture([resetGrant('a',0)]):{})
     }
+    storage.delete('ai_usage_claude_reset_cards_v1');storage.delete('ai_usage_claude_usage_cooldown_v1')
     before=calls.length;const readRows=await api.loadClaudeAccounts()
     assert.equal(readRows.length,resetCredentialRows.length)
     const expected=scenario==='inline'?4:scenario==='positive'?5:scenario==='zero'?0:null
@@ -1841,17 +1842,82 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.8.13'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.8.14'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.8.13'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.8.14'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
+  // 1.8.14 request budget: one plain usage per refresh, hourly card selector, 429 cooldown per account, in-flight sharing.
+  storage.delete('ai_usage_claude_reset_cards_v1');storage.delete('ai_usage_claude_usage_cooldown_v1')
+  const usageURL='https://api.anthropic.com/api/oauth/usage',budgetRows=JSON.parse(kc.get('ai_usage_claude_oauth_v1'))
+  budgetRows.forEach(a=>a.expiresAt=now+7200000);kc.set('ai_usage_claude_oauth_v1',JSON.stringify(budgetRows))
+  const nAcc=budgetRows.length;assert.ok(nAcc>0)
+  let usageMode='ok',cardMode='positive',retryAfter=null,holdUsage=false,releaseUsage=[]
+  quotaFailure=false;statsFailure=false
+  handler=async(u,o)=>{
+    if(!u.startsWith('https://api.anthropic.com/'))return combinedHandler(u,o)
+    assert.ok(!o.method||o.method==='GET')
+    if(u===usageURL){
+      if(holdUsage)await new Promise(r=>releaseUsage.push(r))
+      if(usageMode==='429')return {status:429,headers:{get:n=>n==='Retry-After'?retryAfter:null},json:async()=>({error:{type:'rate_limit_error'}})}
+      return resp(200,claudeUsage)
+    }
+    assert.equal(u,cardsURL)
+    if(cardMode==='429')return {status:429,headers:{get:()=>null},json:async()=>({})}
+    return resp(200,resetFixture([resetGrant('a',2)]))
+  }
+  const countCalls=from=>({usage:calls.slice(from).filter(x=>x.url===usageURL).length,cards:calls.slice(from).filter(x=>x.url===cardsURL).length})
+  // First refresh: one usage + one card selector per account; second within the hour: usage only, card count from cache.
+  before=calls.length;let rows=await api.loadClaudeAccounts();assert.deepEqual(countCalls(before),{usage:nAcc,cards:nAcc});assert.ok(rows.every(a=>a.resetCredits===2))
+  now+=60000;before=calls.length;rows=await api.loadClaudeAccounts();assert.deepEqual(countCalls(before),{usage:nAcc,cards:0});assert.ok(rows.every(a=>a.resetCredits===2))
+  now+=3600000;budgetRows.forEach(a=>a.expiresAt=now+7200000);kc.set('ai_usage_claude_oauth_v1',JSON.stringify(budgetRows))
+  before=calls.length;await api.loadClaudeAccounts();assert.deepEqual(countCalls(before),{usage:nAcc,cards:nAcc})
+  // Concurrent App/Widget/AppIntent loads share one in-flight request per account.
+  holdUsage=true;releaseUsage=[];before=calls.length
+  const concurrent=[api.loadClaudeAccounts(),api.loadClaudeAccounts(),api.loadClaudeAccounts()]
+  for(let i=0;i<30&&releaseUsage.length<nAcc;i++)await Promise.resolve()
+  assert.equal(releaseUsage.length,nAcc);holdUsage=false;releaseUsage.forEach(r=>r())
+  const shared=await Promise.all(concurrent);assert.equal(countCalls(before).usage,nAcc);assert.equal(shared[0][0],shared[1][0])
+  // Card selector 429 never becomes a quota failure; it is remembered and not retried.
+  now+=3600001;budgetRows.forEach(a=>a.expiresAt=now+7200000);kc.set('ai_usage_claude_oauth_v1',JSON.stringify(budgetRows))
+  cardMode='429';before=calls.length;rows=await api.loadClaudeAccounts()
+  assert.deepEqual(countCalls(before),{usage:nAcc,cards:nAcc});assert.ok(rows.every(a=>a.fiveHour.remainingPercent===62.5))
+  before=calls.length;await api.loadClaudeAccounts();assert.deepEqual(countCalls(before),{usage:nAcc,cards:0});cardMode='positive'
+  // Plain usage 429: exact path + Retry-After, cache preserved, no retry, later refreshes send nothing until deadline.
+  const isolatedCodex=kc.get('ai_usage_official_oauth_v1');kc.delete('ai_usage_official_oauth_v1')
+  const officialBefore=await api.loadOfficialUsage();assert.equal(officialBefore.stale,false,String(officialBefore.error))
+  for(const [ra,ms] of [['120',120000],[null,300000],['99999',3600000],['DATE+600',600000],['past-date',300000]]){
+    storage.delete('ai_usage_claude_usage_cooldown_v1');usageMode='429';now+=1000
+    retryAfter=ra==='DATE+600'?new Date(now+600000).toUTCString():ra==='past-date'?new Date(now-60000).toUTCString():ra
+    const cachedAt=api.officialCached().fetchedAt
+    before=calls.length;const limited=await api.loadOfficialUsage()
+    assert.equal(countCalls(before).usage,nAcc===1?1:countCalls(before).usage);assert.ok(countCalls(before).usage<=nAcc)
+    assert.equal(limited.stale,true);assert.equal(api.officialCached().fetchedAt,cachedAt)
+    assert.ok(limited.error.includes('HTTP 429，GET /api/oauth/usage'));assert.ok(limited.error.includes('不自动重试'))
+    assert.ok([Math.round(ms/1000),Math.round(ms/1000)-1].some(n=>limited.error.includes('剩余'+n+'秒')),limited.error);assert.ok(!limited.error.includes('cedar_ember'))
+    const stored=storage.get('ai_usage_claude_usage_cooldown_v1');assert.ok(Object.values(stored).some(v=>Math.abs(v-(now+ms))<1000))
+    usageMode='ok';before=calls.length;const cooling=await api.loadOfficialUsage()
+    assert.equal(countCalls(before).usage,0);assert.equal(cooling.stale,true);assert.ok(cooling.error.includes('本次未发送请求'))
+    // AppIntent button during cooldown performs a local cache result + reload, zero Claude requests.
+    let intentReloads=0;const savedReload=scripting.Widget.reloadAll;scripting.Widget.reloadAll=async()=>{intentReloads++}
+    before=calls.length;await registeredIntents.get('RefreshUsageIntent').perform(undefined)
+    assert.equal(countCalls(before).usage,0);assert.equal(intentReloads,1);scripting.Widget.reloadAll=savedReload
+    now+=ms+1000;before=calls.length;const resumed=await api.loadOfficialUsage()
+    assert.equal(countCalls(before).usage,nAcc);assert.equal(resumed.stale,false)
+  }
+  if(isolatedCodex!=null)kc.set('ai_usage_official_oauth_v1',isolatedCodex)
+  // Logout clears that account's cooldown/card records only.
+  storage.set('ai_usage_claude_usage_cooldown_v1',{[budgetRows[0].id]:now+60000,other:now+60000});storage.set('ai_usage_claude_reset_cards_v1',{[budgetRows[0].id]:{count:1,at:now},other:{count:1,at:now}})
+  const savedCreds=kc.get('ai_usage_claude_oauth_v1');api.logoutOfficial(budgetRows[0].id)
+  assert.deepEqual(Object.keys(storage.get('ai_usage_claude_usage_cooldown_v1')),['other']);assert.deepEqual(Object.keys(storage.get('ai_usage_claude_reset_cards_v1')),['other'])
+  kc.set('ai_usage_claude_oauth_v1',savedCreds);storage.delete('ai_usage_claude_usage_cooldown_v1');storage.delete('ai_usage_claude_reset_cards_v1');handler=claudeHandler
+  console.log('PASS: Claude refresh = one GET /api/oauth/usage per account; card selector at most hourly with cached count; concurrent App/widget/intent share in-flight; card 429 never a quota failure; usage 429 shows exact path + Retry-After/5min/1h cap, keeps cache, no retry, sends nothing (incl. button) until deadline; logout clears only that account')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
