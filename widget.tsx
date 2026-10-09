@@ -9,13 +9,13 @@ const C = (light: string, dark: string): DC => ({ light, dark })
 const BG = {
   light: {
     gradient: [
-      { color: "#B4E1FA", location: 0 },
-      { color: "#9DD5F6", location: 0.45 },
-      { color: "#86C8F1", location: 0.8 },
-      { color: "#74BCEC", location: 1 },
+      { color: "#86C8F1", location: 0 },
+      { color: "#86C8F1", location: 0.45 },
+      { color: "#9DD5F6", location: 0.75 },
+      { color: "#B4E1FA", location: 1 },
     ],
-    startPoint: { x: 0.3, y: 0 },
-    endPoint: { x: 0.7, y: 1 },
+    startPoint: { x: 0, y: 0 },
+    endPoint: { x: 1, y: 1 },
   },
   dark: {
     gradient: [
