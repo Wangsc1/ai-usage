@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.13"
+const VERSION = "1.9.14"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
@@ -533,9 +533,7 @@ function SettingsView() {
       </Section>
 
       <Section header={<Text>预览小组件</Text>}>
-        <Button title={"小"} action={() => Widget.preview({ family: "systemSmall" })} />
-        <Button title={"中"} action={() => Widget.preview({ family: "systemMedium" })} />
-        <Button title={"大"} action={() => Widget.preview({ family: "systemLarge" })} />
+        <Button title="预览小组件" action={() => Widget.preview({ family: "systemSmall" })} />
       </Section>
 
       <Section header={<Text>更新</Text>} footer={<Text>从 GitHub 拉取最新版本覆盖当前脚本，配置和密钥保留。</Text>}>
