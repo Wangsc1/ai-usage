@@ -151,8 +151,9 @@ function providerName(p: string) {
 function AccountTitle({ acc, font }: { acc: Account; font: number }) {
   const showReset = typeof acc.resetCredits === "number" && Number.isFinite(acc.resetCredits) && acc.resetCredits > 0
   // Same full-width container as the quota rows: trailing reset text aligns to the entire LCD/% right edge.
-  // Only the positive-count case changes layout; unknown and zero remain distinct data values, both hidden.
-  return <HStack spacing={5} alignment={showReset ? "bottom" : undefined}
+  // Keep the original default-center title alignment for BOTH sources; reset must not lower the username.
+  // RE uses the same font and center axis as the username, while retaining the full-width trailing edge.
+  return <HStack spacing={5}
     frame={showReset ? { maxWidth: "infinity" } : undefined}>
     <ProviderIcon provider={acc.provider} size={font + 1} muted={!acc.enabled} />
     <Text font={font} fontWeight="semibold" foregroundStyle={acc.enabled ? FG : SUB} lineLimit={1}>{providerName(acc.provider)}</Text>

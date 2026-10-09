@@ -435,7 +435,7 @@ async function main() {
         const children=Array.from(row.props.children).filter(Boolean),name=children[2]
         assert.equal(name.props.font,font-3);assert.equal(name.props.lineLimit,1)
         if(show){
-          assert.equal(row.props.alignment,'bottom');assert.equal(row.props.frame.maxWidth,'infinity')
+          assert.equal(row.props.alignment,undefined);assert.equal(row.props.frame.maxWidth,'infinity')
           const [spacer,text]=children.slice(-2);assert.equal(spacer.type,'Spacer');assert.equal(text.type,'Text')
           assert.equal([].concat(text.props.children).join(''),`RE:${reset}`)
           assert.equal(JSON.stringify(text.props.foregroundStyle),JSON.stringify({light:'#5E6068',dark:'#8E8E93'}))
@@ -446,6 +446,24 @@ async function main() {
       }
     }
   }
+  // Direct same-account parity: reset=1 adds only trailing Spacer/RE, never changes title vertical alignment.
+  // This checks real emitted props against the pre-existing Parrot/no-reset default-center baseline,
+  // not native glyph/pixel positions (those still require a phone).
+  for(const source of ['parrot','official'])for(const font of [11,12])for(const enabled of [true,false])for(const available of [true,false]){
+    api.saveSource(source)
+    const a={...singleData.accounts[0],id:'title-layout-parity',name:'gpt2',enabled,available,resetCredits:null}
+    const noReset=AccountTitle({acc:a,font}),withReset=AccountTitle({acc:{...a,resetCredits:1},font})
+    assert.equal(noReset.props.alignment,undefined);assert.equal(withReset.props.alignment,noReset.props.alignment)
+    assert.equal(withReset.props.spacing,noReset.props.spacing)
+    const original=Array.from(noReset.props.children).filter(Boolean),added=Array.from(withReset.props.children).filter(Boolean)
+    assert.equal(JSON.stringify(added.slice(0,original.length)),JSON.stringify(original))
+    const username=original[2],re=added.at(-1)
+    assert.equal(re.props.font,username.props.font);assert.equal(re.props.foregroundStyle,username.props.foregroundStyle)
+    for(const text of [username,re])for(const forbidden of ['offset','padding','alignmentGuide','baselineOffset'])assert.equal(text.props[forbidden],undefined)
+    assert.equal(added.at(-2).type,'Spacer');assert.equal(withReset.props.frame.maxWidth,'infinity')
+  }
+  api.saveSource('parrot')
+  console.log('PASS: reset/no-reset title parity in both sources/fonts/enabled/availability; original leading children/spacing/default center identical; RE retains gray size/trailing edge; NOT native pixel proof')
   // Exactly three FINAL selected accounts: shared SmallStats in top-left, original Quads in the other slots.
   scripting.Widget.family='systemMedium'
   const findCells=tree=>{
@@ -674,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.37')
+  assert.equal(api.VERSION,'1.7.38')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
