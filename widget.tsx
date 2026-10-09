@@ -166,7 +166,7 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
 
 function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   return <HStack spacing={3}>
-    <Image systemName={stale ? "wifi.slash" : "arrow.triangle.2.circlepath"} font={8} foregroundStyle={stale ? ORANGE : SUB} />
+    <Image systemName={stale ? "wifi.slash" : "arrow.triangle.2.circlepath"} font={9} foregroundStyle={stale ? ORANGE : SUB} />
     <Text font={9} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
   </HStack>
 }
