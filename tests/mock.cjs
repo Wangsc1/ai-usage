@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.11')
+  assert.equal(api.VERSION,'1.8.12')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1161,7 +1161,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.11')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.12')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1175,6 +1175,7 @@ async function main() {
       if(holdProfile)await new Promise(resolve=>releaseClaudeRequest=resolve)
       return claudeProfileFailure?resp(503):resp(200,{account:{uuid:claudeAccount,email:claudeEmail},organization:{uuid:claudeOrg}})
     }
+    if(u==='https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1'){assert.ok(!o.method||o.method==='GET');return resp(200,{})}
     if(u==='https://api.anthropic.com/api/oauth/usage'){
       assert.equal(o.headers['anthropic-beta'],'oauth-2025-04-20');assert.ok(!o.headers['ChatGPT-Account-ID']);assert.ok(o.headers.Authorization.startsWith('Bearer mock-claude-'))
       if(usage401){usage401=false;return resp(401)}
@@ -1394,7 +1395,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.11'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.12'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1693,7 +1694,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.11')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.12')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1703,7 +1704,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.11 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.12 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1754,6 +1755,55 @@ async function main() {
     await missingRow.props.children[2].props.action();assert.ok(!api.officialAccounts().some(a=>a.id===targetID))
   }
   console.log('PASS: auto/manual success uses one unified Claude full-email/Spacer/点击退出 row only; older reauthorized ID not last-account inference; exact target exit preserves other Claude/Codex IDs; no 已保存/generic duplicate success text; missing-email explicit fallback in both modes')
+  // Fixtures mirror official 2.1.295 Bn/Xn schema (not captured user account responses).
+  const resetGrant=(id,left)=>({id,label:'Plan reset',resets_total:5,resets_left:left,starts_at:null,ends_at:null,clears:['five_hour','seven_day'],paused:false,usable_now:false,use_requires_limit:true,percent_used:{},blocking:[]})
+  const resetFixture=(grants)=>({cedar_ember:{eligible:true,at_limit:false,exhausted:[],grants,next_grant_id:null,weekly_resets_at:null,cooldown_until:null,event_props:null}})
+  for(const [body,count] of [[{},null],[{cedar_ember:null},null],[{cedar_ember:{eligible:true}},null],[resetFixture([]),0],[resetFixture([resetGrant('grant-a',0)]),0],[resetFixture([resetGrant('grant-a',2),resetGrant('grant-b',3)]),5]]){
+    const mapped=api.mapClaudeUsage({...claudeUsage,...body});assert.equal(mapped.resetCredits,count);assert.equal(mapped.fiveHour.remainingPercent,62.5);assert.equal(mapped.sevenDay.remainingPercent,19)
+  }
+  for(const value of [-1,NaN,Infinity,'2',1.5,Number.MAX_SAFE_INTEGER+1,undefined])assert.equal(api.mapClaudeUsage(resetFixture([resetGrant('grant-a',value)])).resetCredits,null)
+  assert.equal(api.mapClaudeUsage(resetFixture([resetGrant('same',2),resetGrant('same',2)])).resetCredits,null)
+  assert.equal(api.mapClaudeUsage(resetFixture([resetGrant('a',Number.MAX_SAFE_INTEGER),resetGrant('b',1)])).resetCredits,null)
+  assert.equal(api.mapClaudeUsage({...claudeUsage,extra_usage:{used_credits:99}}).resetCredits,null)
+  const cardsURL='https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1'
+  const queryCredentials=kc.get('ai_usage_claude_oauth_v1'),queryCodex=kc.get('ai_usage_official_oauth_v1')
+  const resetCredentialRows=JSON.parse(queryCredentials);assert.ok(resetCredentialRows.length>0)
+  resetCredentialRows.forEach(a=>a.expiresAt=now+3600000);kc.set('ai_usage_claude_oauth_v1',JSON.stringify(resetCredentialRows))
+  for(const scenario of ['inline','positive','zero','missing','http','network','malformed']){
+    handler=async(u,o)=>{
+      assert.ok(!o.method||o.method==='GET');assert.ok(!u.includes('reset_rate_limits'));assert.ok(o.headers.Authorization.startsWith('Bearer mock-claude-'))
+      assert.equal(o.headers['anthropic-beta'],'oauth-2025-04-20');assert.equal(o.headers['Content-Type'],'application/json')
+      if(u==='https://api.anthropic.com/api/oauth/usage')return resp(200,{...claudeUsage,...(scenario==='inline'?resetFixture([resetGrant('inline',4)]):{})})
+      assert.equal(u,cardsURL)
+      if(scenario==='network')throw Error('SECRET-query-network')
+      if(scenario==='http')return resp(503,{error:'SECRET-query-response'})
+      if(scenario==='malformed')return {status:200,json:async()=>{throw Error('SECRET-json')}}
+      return resp(200,scenario==='positive'?resetFixture([resetGrant('a',2),resetGrant('b',3)]):scenario==='zero'?resetFixture([resetGrant('a',0)]):{})
+    }
+    before=calls.length;const readRows=await api.loadClaudeAccounts()
+    assert.equal(readRows.length,resetCredentialRows.length)
+    const expected=scenario==='inline'?4:scenario==='positive'?5:scenario==='zero'?0:null
+    for(const a of readRows){assert.equal(a.resetCredits,expected);assert.equal(a.fiveHour.remainingPercent,62.5);assert.equal(a.sevenDay.remainingPercent,19)}
+    assert.equal(calls.slice(before).filter(x=>x.url===cardsURL).length,scenario==='inline'?0:resetCredentialRows.length)
+    assert.ok(calls.slice(before).every(x=>!x.options.method||x.options.method==='GET'))
+    assert.equal(kc.get('ai_usage_official_oauth_v1'),queryCodex)
+    // Existing RE rules and all widget layouts remain untouched: positive displayed, zero/unknown hidden.
+    for(const family of ['systemSmall','systemMedium','systemLarge']){
+      scripting.Widget.family=family;scripting.Widget.parameter='1'
+      const resetTree=expand(Root({data:{...result.data,accounts:[readRows[0]]},stale:false,error:null}))
+      const resetTexts=resetTree.filter(x=>x.type==='Text').map(x=>[].concat(x.props.children).join(''));assert.equal(resetTexts.includes('RE:'+expected),expected!=null&&expected>0,JSON.stringify({family,scenario,expected,resetTexts}))
+      assert.ok(!resetTree.includes('RE:0'));assert.ok(!resetTree.includes('RE:null'))
+    }
+  }
+  // Logout during a delayed optional card query must not resurrect the account.
+  const targetResetID=resetCredentialRows[0].id;let releaseReset
+  handler=async(u,o)=>u===cardsURL?await new Promise(resolve=>{releaseReset=()=>resolve(resp(200,resetFixture([resetGrant('a',2)]))) }):resp(200,claudeUsage)
+  // Keep one credential for the delayed-query assertion, restore untouched rows afterwards.
+  kc.set('ai_usage_claude_oauth_v1',JSON.stringify([resetCredentialRows[0]]));const lateReset=api.loadClaudeAccounts()
+  for(let i=0;i<20&&!releaseReset;i++)await Promise.resolve();assert.ok(releaseReset)
+  api.logoutOfficial(targetResetID);releaseReset();await assert.rejects(()=>lateReset,/已退出/)
+  kc.set('ai_usage_claude_oauth_v1',queryCredentials);handler=claudeHandler
+  console.log('PASS: official cedar_ember schema/grants resets_left sum (missing unknown/explicit zero/positive/invalid/overflow); inline or one optional GET only; HTTP/network/JSON failures do not block quota; no reset/claim POST; logout late-query guard; RE>0 existing layout rules preserved')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.11"
+export const VERSION = "1.8.12"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -52,7 +52,7 @@ export type Account = {
   available: boolean
   fiveHour: QuotaWindow
   sevenDay: QuotaWindow
-  resetCredits: number | null // 重置卡数量（仅 OpenAI）
+  resetCredits: number | null // 官方只读重置卡数量；未提供/查询失败为未知
 }
 
 export type UsageData = {
@@ -893,7 +893,22 @@ async function refresh(item: Credential): Promise<Credential> {
   refreshing.set(item.id, job)
   try { return await job } finally { refreshing.delete(item.id) }
 }
-export function mapClaudeUsage(b: any): { fiveHour: QuotaWindow; sevenDay: QuotaWindow; resetCredits: null } {
+// Official 2.1.295 cedar_ember status: grants[].resets_left; CLI Ue sums the remaining grants.
+// Do not substitute extra_usage.used_credits (money), or infer zero from an absent/malformed status.
+function claudeResetCount(b: any): number | null {
+  const status = b?.cedar_ember
+  if (typeof status?.eligible !== "boolean" || !Array.isArray(status.grants)) return null
+  let total = 0
+  const ids = new Set<string>()
+  for (const grant of status.grants) {
+    if (typeof grant?.id !== "string" || !/^[a-z0-9_-]{1,40}$/.test(grant.id) || ids.has(grant.id) ||
+        !Number.isSafeInteger(grant.resets_left) || grant.resets_left < 0) return null
+    ids.add(grant.id); total += grant.resets_left
+    if (!Number.isSafeInteger(total)) return null
+  }
+  return total
+}
+export function mapClaudeUsage(b: any): { fiveHour: QuotaWindow; sevenDay: QuotaWindow; resetCredits: number | null } {
   const window = (w: any): QuotaWindow => {
     const used = typeof w?.utilization === "number" && Number.isFinite(w.utilization) ? Math.max(0, Math.min(100, w.utilization)) : null
     const at = typeof w?.resets_at === "string" ? Date.parse(w.resets_at) : NaN
@@ -901,7 +916,7 @@ export function mapClaudeUsage(b: any): { fiveHour: QuotaWindow; sevenDay: Quota
       resetsAt: Number.isFinite(at) ? new Date(at).toISOString() : null }
   }
   // Never substitute model-specific Opus/Sonnet or extra usage for the aggregate weekly window.
-  return { fiveHour: window(b?.five_hour), sevenDay: window(b?.seven_day), resetCredits: null }
+  return { fiveHour: window(b?.five_hour), sevenDay: window(b?.seven_day), resetCredits: claudeResetCount(b) }
 }
 export async function loadClaudeAccounts(): Promise<Account[]> {
   return Promise.all(credentials().map(async item => {
@@ -912,6 +927,14 @@ export async function loadClaudeAccounts(): Promise<Account[]> {
     if (r.status === 401) { current = await refresh(current); r = await getUsage() }
     if (r.status !== 200) throw new Error(`Claude额度读取失败（HTTP ${r.status}）`)
     const mapped = mapClaudeUsage(await json(r))
+    if (mapped.resetCredits == null) {
+      // Official read-only selector; never call the reset_rate_limits POST/claim endpoint.
+      try {
+        const cards = await request(API + "/usage?cedar_ember=1&skip_spend=1", { headers: { Authorization: `Bearer ${current.access}`,
+          "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
+        if (cards.status === 200) mapped.resetCredits = claudeResetCount(await json(cards))
+      } catch { /* optional card lookup must not block the successfully read quota */ }
+    }
     if (!credentials().some(a => a.id === item.id)) throw new Error("该Claude账号已退出")
     return { id: current.id, name: current.email || "Claude账号（邮箱未提供）", provider: "claude", enabled: true, available: true, ...mapped }
   }))
