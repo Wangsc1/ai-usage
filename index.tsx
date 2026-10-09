@@ -3,11 +3,11 @@ import {
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { GLASS_ASSETS, downloadGlassAsset, ensureGlassAssets, getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, getWidgetBackgroundStyle, saveWidgetBackgroundStyle, WidgetBackgroundStyle, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.10"
+const VERSION = "1.9.11"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
@@ -37,32 +37,25 @@ async function updateFromGitHub(force: boolean): Promise<string | null> {
     if (!t.trim()) throw new Error(`${f} 内容为空`)
     bodies.push(t)
   }
-  const images: Data[] = []
-  for (const asset of GLASS_ASSETS) images.push(await downloadGlassAsset(asset.file))
-  // Back up only the seven owned resources; keep all credentials and unrelated files untouched.
-  const names = [...GLASS_ASSETS.map(a => a.file), ...FILES]
-  const previous: (Data | string | null)[] = []
-  for (let i = 0; i < names.length; i++) {
-    const path = Script.directory + "/" + names[i]
-    previous.push(!FileManager.existsSync(path) ? null : i < GLASS_ASSETS.length ? await FileManager.readAsData(path) : await FileManager.readAsString(path))
+  // Back up only the four code files; never touch credentials or other local files.
+  const previous: (string | null)[] = []
+  for (const file of FILES) {
+    const path = Script.directory + "/" + file
+    previous.push(FileManager.existsSync(path) ? await FileManager.readAsString(path) : null)
   }
-  await FileManager.createDirectory(Script.directory + "/assets", true)
   let attempted = -1
   try {
-    for (let i = 0; i < names.length; i++) {
+    for (let i = 0; i < FILES.length; i++) {
       attempted = i
-      const path = Script.directory + "/" + names[i]
-      if (i < GLASS_ASSETS.length) await FileManager.writeAsData(path, images[i])
-      else await FileManager.writeAsString(path, bodies[i - GLASS_ASSETS.length])
+      await FileManager.writeAsString(Script.directory + "/" + FILES[i], bodies[i])
     }
   } catch {
     let restored = true
     for (let i = attempted; i >= 0; i--) {
       try {
-        const path = Script.directory + "/" + names[i]
+        const path = Script.directory + "/" + FILES[i]
         if (previous[i] == null) { if (FileManager.existsSync(path)) await FileManager.remove(path) }
-        else if (i < GLASS_ASSETS.length) await FileManager.writeAsData(path, previous[i] as Data)
-        else await FileManager.writeAsString(path, previous[i] as string)
+        else await FileManager.writeAsString(path, previous[i]!)
       } catch { restored = false }
     }
     throw new Error(restored ? "更新写入失败，已恢复原文件" : "更新写入失败，部分文件未恢复；请重新导入完整脚本")
@@ -216,17 +209,10 @@ function SettingsView() {
   const [browserError, setBrowserError] = useState("")
   const [lines, setLines] = useState<string[]>([])
   const [updateMsg, setUpdateMsg] = useState("")
-  const [backgroundStyle, setBackgroundStyle] = useState<WidgetBackgroundStyle>(getWidgetBackgroundStyle())
-  const [backgroundMsg, setBackgroundMsg] = useState("")
-  const prepareBackgrounds = async () => {
-    try { await ensureGlassAssets(); setBackgroundMsg("") }
-    catch { setBackgroundMsg("背景图片获取失败；缺少图片时使用渐变。请检查网络后重新运行脚本或重选背景。") }
-  }
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
   useEffect(() => {
-    void prepareBackgrounds().then(() => Widget.reloadAll())
     if (getSource() === "official" || getSource() === "sub2api" && subCur.adminKey || cur.managementKey) test()
   }, [])
 
@@ -534,17 +520,6 @@ function SettingsView() {
           <Text>账号排序</Text>
         </NavigationLink> : null}
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
-      </Section>
-
-      <Section header={<Text>小组件背景</Text>} footer={<Text>默认渐变；三种玻璃背景使用固定原图，等比例居中裁切，不是实时透明。图片保存在脚本本机资源中，缺失时由App获取；获取失败使用渐变。仅影响主屏，锁屏不受影响。</Text>}>
-        <Picker title="背景样式" value={backgroundStyle} onChanged={async (value: string) => {
-          saveWidgetBackgroundStyle(value as WidgetBackgroundStyle); setBackgroundStyle(getWidgetBackgroundStyle())
-          if (getWidgetBackgroundStyle() !== "gradient") await prepareBackgrounds()
-          await Widget.reloadAll()
-        }}>
-          <Text tag="gradient">渐变背景</Text><Text tag="glass1">玻璃背景 1</Text><Text tag="glass2">玻璃背景 2</Text><Text tag="glass3">玻璃背景 3</Text>
-        </Picker>
-        {backgroundMsg ? <Text font={12} foregroundStyle="secondaryLabel">{backgroundMsg}</Text> : null}
       </Section>
 
       <Section header={<Text>小组件刷新</Text>} footer={<Text>这是请求刷新间隔，实际时间由iOS调度，可能延后。更短间隔会增加网络请求与耗电。</Text>}>

@@ -1,8 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
-import { Script } from "scripting"
 
 
-export const VERSION = "1.9.10"
+export const VERSION = "1.9.11"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -89,69 +88,6 @@ export type UsageData = {
 type ParrotStats = Pick<UsageData, "today" | "month" | "todayByFamily" | "monthByFamily" | "fetchedAt">
 export type LoadResult = { data: UsageData | null; stale: boolean; error: string | null }
 
-// Local image backgrounds; never fetched by Widget rendering. Original JPEG bytes are kept intact.
-export type WidgetBackgroundStyle = "gradient" | "glass1" | "glass2" | "glass3"
-const KEY_WIDGET_BACKGROUND = "ai_usage_widget_background_v1"
-export const GLASS_ASSETS = [
-  { style: "glass1", file: "assets/glass-1.jpg", size: 77515, sha256: "c12b9af9fa64c52a0dabb9d82a5e7df4035c54054e3692e7828619fa4d1f44a3" },
-  { style: "glass2", file: "assets/glass-2.jpg", size: 496482, sha256: "f4bbd3de162421613a63d9e943f15a0757a0cd38bc464c61ebff612e11774441" },
-  { style: "glass3", file: "assets/glass-3.jpg", size: 336946, sha256: "f09103499c6d951f98fd5d2ac79b2a93c03cd61e3ca8ecb6d4a3f99a551af33a" },
-] as const
-export function getWidgetBackgroundStyle(): WidgetBackgroundStyle {
-  const style = Storage.get<string>(KEY_WIDGET_BACKGROUND)
-  if (style === "glass") return "glass1"
-  return style === "glass1" || style === "glass2" || style === "glass3" ? style : "gradient"
-}
-export function saveWidgetBackgroundStyle(style: WidgetBackgroundStyle) {
-  if (style === "gradient" || style === "glass1" || style === "glass2" || style === "glass3") Storage.set(KEY_WIDGET_BACKGROUND, style)
-}
-export function glassAssetPath(file: string): string { return Script.directory + "/" + file }
-export function validateGlassAsset(file: string, data: Data): void {
-  const asset = GLASS_ASSETS.find(a => a.file === file)
-  if (!asset || data.size !== asset.size || Crypto.sha256(data).toHexString() !== asset.sha256 || !UIImage.fromData(data)) throw new Error(`背景资源 ${file} 校验失败`)
-}
-export function getGlassBackgroundPath(style: WidgetBackgroundStyle): string | null {
-  const asset = GLASS_ASSETS.find(a => a.style === style)
-  if (!asset) return null
-  try {
-    const path = glassAssetPath(asset.file)
-    if (!FileManager.existsSync(path)) return null
-    validateGlassAsset(asset.file, FileManager.readAsDataSync(path))
-    return path
-  } catch { return null }
-}
-export async function downloadGlassAsset(file: string): Promise<Data> {
-  if (!GLASS_ASSETS.some(a => a.file === file)) throw new Error("无效背景资源")
-  const response = await fetch("https://raw.githubusercontent.com/Wangsc1/ai-usage/main/" + file + `?t=${Date.now()}`, { timeout: 20 })
-  if (response.status !== 200) throw new Error(`下载 ${file} 失败（HTTP ${response.status}）`)
-  const data = await response.data()
-  validateGlassAsset(file, data)
-  return data
-}
-let glassAssetsPending: Promise<void> | null = null
-export async function ensureGlassAssets(): Promise<void> {
-  if (glassAssetsPending) return glassAssetsPending
-  const missing = GLASS_ASSETS.filter(a => !getGlassBackgroundPath(a.style))
-  if (!missing.length) return
-  glassAssetsPending = (async () => {
-    // Download and validate all missing images before touching the local cache.
-    const downloaded: Data[] = []
-    for (const asset of missing) downloaded.push(await downloadGlassAsset(asset.file))
-    const previous = missing.map(a => FileManager.existsSync(glassAssetPath(a.file)) ? FileManager.readAsDataSync(glassAssetPath(a.file)) : null)
-    await FileManager.createDirectory(Script.directory + "/assets", true)
-    let attempted = -1
-    try {
-      for (let i = 0; i < missing.length; i++) { attempted = i; await FileManager.writeAsData(glassAssetPath(missing[i].file), downloaded[i]) }
-    } catch {
-      let restored = true
-      for (let i = attempted; i >= 0; i--) {
-        try { if (previous[i]) await FileManager.writeAsData(glassAssetPath(missing[i].file), previous[i]!); else if (FileManager.existsSync(glassAssetPath(missing[i].file))) await FileManager.remove(glassAssetPath(missing[i].file)) } catch { restored = false }
-      }
-      throw new Error(restored ? "背景资源保存失败，已恢复原文件" : "背景资源保存失败，部分文件未恢复；请重新运行脚本获取资源")
-    }
-  })()
-  try { await glassAssetsPending } finally { glassAssetsPending = null }
-}
 const KEY_REFRESH = "ai_usage_refresh_minutes_v1"
 export const REFRESH_OPTIONS = [5, 15, 30, 60]
 export function getRefreshMinutes(): number {

@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, getWidgetBackgroundStyle, getGlassBackgroundPath } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -512,18 +512,10 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />
   }
-  // A full-widget image, not a content-sized layer; original pixels are neither blurred nor tinted.
-  // File lookup is local-only. Missing or invalid images safely use the original gradient.
-  const backgroundPath = getGlassBackgroundPath(getWidgetBackgroundStyle())
-  const backgroundProps = backgroundPath ? {
-    widgetBackground: "clear",
-    background: <Image filePath={backgroundPath} resizable scaleToFill
-      frame={{ width: Widget.displaySize.width, height: Widget.displaySize.height, alignment: "center" }} clipped />,
-  } : { widgetBackground: BG }
   return <ZStack
     padding={{ horizontal: 14, vertical: 12 }}
     frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-    {...backgroundProps}
+    widgetBackground={BG}
   >
     <ZStack padding={{ bottom: data ? 14 : 0 }} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>{body}</ZStack>
     {data ? <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
