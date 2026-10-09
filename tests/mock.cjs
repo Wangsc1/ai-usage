@@ -21,7 +21,7 @@ const context = vm.createContext({ console, Date: Clock, Math, Map, Set, Promise
 function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
-  let code = fs.readFileSync(name === 'background-baseline-api.ts' ? path.join(path.dirname(process.env.BACKGROUND_BASELINE_PATH),'api.ts') : name === 'background-baseline.tsx' ? process.env.BACKGROUND_BASELINE_PATH : name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'pre-accessory-widget.tsx' ? process.env.PRE_ACCESSORY_WIDGET_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
+  let code = fs.readFileSync(name === 'renewal-fresh-api.ts' ? path.join(root,'api.ts') : name === 'background-baseline-api.ts' ? path.join(path.dirname(process.env.BACKGROUND_BASELINE_PATH),'api.ts') : name === 'background-baseline.tsx' ? process.env.BACKGROUND_BASELINE_PATH : name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'pre-accessory-widget.tsx' ? process.env.PRE_ACCESSORY_WIDGET_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
   if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout, run as runWidget }')
   if (name === 'background-baseline.tsx' || name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx' || name === 'pre-accessory-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
   if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari, presentIsolatedAuthorization }')
@@ -31,6 +31,7 @@ function load(name) {
   vm.runInContext(`(function(require,module,exports){${out.outputText}\n})`,context)(req,m,m.exports)
   return m.exports
 }
+const globalModuleLoad=load
 const api = load('api.ts'), official = api
 function resp(status,b={}) { return {status,json:async()=>b} }
 function token(account='account-A',user='user-A',expires=now+3600000) {
@@ -126,7 +127,7 @@ async function main() {
   handler=async u=>u.endsWith('/usage')?resp(200,{rate_limit:usage.rate_limit}):resp(404)
   result=await official.loadOfficialUsage(); assert.equal(result.data.accounts[0].resetCredits,null)
   handler=async()=>resp(500,{error:'private-secret'}); result=await official.loadOfficialUsage(); assert.equal(result.stale,true); assert.ok(!result.error.includes('private-secret'))
-  handler=async()=>resp(401); result=await official.loadOfficialUsage(); assert.equal(result.stale,true); assert.match(result.error,/登录已失效/)
+  handler=async()=>resp(401); result=await official.loadOfficialUsage(); assert.equal(result.stale,true); assert.match(result.error,/尚不能确认登录失效/)
   // Logout only this account; cache/order pruned, obsolete selected IDs untouched and ignored.
   api.saveWidgetName(first.id,'官方退出清除','official');api.saveWidgetName(first.id,'同ID另一来源','parrot')
   handler=async u=>u.endsWith('/usage')?resp(200,{rate_limit:usage.rate_limit}):resp(404)
@@ -693,7 +694,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.15')
+  assert.equal(api.VERSION,'1.9.16')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1227,7 +1228,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.15')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.16')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1461,7 +1462,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.15'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.16'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1768,7 +1769,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.15')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.16')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1778,7 +1779,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.15 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.16 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2277,6 +2278,84 @@ async function main() {
     kc.clear();for(const [k,v] of oldKC)kc.set(k,v);storage.clear();for(const [k,v] of oldStore)storage.set(k,v)
     scripting.Widget.family=oldFamily;scripting.Widget.parameter=oldParameter;scripting.Widget.displaySize=oldSize;handler=oldHandler
     console.log('PASS: actual unconfigured Parrot/official/Sub2API x7 families display only 账号未配置; no-account state unified; warning/icon/font/background/layout unchanged; stats/network errors exact and populated data untouched; no setup network')
+  }
+  // Real composed entrypoints with virtual credentials only: renewal expiry, retries, cooldown and rotation.
+  {
+    const oldKC=[...kc.entries()],oldStore=[...storage.entries()],oldHandler=handler,oldNow=now,oldPresent=scripting.Widget.present,oldReload=scripting.Widget.reloadAll
+    const cdKey='ai_usage_oauth_renewal_cooldown_v1'
+    let posted=[],usageCalls=0,mode='ok',retry=null,denyUsage=false,omit=false,releaseRenewal=null,hold=false,raced=null,presented=null
+    scripting.Widget.present=(tree,options)=>{presented={tree,options}};scripting.Widget.reloadAll=async()=>{}
+    const keyOf=p=>p==='Codex'?'ai_usage_official_oauth_v1':'ai_usage_claude_oauth_v1'
+    const fixture=p=>p==='Codex'?{id:'renew-codex',accountId:'renew-a',subject:'renew-u',name:'renew',email:'renew@example.test',access:token('renew-a','renew-u'),refresh:'mock-refresh-old',expiresAt:now-1,unknownMetadata:{keep:true}}:{id:'claude:renew-a:renew-org',accountId:'renew-a',organizationId:'renew-org',email:'renew@example.test',access:'mock-claude-old',refresh:'mock-refresh-old',expiresAt:now-1,scope:'user:profile',unknownMetadata:{keep:true}}
+    const prepare=p=>{
+      kc.clear();storage.clear();api.saveSource('official');api.saveStatisticsSource('parrot')
+      kc.set(keyOf(p),JSON.stringify([fixture(p)]));posted=[];usageCalls=0;mode='ok';retry=null;denyUsage=false;omit=false;hold=false;raced=null
+      const data={...singleData,accounts:[{...singleData.accounts[0],id:fixture(p).id,provider:p==='Codex'?'openai':'claude',name:'renew@example.test'}],fetchedAt:now-30000}
+      storage.set('ai_usage_official_cache_v1',data)
+    }
+    handler=async(u,o)=>{
+      if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
+        const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
+        assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');assert.equal(o.headers['User-Agent'],undefined)
+        assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
+        if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
+        if(raced){const rows=JSON.parse(kc.get(keyOf(p)));rows[0]={...rows[0],...raced};kc.set(keyOf(p),JSON.stringify(rows))}
+        if(mode==='network')throw Error('SECRET-network-token')
+        if(mode!=='ok')return {status:Number(mode),headers:{get:n=>n==='Retry-After'?retry:null},json:async()=>({error:mode==='400'&&retry==='invalid-grant'?'invalid_grant':mode==='403'?'access_denied':'temporarily_unavailable',message:'SECRET-body'})}
+        return resp(200,{access_token:p==='Codex'?token('renew-a','renew-u',now+7200000):'mock-claude-new',...(omit?{}:{refresh_token:'mock-refresh-rotated'}),expires_in:7200})
+      }
+      if(u.includes('/usage')||u.includes('/rate-limit-reset-credits')){
+        usageCalls++;if(denyUsage){denyUsage=false;return resp(401)}
+        return resp(200,u.includes('chatgpt.com')?{rate_limit:usage.rate_limit,rate_limit_reset_credits:{available_count:2}}:{five_hour:{utilization:20},seven_day:{utilization:30},cedar_ember:{eligible:true,grants:[{id:'mock-renew-grant',resets_left:2}]}})
+      }
+      throw Error('unexpected mock renewal URL')
+    }
+    const load=()=>api.loadUsage(),globalLoadFreshAPI=()=>globalModuleLoad('renewal-fresh-api.ts')
+    for(const provider of ['Codex','Claude']){
+      for(const expiry of ['past','near','future','missing','null']){
+        prepare(provider);const row=fixture(provider)
+        if(expiry==='future')row.expiresAt=now+3600000;else if(expiry==='near')row.expiresAt=now+30000;else if(expiry==='missing')delete row.expiresAt;else if(expiry==='null')row.expiresAt=null
+        kc.set(keyOf(provider),JSON.stringify([row]));const out=await load();assert.equal(out.stale,false);assert.equal(posted.length,expiry==='future'?0:1)
+        const saved=JSON.parse(kc.get(keyOf(provider)))[0];assert.deepEqual(saved.unknownMetadata,{keep:true})
+        if(expiry!=='future'){assert.equal(saved.refresh,'mock-refresh-rotated');assert.ok(saved.expiresAt>now+60000)}
+      }
+      prepare(provider);let rows=JSON.parse(kc.get(keyOf(provider)));rows[0].expiresAt=now+3600000;kc.set(keyOf(provider),JSON.stringify(rows));denyUsage=true;omit=true
+      assert.equal((await load()).stale,false);assert.equal(posted.length,1);assert.equal(usageCalls,2);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-refresh-old')
+      for(const [status,wait] of [['429','7'],['429',new Date(now+13000).toUTCString()],['429',null],['503','9']]){
+        prepare(provider);mode=status;retry=wait;const before=kc.get(keyOf(provider)),at=api.officialCached().fetchedAt
+        const failed=await load();assert.equal(failed.stale,true);assert.equal(failed.data.fetchedAt,at);assert.equal(kc.get(keyOf(provider)),before);assert.equal(posted.length,1)
+        assert.ok(!/请重新|SECRET/.test(failed.error));assert.ok(failed.error.includes('保留登录'))
+        const until=Object.values(storage.get(cdKey))[0],expected=wait===null?now+300000:/^\d+$/.test(wait)?now+Number(wait)*1000:Date.parse(wait)
+        assert.equal(until,expected);await load();assert.equal(posted.length,1)
+        // A new module instance shares only persisted Keychain/Storage, not the in-process promise maps.
+        delete modules['renewal-fresh-api.ts'];const freshAPI=globalLoadFreshAPI();assert.equal((await freshAPI.loadUsage()).stale,true);assert.equal(posted.length,1)
+        states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+        await modules['widget.tsx'].exports.runWidget();await registeredIntents.get('RefreshUsageIntent').perform(undefined);assert.equal(posted.length,1)
+        now=until+1;mode='ok';assert.equal((await load()).stale,false);assert.equal(posted.length,2);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-refresh-rotated')
+      }
+      for(const failure of ['network','500','400','401','403']){
+        prepare(provider);mode=failure;const before=kc.get(keyOf(provider)),out=await load()
+        assert.equal(out.stale,true);assert.equal(kc.get(keyOf(provider)),before);assert.ok(!/请重新|SECRET/.test(out.error));assert.equal(posted.length,1)
+        mode='ok';assert.equal((await load()).stale,false);assert.equal(posted.length,2)
+      }
+      prepare(provider);mode='400';retry='invalid-grant';const beforeInvalid=kc.get(keyOf(provider)),invalid=await load()
+      assert.equal(invalid.stale,true);assert.ok(invalid.error.includes('invalid_grant')&&invalid.error.includes('请重新添加'));assert.equal(kc.get(keyOf(provider)),beforeInvalid)
+      prepare(provider);hold=true;const one=api.loadOfficialUsage(),two=api.loadOfficialUsage();for(let i=0;i<20&&!releaseRenewal;i++)await Promise.resolve();assert.ok(releaseRenewal);releaseRenewal();await Promise.all([one,two]);assert.equal(posted.length,1)
+      // Changed credential during a response wins: never overwrite a newer login/rotation snapshot.
+      prepare(provider);raced={access:provider==='Codex'?token('renew-a','renew-u',now+9000000):'mock-newer-access',refresh:'mock-newer-refresh',expiresAt:now+9000000}
+      assert.equal((await load()).stale,false);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-newer-refresh')
+      // App/widget/intent all call the same loader, and each automatically renews without authorization.
+      for(const entry of ['App','Widget','Intent']){
+        prepare(provider)
+        if(entry==='App'){states.length=0;const ui=render();await ui.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()}
+        else if(entry==='Widget')await modules['widget.tsx'].exports.runWidget()
+        else await registeredIntents.get('RefreshUsageIntent').perform(undefined)
+        assert.equal(posted.length,1,provider+' '+entry);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-refresh-rotated')
+      }
+    }
+    kc.clear();for(const [k,v] of oldKC)kc.set(k,v);storage.clear();for(const [k,v] of oldStore)storage.set(k,v)
+    handler=oldHandler;now=oldNow;scripting.Widget.present=oldPresent;scripting.Widget.reloadAll=oldReload;states.length=0
+    console.log('PASS: Codex+Claude expiry/near/future/missing/null and 401 renew; rotation+omission+unknown metadata retained; 429 seconds/date/no-header &503 RetryAfter preserve cache/credentials, no requests during cooldown, next load retries; network/5xx/unclassified400/401/403 retain, only invalid_grant asks login; in-process dedup/newer-credential guard; App+Widget+Intent automatic renewal')
   }
   // One Chinese entry delegates to the native host, without unsupported filtering/theme options.
   {
