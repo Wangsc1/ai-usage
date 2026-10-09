@@ -325,8 +325,55 @@ function QuadGrid({ accounts, s, fixedLcd = false, statsData }: { accounts: Acco
   </ZStack>
 }
 
+// Shared source-wide Parrot six-column summary, not selected-account totals.
+function summaryColumns(data: UsageData): StatColumn[] | null {
+  if (!data.today || !data.month) return null
+  const values = (m: NonNullable<UsageData["today"]>) => {
+    const inputSide = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
+    return [fmtTokens(m.inputTokens), fmtTokens(m.outputTokens), fmtTokens(m.cacheReadTokens + m.cacheCreationTokens),
+      inputSide > 0 ? (m.cacheReadTokens / inputSide * 100).toFixed(1) + "%" : "--", fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
+  }
+  const today = values(data.today), month = values(data.month)
+  return ["输入", "输出", "缓存", "缓存率", "Token", "花费"].map((label, i) => ({ label, today: today[i], month: month[i] }))
+}
+
+function mediumTwoLayout(height: number) {
+  // Root vertical padding 12×2 + refresh reservation 14; divider remains halfway.
+  const contentHeight = Math.max(1, height - 38), half = contentHeight / 2
+  // Compact six lines: 4×ceil(7×1.2)+2×ceil(8×1.2)+2 gaps = 58pt MODEL, not native measurement.
+  return { contentHeight, half, statsScale: Math.min(1, Math.max(1, half - 4) / 58) }
+}
+function MediumTwo({ data }: { data: UsageData }) {
+  const width = Widget.displaySize.width - 28
+  const { contentHeight, half, statsScale } = mediumTwoLayout(Widget.displaySize.height)
+  const columns = summaryColumns(data)
+  return <ZStack frame={{ width, height: contentHeight }}>
+    <VStack spacing={0}>
+      <Spacer frame={{ height: half }} />
+      <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ width: 1, height: half })} />
+    </VStack>
+    <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} />
+    <VStack spacing={0}>
+      <VStack alignment="leading" spacing={0}
+        modifiers={modifiers().padding({ bottom: 4 }).frame({ height: half }).frame({ maxWidth: "infinity", alignment: "topLeading" })}>
+        {columns ? <PeriodStats columns={columns} labelFont={7 * statsScale} valueFont={8 * statsScale}
+          gap={2} verticalGap={0} contentWidth={width} />
+          : <Text font={7} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
+      </VStack>
+      <HStack spacing={0} modifiers={modifiers().frame({ height: half }).frame({ maxWidth: "infinity" })}>
+        {data.accounts.map((acc, i) => <VStack
+          padding={{ top: 7, bottom: 0, leading: i === 0 ? 0 : 10, trailing: i === 0 ? 10 : 0 }}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}>
+          <Quad acc={acc} s={MEDIUM_SCALE} fixedLcd />
+        </VStack>)}
+      </HStack>
+    </VStack>
+  </ZStack>
+}
+
 // ---------- 中号：四宫格，最多 4 个账号 ----------
 function Medium({ data }: { data: UsageData }) {
+  if (data.accounts.length === 2) return <MediumTwo data={data} />
   if (data.accounts.length === 3) return <QuadGrid accounts={data.accounts} s={MEDIUM_SCALE} fixedLcd statsData={data} />
   return <QuadGrid accounts={data.accounts} s={MEDIUM_SCALE} fixedLcd />
 }
@@ -352,20 +399,12 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const m = data.today
   const month = data.month
   const contentWidth = Widget.displaySize.width - 28 // Root's 14pt horizontal inset on each side.
-  // Token缓存命中率：缓存读取占全部输入侧Token的比例，不包含输出。
-  const cacheRate = (m: NonNullable<UsageData["today"]>) => {
-    const total = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
-    return total > 0 ? (m.cacheReadTokens / total * 100).toFixed(1) + "%" : "--"
-  }
-  const values = (m: NonNullable<UsageData["today"]>) => [fmtTokens(m.inputTokens), fmtTokens(m.outputTokens),
-    fmtTokens(m.cacheReadTokens + m.cacheCreationTokens), cacheRate(m), fmtTokens(m.totalTokens), fmtUsd(m.costUsd)]
+  const columns = summaryColumns(data)
   return <VStack alignment="leading" spacing={3}
     modifiers={modifiers().fixedSize({ horizontal: false, vertical: true })
       .frame({ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" })}>
     {m && month ? <PeriodStats labelFont={9} valueFont={11} sizingValueFont={12} gap={4} verticalGap={3} contentWidth={contentWidth}
-      columns={["输入", "输出", "缓存", "缓存率", "Token", "花费"].map((label, i) => ({
-        label, today: values(m)[i], month: values(month)[i],
-      }))} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
+      columns={columns!} /> : <Text font={10} foregroundStyle={SUB}>官方未提供今日/本月Token与花费</Text>}
     <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} />
     <VStack alignment="leading" spacing={2} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
       {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={1}
