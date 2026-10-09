@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.0')
+  assert.equal(api.VERSION,'1.8.1')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -796,7 +796,7 @@ async function main() {
     api.saveWidgetName(nested.id,'','official')
   }
   states.length=0;let emailUI=render()
-  assert.ok(emailUI.some(x=>x.type==='Button'&&x.props.title==='退出 nested@example.test'))
+  assert.ok(emailUI.some(x=>x.type==='Text'&&x.props.children==='Codex nested@example.test'))
   assert.ok(emailUI.some(x=>typeof x==='string'&&x.includes('Codex · nested@example.test')))
   const orderLink=emailUI.find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
   obsStore=[];obsIndex=0;const emailOrder=expand(orderLink.props.destination.type(orderLink.props.destination.props))
@@ -1242,8 +1242,8 @@ async function main() {
   const autoBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
   assert.equal(instances.at(-1).options.ephemeral,true);assert.equal(instances.at(-1).urls[0],uiD.url)
   uiServer.handlers['/callback'](callback(uiD.state));await autoBrowser
-  for(let i=0;i<50&&!render().some(x=>x.type==='Button'&&x.props.title==='退出 ui-auto@example.test');i++)await Promise.resolve()
-  assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='退出 ui-auto@example.test'))
+  for(let i=0;i<50&&!render().some(x=>x.type==='Text'&&x.props.children==='Claude ui-auto@example.test');i++)await Promise.resolve()
+  assert.ok(render().some(x=>x.type==='Text'&&x.props.children==='Claude ui-auto@example.test'))
   for(let i=0;i<50&&!api.officialCached()?.accounts.some(a=>a.id==='claude:ui-claude-auto:org-a');i++)await Promise.resolve()
   assert.ok(api.officialCached().accounts.some(a=>a.id==='claude:ui-claude-auto:org-a'));assert.equal(instances.at(-1).disposed,1);assert.equal(uiServer.stops,1)
   assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'));assert.equal(claudeTimers.size,0)
@@ -1258,7 +1258,7 @@ async function main() {
   assert.equal(uiD.consumed,false);authUI=render()
   authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-ui-code#'+uiD.state)
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
-  assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='退出 ui-manual@example.test'));assert.equal(claudeTimers.size,0)
+  assert.ok(render().some(x=>x.type==='Text'&&x.props.children==='Claude ui-manual@example.test'));assert.equal(claudeTimers.size,0)
   assert.ok(!JSON.stringify(Array.from(storage.entries())).includes('mock-ui-code'))
   // UI cancel/source/settings dismissal during exchange: late response cannot persist account/code.
   for(const mode of ['cancel','source','dismiss','provider']){
@@ -1283,6 +1283,58 @@ async function main() {
   context.Crypto=savedCrypto
   console.log('PASS: Claude UI automatic loopback callback while ephemeral modal open; manual fresh state/paste flow; unsupported crypto inline; cancel/source/dismiss late exchange and expiry release all resources; no stored authorization code')
   console.log('PASS: Claude PKCE actual SHA256/global APIs/loopback and manual contracts; state/expiry/cancel/code reuse; token/profile failures; refresh rotation/dedup/401; aggregate windows; mixed official+Parrot stats; local provider exits and late logout isolation')
+  // Official rows: provider/email plain Text -> Spacer -> independent borderless exit button.
+  states.length=0;api.saveSource('official');handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
+  const legacyCodex=JSON.parse(kc.get('ai_usage_official_oauth_v1'))[0]
+  assert.equal(legacyCodex.provider,undefined);assert.equal(api.officialAccounts().find(a=>a.id===legacyCodex.id).provider,'codex')
+  const listRecords=api.officialAccounts();assert.ok(listRecords.some(a=>a.provider==='claude'))
+  const exitRow=(tree,id)=>tree.find(x=>x.type==='HStack'&&x.key===id)
+  let exitUI=render()
+  for(const a of listRecords){
+    const row=exitRow(exitUI,a.id);assert.ok(row)
+    const children=Array.from(row.props.children)
+    assert.deepEqual(children.map(x=>x.type),['Text','Spacer','Button'])
+    assert.equal(children[0].props.children,(a.provider==='claude'?'Claude':'Codex')+' '+a.name)
+    assert.equal(children[0].props.action,undefined);assert.equal(children[0].props.onTapGesture,undefined);assert.equal(row.props.action,undefined)
+    assert.equal(children[0].props.lineLimit,undefined);assert.equal(children[0].props.fixedSize.horizontal,false);assert.equal(children[0].props.fixedSize.vertical,true)
+    assert.equal(children[2].props.title,'点击退出');assert.equal(children[2].props.buttonStyle,'borderless');assert.equal(children[2].props.fixedSize.horizontal,true)
+    assert.equal(children[2].props.disabled,false)
+  }
+  assert.ok(!exitUI.some(x=>x.type==='Button'&&x.props.title?.startsWith('退出 ')))
+  // Long complete email stays in the label; wrapping is allowed and never squeezes away button text.
+  const longEmail='very-long-account-'.repeat(12)+'@example.test',longRows=JSON.parse(kc.get('ai_usage_official_oauth_v1'))
+  longRows[0].email=longEmail;kc.set('ai_usage_official_oauth_v1',JSON.stringify(longRows));states.length=0
+  exitUI=render();assert.equal(exitRow(exitUI,legacyCodex.id).props.children[0].props.children,'Codex '+longEmail)
+  // Identical disabling rules during either login flow, plus a held busy refresh.
+  handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'row-disable-device',usercode:'MOCK-ROW',interval:'5'}):u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
+  await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action();exitUI=render()
+  assert.ok(exitUI.filter(x=>x.type==='Button'&&x.props.title==='点击退出').every(x=>x.props.disabled))
+  exitUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+  exitUI=render();exitUI.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('claude')
+  exitUI=render();await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action();exitUI=render()
+  assert.ok(exitUI.filter(x=>x.type==='Button'&&x.props.title==='点击退出').every(x=>x.props.disabled))
+  exitUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action();exitUI=render()
+  let releaseBusyRefresh;let heldBusy=false
+  handler=async(u,o)=>{if(u.endsWith('/usage')&&!heldBusy){heldBusy=true;await new Promise(resolve=>releaseBusyRefresh=resolve)}return u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)}
+  const busyRefresh=exitUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  assert.ok(render().filter(x=>x.type==='Button'&&x.props.title==='点击退出').every(x=>x.props.disabled))
+  for(let i=0;i<12&&!releaseBusyRefresh;i++)await Promise.resolve();assert.ok(releaseBusyRefresh);releaseBusyRefresh();await busyRefresh
+  handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
+  // Click each provider's exact row button, preserve other IDs/keys, prune only target cache/order/alias.
+  for(const provider of ['claude','codex']){
+    const target=api.officialAccounts().find(a=>a.provider===provider),beforeRecords=api.officialAccounts(),otherKey=provider==='claude'?'ai_usage_official_oauth_v1':'ai_usage_claude_oauth_v1'
+    const untouchedKey=kc.get(otherKey),parrotUntouched=JSON.stringify(storage.get('ai_usage_cache_v1'))
+    api.saveWidgetName(target.id,'target-alias','official');api.saveAccountOrder(beforeRecords.map(a=>a.id),'official')
+    states.length=0;exitUI=render()
+    await exitRow(exitUI,target.id).props.children[2].props.action()
+    assert.ok(!api.officialAccounts().some(a=>a.id===target.id))
+    assert.deepEqual(api.officialAccounts().map(a=>a.id),beforeRecords.filter(a=>a.id!==target.id).map(a=>a.id))
+    assert.equal(kc.get(otherKey),untouchedKey);assert.equal(api.getWidgetName(target.id,'official'),'')
+    assert.ok(!api.officialCached().accounts.some(a=>a.id===target.id));assert.ok(!storage.get('ai_usage_official_order_v1').includes(target.id))
+    assert.equal(JSON.stringify(storage.get('ai_usage_cache_v1')),parrotUntouched)
+    assert.ok(!exitRow(render(),target.id))
+  }
+  console.log('PASS: Codex/Claude provider from separate real record collections (legacy Codex supported); plain complete-email label/Spacer/right independent borderless 点击退出; long-email wrapping; busy/device/Claude disables; each exact-ID button preserves other providers/cache/credentials')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

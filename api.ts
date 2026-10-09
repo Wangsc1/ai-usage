@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.0"
+export const VERSION = "1.8.1"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -439,8 +439,9 @@ function persist(items: Credential[]) {
 function officialDisplay(item: Credential, index: number): string {
   return item.email || `账号 ${index + 1}（邮箱未提供）`
 }
-export function officialAccounts(): { id: string; name: string; email: string }[] {
-  return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "" })), ...claudeAccounts()]
+export function officialAccounts(): { id: string; name: string; email: string; provider: "codex" | "claude" }[] {
+  // Legacy Codex records have no provider field; their dedicated credential collection identifies them.
+  return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const })), ...claudeAccounts()]
 }
 export function officialCached(): UsageData | null {
   const cache = Storage.get<UsageData>(CACHE)
@@ -656,8 +657,8 @@ function persist(items: Credential[]) {
   try { saved = Keychain.set(KEY, JSON.stringify(items)) } catch { /* never expose native errors containing credentials */ }
   if (!saved) throw new Error("Claude钥匙串保存失败")
 }
-export function claudeAccounts(): { id: string; name: string; email: string }[] {
-  return credentials().map((a, i) => ({ id: a.id, name: a.email || `Claude账号 ${i + 1}（邮箱未提供）`, email: a.email }))
+export function claudeAccounts(): { id: string; name: string; email: string; provider: "claude" }[] {
+  return credentials().map((a, i) => ({ id: a.id, name: a.email || `Claude账号 ${i + 1}（邮箱未提供）`, email: a.email, provider: "claude" as const }))
 }
 export function logoutClaude(id: string) { persist(credentials().filter(a => a.id !== id)) }
 const base64url = (data: any): string => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")

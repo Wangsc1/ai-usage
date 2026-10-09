@@ -1,5 +1,5 @@
 import {
-  Button, Form, Group, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, Form, Group, HStack, Spacer, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
@@ -7,7 +7,7 @@ import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPc
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin } from "./api"
 
-const VERSION = "1.8.0"
+const VERSION = "1.8.1"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -410,7 +410,10 @@ function SettingsView() {
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />
         </> : null}
         {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-        {logins.map(a => <Button title={`退出 ${a.name}`} disabled={busy || !!device || !!claude} action={async () => {
+        {logins.map(a => <HStack key={a.id}>
+          <Text fixedSize={{ horizontal: false, vertical: true }}>{`${a.provider === "claude" ? "Claude" : "Codex"} ${a.name}`}</Text>
+          <Spacer />
+          <Button title="点击退出" buttonStyle="borderless" fixedSize={{ horizontal: true, vertical: true }} disabled={busy || !!device || !!claude} action={async () => {
           try {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
@@ -418,7 +421,8 @@ function SettingsView() {
             await test()
             await Widget.reloadAll()
           } catch (e: any) { setStatus(e.message) }
-        }} />)}
+        }} />
+        </HStack>)}
         <Button title={"刷新官方额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
