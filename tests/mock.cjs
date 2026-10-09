@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.9')
+  assert.equal(api.VERSION,'1.8.10')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1141,7 +1141,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.9')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.10')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1314,7 +1314,7 @@ async function main() {
     const row=exitRow(exitUI,a.id);assert.ok(row)
     const children=Array.from(row.props.children)
     assert.deepEqual(children.map(x=>x.type),['Text','Spacer','Button'])
-    assert.equal(children[0].props.children,(a.provider==='claude'?'Claude':'Codex')+' '+a.name)
+    assert.equal(children[0].props.children,(a.provider==='claude'?'Claude':'Codex')+' '+(a.provider==='claude'?(a.email||'邮箱未提供'):a.name))
     assert.equal(children[0].props.action,undefined);assert.equal(children[0].props.onTapGesture,undefined);assert.equal(row.props.action,undefined)
     assert.equal(children[0].props.lineLimit,undefined);assert.equal(children[0].props.fixedSize.horizontal,false);assert.equal(children[0].props.fixedSize.vertical,true)
     assert.equal(children[2].props.title,'点击退出');assert.equal(children[2].props.buttonStyle,'borderless');assert.equal(children[2].props.fixedSize.horizontal,true)
@@ -1374,7 +1374,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.9'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.10'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1562,7 +1562,7 @@ async function main() {
   assert.ok(render().includes('正在读取Claude账号资料'));assert.equal(stageServer.stops,0)
   const releaseProfileStage=releaseClaudeRequest;releaseClaudeRequest=null;holdProfile=false;releaseProfileStage()
   for(let i=0;i<100;i++)await Promise.resolve()
-  assert.ok(render().includes('Claude账号已保存'));assert.ok(api.officialAccounts().some(a=>a.email==='stage-auto@example.test'))
+  assert.ok(render().includes('Claude stage-auto@example.test'));assert.ok(api.officialAccounts().some(a=>a.email==='stage-auto@example.test'))
   assert.equal(stageServer.stops,1);assert.equal(claudeTimers.size,0)
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
   assert.equal(lastExchange.redirect_uri,stageAttempt.redirect)
@@ -1572,7 +1572,7 @@ async function main() {
   signalFlow=api.beginClaudeLogin(()=>void api.finishClaudeLogin(signalFlow),()=>{},false,s=>orderedStages.push(s))
   const signalServer=claudeServers.at(-1);signalServer.handlers['/callback'](callback(signalFlow.state))
   for(let i=0;i<100;i++)await Promise.resolve()
-  assert.deepEqual(orderedStages,['收到Claude回调，已通过本次校验','正在交换Claude令牌（不重复提交）','正在读取Claude账号资料','正在保存Claude账号到本机','Claude账号已保存'])
+  assert.deepEqual(orderedStages,['收到Claude回调，已通过本次校验','正在交换Claude令牌（不重复提交）','正在读取Claude账号资料','正在保存Claude账号到本机','Claude stage-order@example.test'])
   // Browser close WITHOUT callback keeps waiting; cancellation suppresses late signals and late token saves.
   authUI=await startClaudeUI();const emptyBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
   closeClaudeModal();await emptyBrowser;assert.ok(render().includes('等待Claude回调（尚未收到）'))
@@ -1673,7 +1673,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.9')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.10')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1683,7 +1683,57 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.9 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.10 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
+  handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
+  storage.delete(cooldownKey)
+  for(const mode of ['auto','manual']){
+    // Reauthorize an older existing ID, leaving a different account at the end of the collection.
+    claudeAccount=mode==='auto'?'stage-order':'scope-new';claudeEmail='complete-'+mode+'-full@example.test'
+    const targetID='claude:'+claudeAccount+':org-a',beforeCompletion=api.officialAccounts(),lastCompletion=beforeCompletion.at(-1)
+    assert.notEqual(lastCompletion.id,targetID)
+    const otherCredKey=kc.get('ai_usage_official_oauth_v1')
+    authUI=await startClaudeUI()
+    if(mode==='manual'){
+      authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action();authUI=render()
+      authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-complete#'+uiAttempt().state)
+      await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
+    }else{
+      const completionAttempt=uiAttempt(),completionServer=claudeServers.at(-1)
+      const completingBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
+      completionServer.handlers['/callback'](callback(completionAttempt.state))
+      await completingBrowser
+    }
+    for(let i=0;i<100;i++)await Promise.resolve()
+    authUI=render();const expectedLabel='Claude '+claudeEmail
+    assert.equal(authUI.filter(x=>x.type==='Text'&&x.props.children===expectedLabel).length,1)
+    assert.equal(authUI.filter(x=>x.type==='HStack'&&x.key===targetID).length,1)
+    assert.ok(!authUI.some(x=>x.type==='Text'&&typeof x.props.children==='string'&&x.props.children.includes('已保存')))
+    const completedRow=authUI.find(x=>x.type==='HStack'&&x.key===targetID),rowChildren=completedRow.props.children
+    assert.deepEqual(Array.from(rowChildren).map(x=>x.type),['Text','Spacer','Button'])
+    assert.equal(rowChildren[0].props.children,expectedLabel);assert.equal(rowChildren[2].props.title,'点击退出');assert.equal(rowChildren[2].props.disabled,false)
+    assert.equal(api.officialAccounts().at(-1).id,lastCompletion.id);assert.equal(kc.get('ai_usage_official_oauth_v1'),otherCredKey)
+    const remainingIDs=api.officialAccounts().filter(a=>a.id!==targetID).map(a=>a.id)
+    await rowChildren[2].props.action()
+    assert.deepEqual(api.officialAccounts().map(a=>a.id),remainingIDs);assert.ok(!render().some(x=>x.type==='HStack'&&x.key===targetID))
+    assert.equal(kc.get('ai_usage_official_oauth_v1'),otherCredKey)
+  }
+  for(const mode of ['auto','manual']){
+    claudeAccount='missing-email-'+mode;claudeEmail='';const targetID='claude:'+claudeAccount+':org-a'
+    authUI=await startClaudeUI()
+    if(mode==='manual'){
+      authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action();authUI=render()
+      authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-missing#'+uiAttempt().state)
+      await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
+    }else claudeServers.at(-1).handlers['/callback'](callback(uiAttempt().state))
+    for(let i=0;i<100;i++)await Promise.resolve()
+    authUI=render();const missingRow=authUI.find(x=>x.type==='HStack'&&x.key===targetID)
+    assert.ok(missingRow);assert.equal(missingRow.props.children[0].props.children,'Claude 邮箱未提供')
+    assert.equal(authUI.filter(x=>x.type==='Text'&&x.props.children==='Claude 邮箱未提供').length,1)
+    assert.equal(api.officialAccounts().find(a=>a.id===targetID).email,'')
+    await missingRow.props.children[2].props.action();assert.ok(!api.officialAccounts().some(a=>a.id===targetID))
+  }
+  console.log('PASS: auto/manual success uses one unified Claude full-email/Spacer/点击退出 row only; older reauthorized ID not last-account inference; exact target exit preserves other Claude/Codex IDs; no 已保存/generic duplicate success text; missing-email explicit fallback in both modes')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

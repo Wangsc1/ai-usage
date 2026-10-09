@@ -7,7 +7,7 @@ import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPc
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.8.9"
+const VERSION = "1.8.10"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -227,7 +227,8 @@ function SettingsView() {
       const d = beginClaudeLogin(() => { if (auth.claude === d && auth.alive) void completeClaude(d) }, () => {
         if (auth.claude === d && auth.alive) { stopAuth(); setBusy(false); setStatus("Claude授权已过期，请重新开始") }
       }, manual, stage => {
-        if (auth.claude === d && auth.alive && getSource() === "official") setClaudeProgress(stage)
+        // Completed account identity is rendered only by the shared login row, never a second Text.
+        if (auth.claude === d && auth.alive && getSource() === "official" && !stage.startsWith("Claude ")) setClaudeProgress(stage)
       })
       auth.claude = d; setClaude(d); setClaudeCode(""); setClaudeProgress(d.progress)
       setStatus(d.fallback || (d.manual ? "请完成Claude官方页面授权并粘贴完整code#state" : "请打开Claude授权页；本机回调成功后自动检查并保存"))
@@ -242,7 +243,7 @@ function SettingsView() {
     try {
       await finishClaudeLogin(attempt, claudeCode, valid)
       if (!valid()) return
-      auth.claude = null; setClaude(null); setClaudeCode("")
+      auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("")
       auth.releaseBrowser?.(); auth.releaseBrowser = null
       setLogins(officialAccounts()); await test()
     } catch (e: any) {
@@ -434,7 +435,7 @@ function SettingsView() {
         </> : null}
         {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
         {logins.map(a => <HStack key={a.id}>
-          <Text fixedSize={{ horizontal: false, vertical: true }}>{`${a.provider === "claude" ? "Claude" : "Codex"} ${a.name}`}</Text>
+          <Text fixedSize={{ horizontal: false, vertical: true }}>{`${a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
           <Spacer />
           <Button title="点击退出" buttonStyle="borderless" fixedSize={{ horizontal: true, vertical: true }} disabled={busy || !!device || !!claude} action={async () => {
           try {

@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.9"
+export const VERSION = "1.8.10"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -872,7 +872,7 @@ export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive
     if (index < 0) items.push(item)
     else { if (!item.email) item.email = items[index].email; items[index] = item }
     persist(items)
-    loginProgress(d, "Claude账号已保存")
+    loginProgress(d, item.email ? `Claude ${item.email}` : "Claude 邮箱未提供")
     return id
   } finally { cancelClaudeLogin(d) }
 }
