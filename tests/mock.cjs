@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.2')
+  assert.equal(api.VERSION,'1.8.3')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1120,6 +1120,7 @@ async function main() {
   }
   kc.delete('ai_usage_claude_oauth_v1')
   let claudeAccount='claude-a',claudeEmail='claude-a@example.test',claudeOrg='org-a',claudePostFailure=false,claudeProfileFailure=false,claudeUsageFailure=false,claudeRefreshFailure=false,omitRefresh=false,usage401=false
+  let grantedClaudeScope="user:profile user:inference",lastRefreshBody
   let lastExchange,refreshCount=0,holdToken,holdProfile,releaseClaudeRequest
   const claudeUsage={five_hour:{utilization:37.5,resets_at:'2030-01-01T01:00:00Z'},seven_day:{utilization:81,resets_at:'2030-01-03T01:00:00Z'},seven_day_sonnet:{utilization:2},seven_day_opus:{utilization:3},extra_usage:{utilization:4}}
   const claudeHandler=async(u,o)=>{
@@ -1129,8 +1130,8 @@ async function main() {
       if(b.grant_type==='authorization_code'){
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.equal(b.grant_type,'refresh_token');assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
-      return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:'user:profile user:inference'})
+      }else{assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
       assert.ok(o.headers.Authorization.startsWith('Bearer mock-claude-'));assert.ok(!o.headers['ChatGPT-Account-ID'])
@@ -1356,7 +1357,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.2'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.3'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1379,6 +1380,37 @@ async function main() {
   claudePostFailure=true;await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action();claudePostFailure=false
   assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'));assert.equal(claudeTimers.size,0)
   console.log('PASS: callback fixed safe stage labels (construct/address/readback/register/start/port/missing API) with cleanup; distinct empty/hash/format/state manual errors; retained secure input/no exchange/no state regeneration; empty disabled; same-flow correction; fatal clears; visible runtime version')
+  // Scope collection exactly matches official base subscription set, not optional or org scopes.
+  const fullClaudeScope='user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload'
+  const storedBeforeScopeChange=kc.get('ai_usage_claude_oauth_v1')
+  for(const manual of [true,false]){
+    const scopeFlow=api.beginClaudeLogin(()=>{},()=>{},manual)
+    assert.equal(new URL(scopeFlow.url).searchParams.get('scope'),fullClaudeScope)
+    assert.equal(kc.get('ai_usage_claude_oauth_v1'),storedBeforeScopeChange)
+    api.cancelClaudeLogin(scopeFlow)
+  }
+  assert.equal(claudeTimers.size,0)
+  handler=claudeHandler
+  // Newly authorized record stores the server grant (not merely our requested scope).
+  grantedClaudeScope=fullClaudeScope;claudeAccount='scope-new';claudeEmail='scope-new@example.test'
+  cl=api.beginClaudeLogin(()=>{},()=>{},true);const newScopeID=await api.finishClaudeLogin(cl,'mock-scope#'+cl.state)
+  const scopeRows=JSON.parse(kc.get('ai_usage_claude_oauth_v1'));assert.equal(scopeRows.find(a=>a.id===newScopeID).scope,fullClaudeScope)
+  const oldScopeID=scopeRows.find(a=>a.id!==newScopeID).id
+  assert.equal(scopeRows.find(a=>a.id===oldScopeID).scope,'user:profile user:inference')
+  // Isolate each refresh target while retaining all credentials; missing response scope keeps its prior grant.
+  grantedClaudeScope=undefined
+  for(const [id,expectedScope] of [[oldScopeID,'user:profile user:inference'],[newScopeID,fullClaudeScope]]){
+    const rows=JSON.parse(kc.get('ai_usage_claude_oauth_v1'));rows.forEach(a=>a.expiresAt=a.id===id?now:now+3600000)
+    kc.set('ai_usage_claude_oauth_v1',JSON.stringify(rows));lastRefreshBody=null
+    await claudeAPI.loadClaudeAccounts()
+    assert.equal(lastRefreshBody.grant_type,'refresh_token');assert.equal(lastRefreshBody.scope,expectedScope)
+    assert.equal(JSON.parse(kc.get('ai_usage_claude_oauth_v1')).find(a=>a.id===id).scope,expectedScope)
+  }
+  // Server may return a narrower actual grant even for a full-scope request.
+  grantedClaudeScope='user:profile user:inference';claudeAccount='scope-narrow';claudeEmail='scope-narrow@example.test'
+  cl=api.beginClaudeLogin(()=>{},()=>{},true);const narrowID=await api.finishClaudeLogin(cl,'mock-narrow#'+cl.state)
+  assert.equal(JSON.parse(kc.get('ai_usage_claude_oauth_v1')).find(a=>a.id===narrowID).scope,grantedClaudeScope)
+  console.log('PASS: exact official five subscription scopes in auto/manual URLs; no org/plugins/projects; old grants untouched; server full/narrow grant stored; refresh_token submits original grant and missing response scope preserves it; cancellation cleanup')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

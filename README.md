@@ -56,7 +56,7 @@ Parrot 保留原管理会话登录、账号列表（含已停用账号）、统�
 
 ### Claude
 
-1. 登录服务选择Claude，点“添加官方账号”。使用官方Claude Code OAuth客户端与PKCE，授权页为 `https://claude.com/cai/oauth/authorize`；仅请求profile/inference scope，脚本不发送模型推理请求。
+1. 登录服务选择Claude，点“添加官方账号”。使用官方Claude Code OAuth客户端与PKCE，授权页为 `https://claude.com/cai/oauth/authorize`；请求与目标授权页面相应的五项官方权限：`user:profile`（资料）、`user:inference`（订阅推理）、`user:sessions:claude_code`（Claude Code会话）、`user:mcp_servers`（连接器管理/使用）、`user:file_upload`（文件上传）。不请求org API-key管理、plugins或projects额外权限；脚本仅进行登录、账号资料与额度读取，不实际使用推理、会话、连接器或上传业务功能。已有凭据保留实际授予的scope，续期不自动升级权限；获得新权限需要重新授权。权限调整不保证解决HTTP429。
 2. 点“打开Claude授权页”，在独立临时会话登录目标订阅账号。Scripting支持本机回调时，脚本只监听 `127.0.0.1` 随机端口，授权完成通过官方支持的 `http://localhost:端口/callback` 返回；校验本次state后交换令牌、读取真实账号资料并自动刷新。未完成令牌交换和资料读取前不算登录成功。
 3. 本机回调API缺失或无法启动时使用官方手动授权码页；也可在打开前点“改用手动授权码”，取消旧尝试并生成新的PKCE/state。完成网页授权后，将页面提供的**完整code#state**粘贴到“本次完整授权码”，点“完成Claude授权”。手动回调为 `https://platform.claude.com/oauth/code/callback`；只接受本次state，不粘贴别人的代码。空输入不能提交；输入为空、缺少#、格式错误与state不匹配分别提示，可重试的校验错误保留遮蔽输入，不发送令牌交换。回调初始化失败只显示安全阶段（构造、地址配置、注册handler、启动、端口或缺API），不显示原始异常或登录秘密。诊断时可提供“数据来源”中的当前脚本版本及阶段/错误类别，无需发送完整授权码、state或token。
 4. 临时浏览器或嵌入登录不兼容时，可用明确的“Safari备用Claude授权页”（可能复用系统登录）；自动回调无法完成时返回脚本取消并重新发起手动流程。不要把旧自动流程的代码用于新手动流程。

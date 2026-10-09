@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.2"
+export const VERSION = "1.8.3"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -638,7 +638,8 @@ const CLIENT = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 const TOKEN = "https://platform.claude.com/v1/oauth/token"
 const MANUAL = "https://platform.claude.com/oauth/code/callback"
 const API = "https://api.anthropic.com/api/oauth"
-const SCOPE = "user:profile user:inference"
+// Official 2.1.295 base Claude subscription scopes (r); exclude optional plugins/projects and org API-key scope.
+const SCOPE = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 const KEY = "ai_usage_claude_oauth_v1"
 type Credential = { id: string; accountId: string; organizationId: string; email: string; access: string; refresh: string; expiresAt: number; scope: string }
 export type ClaudeLogin = {
