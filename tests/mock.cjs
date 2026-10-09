@@ -674,7 +674,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.34')
+  assert.equal(api.VERSION,'1.7.35')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -785,7 +785,7 @@ async function main() {
   const orderBuilder=emailOrder.find(x=>x.type==='ReorderableForEach')
   assert.ok(expand(orderBuilder.props.builder(nestedAccount,0)).some(x=>typeof x==='string'&&x.includes('nested@example.test')))
   await emailUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
-  emailUI=render();assert.ok(emailUI.some(x=>typeof x==='string'&&x.includes('Codex nested：5 h')))
+  emailUI=render();assert.ok(emailUI.some(x=>typeof x==='string'&&x.includes('Codex nested@example.test：5 h')))
   // Refresh response omitting email preserves the previously authorized stored email and aliases.
   const refreshRecord=JSON.parse(kc.get('ai_usage_official_oauth_v1'));const nr=refreshRecord.find(a=>a.id===nested.id)
   nr.expiresAt=now-1;kc.set('ai_usage_official_oauth_v1',JSON.stringify(refreshRecord))
@@ -799,7 +799,7 @@ async function main() {
   assert.ok(!api.officialCached().accounts.some(a=>a.id===nested.id));assert.equal(api.getWidgetName(nested.id,'official'),'')
   assert.equal(api.getWidgetName(nested.id,'parrot'),'另一来源保留')
   assert.deepEqual(Array.from(api.sortAccounts(api.officialCached().accounts,"official"),a=>a.id),beforeExitOrder.filter(id=>id!==nested.id))
-  console.log('PASS: separate email/name; top+profile claims; legacy access migration; full-email App logout/list/order; status email prefix; widget prefix/alias priority; refresh email retention; scoped exit cleanup')
+  console.log('PASS: separate email/name; top+profile claims; legacy access migration; full-email App logout/list/order; status full email; widget prefix/alias priority; refresh email retention; scoped exit cleanup')
   // Safari Promise closes before exactly one check. Early-close interval is respected with one bounded wait.
   const {checkAfterSafari}=load('index.tsx')
   namedFlow({},'pending-test');let autoDevice=await api.beginDeviceLogin(),browserClose
