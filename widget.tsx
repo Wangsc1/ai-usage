@@ -228,6 +228,9 @@ function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap, contentW
 
 // Same Parrot summary scope as Large, not per-account totals.
 
+// Measured descent below digits, as a fraction of the value font (IMG_4469 @3x, 9pt value font):
+// 7px = 2.333pt => 2.333 / 9 em. See SmallStats(medium) for the measurement.
+const VALUE_DIGIT_DESCENT_EM = (7 / 3) / 9
 function mediumThreeStatsLayout(height: number) {
   const half = Math.max(1, height - 38) / 2
   // 7/9pt, zero inter-heading/period gaps: ceil-line model 60pt; keep 6pt to the divider.
@@ -247,9 +250,20 @@ function SmallStats({ data, medium = false }: { data: UsageData; medium?: boolea
   }
   const t = values(today), m = values(month)
   const layout = medium ? mediumThreeStatsLayout(Widget.displaySize.height) : null
-  return <PeriodStats labelFont={layout?.labelFont ?? 7} valueFont={layout?.valueFont ?? 9} gap={2} verticalGap={layout?.verticalGap ?? 2}
+  const stats = <PeriodStats labelFont={layout?.labelFont ?? 7} valueFont={layout?.valueFont ?? 9} gap={2} verticalGap={layout?.verticalGap ?? 2}
     contentWidth={medium ? (Widget.displaySize.width - 28) / 2 - 10 : undefined}
     columns={["缓存", "缓存率", "Token", "花费"].map((label, i) => ({ label, today: t[i], month: m[i] }))} />
+  if (!layout) return stats
+  // Medium-3 top row is bottom-aligned with the right weekly SegBar. 1.7.19 device capture IMG_4469
+  // (3px per pt: both 1pt dividers are 3px; card 164pt tall puts the divider at 12+63pt = y276 as measured):
+  // weekly bar bottom y255, divider y275-277; last month digits bottom y248 (all 4 columns).
+  // Period pitch is 82px (today heading y96 -> month heading y178); today digits end y166, 12px before
+  // the next heading glyph, and month digits likewise end 7px above the shared bottom y255. Equal
+  // bottom anchors are already in the tree (HStack bottom + bottomLeading + padding 7), and a 9pt SF
+  // value line typically has ~0.24em (~2.2pt = 6.5px) descent below digits, consistent with 7px.
+  // Conclusion: the gap is the value Text's descent, not padding/alignment. Render-only offset
+  // (no layout size change) by the measured 7px; divider and every account cell stay put.
+  return <VStack offset={{ x: 0, y: layout.valueFont * VALUE_DIGIT_DESCENT_EM }}>{stats}</VStack>
 }
 
 // ---------- 小号：上下两个账号，各自5 h在上、每周在下 ----------
