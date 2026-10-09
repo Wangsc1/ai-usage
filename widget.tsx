@@ -1,5 +1,5 @@
-import { Button, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName } from "./api"
+import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -463,7 +463,39 @@ function Message({ text }: { text: string }) {
   </VStack>
 }
 
+// ---------- 锁屏 accessory：只显示排序/参数后的第一个账号 ----------
+// No home-screen gradient, padding, dividers, statistics or footer; the system renders these in vibrant/tinted mode.
+const isAccessory = (f: string) => f.startsWith("accessory")
+function AccessoryRectangular({ acc }: { acc: Account }) {
+  const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
+  return <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
+    <AccountTitle acc={acc} font={s.title} />
+    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
+  </VStack>
+}
+function AccessoryCircular({ acc }: { acc: Account }) {
+  // One primary value: the 5 h window remaining percentage.
+  const v = acc.fiveHour.remainingPercent
+  return <Gauge value={v == null ? 0 : Math.max(0, Math.min(100, v)) / 100} min={0} max={1}
+    gaugeStyle="accessoryCircularCapacity"
+    label={<Text font={9}>5 h</Text>}
+    currentValueLabel={<Text font={12} fontWeight="semibold" monospacedDigit>{fmtPct(v)}</Text>} />
+}
+function AccessoryInline({ acc }: { acc: Account }) {
+  return <Text lineLimit={1}>{`${providerName(acc.provider)} 5h ${fmtPct(acc.fiveHour.remainingPercent)} · 周 ${fmtPct(acc.sevenDay.remainingPercent)}`}</Text>
+}
+function AccessoryRoot({ data, error, family }: { data: UsageData | null; error: string | null; family: string }) {
+  const acc = data ? widgetAccounts(data.accounts, Widget.parameter ?? "")[0] : undefined
+  if (!acc) return <Text font={11} lineLimit={2} multilineTextAlignment="center">
+    {!data ? error ?? "无数据" : data.accounts.length ? "请检查小组件参数" : "没有订阅账号"}
+  </Text>
+  if (family === "accessoryCircular") return <AccessoryCircular acc={acc} />
+  if (family === "accessoryInline") return <AccessoryInline acc={acc} />
+  return <AccessoryRectangular acc={acc} />
+}
+
 function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; error: string | null }) {
+  if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} />
   let body: VirtualNode
   if (!data) body = <Message text={error ?? "无数据"} />
   else if (data.accounts.length === 0) body = <Message text="没有订阅账号" />
