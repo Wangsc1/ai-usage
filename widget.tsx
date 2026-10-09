@@ -5,17 +5,17 @@ import { loadUsage, Account, QuotaWindow, UsageData, fmtReset, fmtResetDays, fmt
 type DC = { light: string; dark: string }
 const C = (light: string, dark: string): DC => ({ light, dark })
 
-// 渐变背景：浅色参考用户车载组件，顶部浅冰蓝→底部近白；深色保持蓝灰→蓝绿
+// 渐变背景：浅色为淡天蓝色渐变；深色保持蓝灰→蓝绿
 const BG = {
   light: {
     gradient: [
-      { color: "#D8ECF7", location: 0 },
-      { color: "#E5F2F9", location: 0.38 },
-      { color: "#F5FBFC", location: 0.8 },
-      { color: "#FAFDFE", location: 1 },
+      { color: "#B4E1FA", location: 0 },
+      { color: "#9DD5F6", location: 0.45 },
+      { color: "#86C8F1", location: 0.8 },
+      { color: "#74BCEC", location: 1 },
     ],
-    startPoint: { x: 0.5, y: 0 },
-    endPoint: { x: 0.5, y: 1 },
+    startPoint: { x: 0.3, y: 0 },
+    endPoint: { x: 0.7, y: 1 },
   },
   dark: {
     gradient: [
@@ -29,16 +29,17 @@ const BG = {
   },
 } as any
 
-const FG = C("#1C1C1E", "#FFFFFF")
-const SUB = C("#5E6068", "#8E8E93")
-const SEG_OFF = C("rgba(0, 0, 0, 0.13)", "rgba(255, 255, 255, 0.14)")
-const DIVIDER = C("rgba(0, 0, 0, 0.12)", "rgba(255, 255, 255, 0.10)")
-const GREEN = C("#2E9E4F", "#7ED957")
-const ORANGE = C("#D9770B", "#FF9F0A")
-const RED = C("#D93025", "#FF453A")
+// 日间与夜间的字体、进度条、数码管颜色一致，仅背景不同
+const FG = C("#FFFFFF", "#FFFFFF")
+const SUB = C("#8E8E93", "#8E8E93")
+const SEG_OFF = C("rgba(255, 255, 255, 0.14)", "rgba(255, 255, 255, 0.14)")
+const DIVIDER = C("rgba(255, 255, 255, 0.10)", "rgba(255, 255, 255, 0.10)")
+const GREEN = C("#7ED957", "#7ED957")
+const ORANGE = C("#FF9F0A", "#FF9F0A")
+const RED = C("#FF453A", "#FF453A")
 // SVG 里只能写具体颜色，按模式各生成一份
-const LCD_ON = C("#1C1C1E", "#FFFFFF")
-const LCD_OFF = C("#B9BCC3", "#363A44")
+const LCD_ON = C("#FFFFFF", "#FFFFFF")
+const LCD_OFF = C("#363A44", "#363A44")
 
 function levelColor(remaining: number | null): DC {
   if (remaining == null) return SUB
@@ -130,7 +131,7 @@ const OPENAI_PATH = "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0
 const iconSvg = (path: string, color: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24"><path fill="${color}" d="${path}"/></svg>`
 const CLAUDE_SVG = iconSvg(CLAUDE_PATH, "#D97757")
-const OPENAI_SVG = { light: iconSvg(OPENAI_PATH, "#1C1C1E"), dark: iconSvg(OPENAI_PATH, "#FFFFFF") }
+const OPENAI_SVG = { light: iconSvg(OPENAI_PATH, "#FFFFFF"), dark: iconSvg(OPENAI_PATH, "#FFFFFF") }
 
 function ProviderIcon({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
   // SVG paths have explicit fills; changing only the parent's foregroundStyle cannot gray them.

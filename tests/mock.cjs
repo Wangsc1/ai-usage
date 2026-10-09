@@ -235,7 +235,7 @@ async function main() {
     }
   }
   // Provider title AND explicit SVG fill respect enabled, never infer disabled from 0%/available/stale.
-  const gray={light:'#5E6068',dark:'#8E8E93'}, normal={light:'#1C1C1E',dark:'#FFFFFF'}
+  const gray={light:'#8E8E93',dark:'#8E8E93'}, normal={light:'#FFFFFF',dark:'#FFFFFF'}
   const statusAccounts=Array.from({length:4},(_,i)=>({...accounts[1],id:'status'+i,provider:i%2?'openai':'claude',name:'状态'+i,enabled:i>=2,available:false,
     fiveHour:{usedPercent:100,remainingPercent:0,resetsAt:null},sevenDay:{usedPercent:100,remainingPercent:0,resetsAt:null}}))
   for(const family of ['systemSmall','systemMedium','systemLarge']){
@@ -250,7 +250,7 @@ async function main() {
         assert.ok(brand)
         if(!a.enabled){assert.ok(brand.props.code.light.includes('fill="'+gray.light+'"'));assert.ok(brand.props.code.dark.includes('fill="'+gray.dark+'"'))}
         else if(a.provider==='claude'){assert.ok(brand.props.code.includes('fill="#D97757"'))}
-        else{assert.ok(brand.props.code.light.includes('fill="#1C1C1E"'));assert.ok(brand.props.code.dark.includes('fill="#FFFFFF"'))}
+        else{assert.ok(brand.props.code.light.includes('fill="#FFFFFF"'));assert.ok(brand.props.code.dark.includes('fill="#FFFFFF"'))}
         assert.ok(!statusTree.some(x=>typeof x==='string'&&x.includes('已停用')))
         // The same exhausted windows keep their quota colors/bars, irrespective of disabled title treatment.
         const quota=JSON.stringify(statusTree.filter(x=>x.type==='RoundedRectangle'||(x.type==='SVG'&&!(typeof x.props.code==='string'?x.props.code:x.props.code?.light)?.includes('<path '))))
@@ -343,8 +343,8 @@ async function main() {
       const cells=tree.filter(x=>x.type==='RoundedRectangle')
       assert.ok(cells.every(x=>x.props.frame.height===5))
       const lit=remaining==null?0:Math.round(remaining/100*layout.count)
-      const head=remaining<=20?{light:'#D93025',dark:'#FF453A'}:remaining<=60?{light:'#D9770B',dark:'#FF9F0A'}:{light:'#2E9E4F',dark:'#7ED957'}
-      for(let i=0;i<cells.length;i++)assert.equal(JSON.stringify(cells[i].props.fill),JSON.stringify(i<lit-1?{light:'#1C1C1E',dark:'#FFFFFF'}:i===lit-1?head:{light:'rgba(0, 0, 0, 0.13)',dark:'rgba(255, 255, 255, 0.14)'}))
+      const head=remaining<=20?{light:'#FF453A',dark:'#FF453A'}:remaining<=60?{light:'#FF9F0A',dark:'#FF9F0A'}:{light:'#7ED957',dark:'#7ED957'}
+      for(let i=0;i<cells.length;i++)assert.equal(JSON.stringify(cells[i].props.fill),JSON.stringify(i<lit-1?{light:'#FFFFFF',dark:'#FFFFFF'}:i===lit-1?head:{light:'rgba(255, 255, 255, 0.14)',dark:'rgba(255, 255, 255, 0.14)'}))
     }
   }
   const largeWindows=largeTree.filter(x=>x.type==='VStack'&&x.props.children?.[1]?.type?.name==='LargeSegBar')
@@ -649,7 +649,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.7.22')
+  assert.equal(api.VERSION,'1.7.23')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
