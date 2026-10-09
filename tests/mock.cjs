@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.7')
+  assert.equal(api.VERSION,'1.8.8')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1367,7 +1367,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.7'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.8'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1456,7 +1456,7 @@ async function main() {
   authUI=await startClaudeUI();const rateAttempt=uiAttempt(),rateServer=claudeServers.at(-1),rateCallsBefore=calls.length
   rateServer.handlers['/callback'](callback(rateAttempt.state,'mock-429-code'))
   for(let i=0;i<70&&!render().some(x=>x.type==='Text'&&String(x.props.children).includes('HTTP 429'));i++)await Promise.resolve()
-  assert.ok(render().some(x=>x.type==='Text'&&String(x.props.children).includes('Claude授权交换失败（HTTP 429）')))
+  assert.ok(render().some(x=>x.type==='Text'&&String(x.props.children).includes('Claude授权交换失败（HTTP 429')))
   assert.equal(calls.slice(rateCallsBefore).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
   assert.equal(rateServer.stops,1);assert.equal(rateAttempt.cancelled,true);assert.equal(rateAttempt.consumed,true);assert.equal(claudeTimers.size,0)
   handler=token429Handler
@@ -1586,6 +1586,78 @@ async function main() {
     assert.ok(!render().includes('Claude账号已保存'));assert.equal(claudeTimers.size,0)
   }
   console.log('PASS: document-shaped synchronous HttpResponse returned before unresolved token/profile; callback received/verified/exchange/profile/save ordered signals; modal-close keeps in-flight busy; close without callback remains waiting; no duplicate exchange; cancel/source suppress late progress/save; dynamic redirect matches')
+  const cooldownKey='ai_usage_claude_login_cooldown_v1',baseRateNow=now
+  const rateCases=[
+    ['120','application/json',{error:{type:'rate_limit_error',message:'SECRET-token-body'}},120000,'JSON','rate_limit'],
+    [new Date(now+90000).toUTCString(),'application/json',{error:'too_many_requests'},90000,'JSON','rate_limit'],
+    ['invalid-secret','text/html','SECRET-html-url',0,'HTML','未分类'],
+    ['-10','application/json',{error:{type:'SECRET-arbitrary',message:'SECRET-body'}},0,'JSON','未分类'],
+    ['1.5','application/problem+json',{error:'temporarily_unavailable'},0,'JSON','temporarily_unavailable'],
+    [new Date(now-1000).toUTCString(),'text/plain','SECRET-body',0,'other','未分类'],
+    ['','application/json',{error:'invalid_grant'},0,'JSON','invalid_grant'],
+    ['0','application/json',{error:'rate_limited'},0,'JSON','rate_limit'],
+    ['9999999999999999999999999','application/json',{error:'rate_limit_error'},0,'JSON','rate_limit'],
+  ]
+  for(const [retry,mime,body,wait,format,category] of rateCases){
+    storage.delete(cooldownKey);now=baseRateNow
+    const rateFlow=api.beginClaudeLogin(()=>{},()=>{},true),savedRateState=rateFlow.state,credentialsBefore=kc.get('ai_usage_claude_oauth_v1')
+    let bodyReads=0
+    handler=async(u,o)=>{
+      assert.equal(u,'https://platform.claude.com/v1/oauth/token');assert.equal(JSON.parse(o.body).grant_type,'authorization_code')
+      return {status:429,headers:{get:n=>n.toLowerCase()==='retry-after'?retry:n.toLowerCase()==='content-type'?mime:null},json:async()=>{bodyReads++;return body}}
+    }
+    before=calls.length;let rateError
+    try{await api.finishClaudeLogin(rateFlow,'mock-rate#'+savedRateState)}catch(e){rateError=e.message}
+    assert.ok(rateError.includes(`格式：${format}；类别：${category}`));assert.ok(!rateError.includes('SECRET'));assert.ok(!rateError.includes('invalid-secret'));assert.ok(!rateError.includes(savedRateState))
+    assert.equal(bodyReads,format==='JSON'?1:0);assert.equal(calls.length,before+1)
+    assert.equal(rateFlow.cancelled,true);assert.equal(rateFlow.consumed,true);assert.equal(kc.get('ai_usage_claude_oauth_v1'),credentialsBefore)
+    assert.equal(api.claudeCooldownUntil(),wait?now+wait:0)
+    if(wait){
+      assert.ok(rateError.includes('冷却中'));assert.ok(!rateError.includes('请重新开始'));assert.equal(storage.get(cooldownKey),now+wait)
+      const serversBefore=claudeServers.length;assert.throws(()=>api.beginClaudeLogin(),/冷却中/);assert.throws(()=>api.beginClaudeLogin(()=>{},()=>{},true),/冷却中/)
+      assert.equal(claudeServers.length,serversBefore)
+      authUI=await startClaudeUI();assert.ok(authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled)
+      assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('冷却中')));assert.equal(calls.length,before+1)
+      states.length=0;api.saveSource('official');authUI=render();authUI.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('claude')
+      assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled)
+      now+=1000;assert.ok(render().some(x=>typeof x==='string'&&x.includes('剩余'+Math.ceil((wait-1000)/1000)+'秒')))
+      // Codex device flow is independent of Claude cooldown, and no existing credentials are removed.
+      render().find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('codex')
+      assert.equal(render().find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled,false)
+      handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'rate-codex',usercode:'MOCK-COOLDOWN',interval:'5'}):combinedHandler(u,o)
+      await render().find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+      assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+      assert.equal(storage.get(cooldownKey),baseRateNow+wait)
+      now=baseRateNow+wait;assert.equal(api.claudeCooldownUntil(),0);const fresh=api.beginClaudeLogin();api.cancelClaudeLogin(fresh)
+    }else{assert.ok(rateError.includes('服务未提供有效等待时间'));assert.ok(!rateError.includes('剩余'));assert.equal(storage.has(cooldownKey),false)}
+    assert.equal(claudeTimers.size,0)
+  }
+  storage.delete(cooldownKey);now=baseRateNow
+  // A cancelled late 429 cannot save/login/update UI, but the server-provided deadline remains a local protection.
+  authUI=await startClaudeUI();let lateRateAttempt=uiAttempt(),lateRateServer=claudeServers.at(-1),releaseRate429
+  const lateRateCredentials=kc.get('ai_usage_claude_oauth_v1')
+  handler=async()=>{await new Promise(resolve=>releaseRate429=resolve);return {status:429,headers:{get:n=>n==='Retry-After'?'30':n==='Content-Type'?'application/json':null},json:async()=>({error:{type:'rate_limit_error',message:'SECRET'}})}}
+  before=calls.length;lateRateServer.handlers['/callback'](callback(lateRateAttempt.state))
+  for(let i=0;i<20&&!releaseRate429;i++)await Promise.resolve();assert.ok(releaseRate429)
+  render().find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action();releaseRate429()
+  for(let i=0;i<100;i++)await Promise.resolve()
+  assert.equal(calls.length,before+1);assert.equal(kc.get('ai_usage_claude_oauth_v1'),lateRateCredentials);assert.equal(lateRateServer.stops,1)
+  assert.equal(api.claudeCooldownUntil(),now+30000);assert.ok(!render().includes('Claude账号已保存'))
+  storage.delete(cooldownKey);handler=claudeHandler
+  console.log('PASS: Retry-After seconds/date/invalid/past/zero; JSON/HTML/other safe whitelist/no body secrets; persisted deadline disables fresh Claude attempts/re-render and expires; Codex device unaffected; one exchange/flow cleanup; cancelled late429 only records nonsecret cooldown')
+  // Exercise the actual countdown effect (normally effects are suppressed by the UI harness).
+  storage.set(cooldownKey,now+3000);const effectBefore=scripting.useEffect,rateEffects=[]
+  scripting.useEffect=(fn,deps)=>rateEffects.push({fn,deps})
+  states.length=0;api.saveSource('official');authUI=render();authUI.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('claude')
+  rateEffects.length=0;authUI=render();const countdownCleanup=rateEffects[0].fn()
+  const rateTick=[...claudeTimers].find(([id,t])=>t.ms===1000);assert.ok(rateTick)
+  now+=1000;rateTick[1].fn();assert.ok(render().some(x=>typeof x==='string'&&x.includes('剩余2秒')))
+  countdownCleanup();assert.ok(!claudeTimers.has(rateTick[0]))
+  now+=2000;rateEffects.length=0;authUI=render();assert.equal(rateEffects[0].fn(),undefined)
+  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled,false)
+  assert.ok(!authUI.some(x=>typeof x==='string'&&x.includes('冷却中')))
+  scripting.useEffect=effectBefore;storage.delete(cooldownKey);now=baseRateNow
+  console.log('PASS: real countdown effect updates remaining seconds, cleans its timer, re-enables Claude at deadline; no token polling')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.7"
+export const VERSION = "1.8.8"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -643,6 +643,36 @@ const SCOPE = "user:profile user:inference user:sessions:claude_code user:mcp_se
 const KEY = "ai_usage_claude_oauth_v1"
 // Explicit nonzero port from Scripting's documented HTTP example. Never fall back to a LAN bind.
 const CALLBACK_PORT = 8080
+const COOLDOWN = "ai_usage_claude_login_cooldown_v1"
+export function claudeCooldownUntil(): number {
+  const value = Storage.get<number>(COOLDOWN)
+  return typeof value === "number" && Number.isFinite(value) && value > Date.now() && value <= 8640000000000000 ? value : 0
+}
+export function claudeCooldownMessage(): string {
+  const until = claudeCooldownUntil()
+  return until ? `Claude授权冷却中，剩余${Math.ceil((until - Date.now()) / 1000)}秒；可重新授权时间：${new Date(until).toISOString()}` : ""
+}
+async function tokenRateLimit(r: any): Promise<Error> {
+  const header = (name: string): string => { try { return r.headers?.get(name) || "" } catch { return "" } }
+  const retry = header("Retry-After").trim()
+  let until = 0
+  if (/^\d+$/.test(retry)) until = Date.now() + Number(retry) * 1000
+  else if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retry)) until = Date.parse(retry)
+  if (!Number.isFinite(until) || until <= Date.now() || until > 8640000000000000) until = 0
+  if (until) { try { Storage.set(COOLDOWN, Math.max(until, claudeCooldownUntil())) } catch { /* no raw storage errors */ } }
+  const mime = header("Content-Type").split(";")[0].trim().toLowerCase()
+  const format = mime === "application/json" || mime.endsWith("+json") ? "JSON" : mime === "text/html" ? "HTML" : "other"
+  let category = "未分类"
+  if (format === "JSON") {
+    try {
+      const b = await r.json(), value = typeof b?.error === "string" ? b.error : b?.error?.type
+      if (["rate_limit_error", "rate_limited", "too_many_requests"].includes(value)) category = "rate_limit"
+      else if (["temporarily_unavailable", "invalid_grant"].includes(value)) category = value
+    } catch { /* no body/message/URL output */ }
+  }
+  const wait = claudeCooldownMessage() || "服务未提供有效等待时间，请稍后再授权，勿连续重试"
+  return new Error(`Claude授权交换失败（HTTP 429；格式：${format}；类别：${category}）。${wait}。本次流程已结束，未自动重试；之后需使用新授权码。`)
+}
 function startErrorCategory(error: unknown): string {
   // Only exact known codes/messages are classified; never echo arbitrary native text or URLs.
   let value = ""
@@ -715,6 +745,7 @@ export function cancelClaudeLogin(d: ClaudeLogin) {
   if (d.server) { d.server.stop(); d.server = null }
 }
 export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => void = () => {}, manual = false, onProgress?: (stage: string) => void): ClaudeLogin {
+  if (claudeCooldownUntil()) throw new Error(claudeCooldownMessage())
   if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function" || typeof Crypto.sha256 !== "function")
     throw new Error("当前Scripting不支持Claude PKCE加密，请更新Scripting")
   const verifier = base64url(Crypto.generateSymmetricKey(256)), state = base64url(Crypto.generateSymmetricKey(256))
@@ -813,6 +844,7 @@ export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive
   try {
     loginProgress(d, "正在交换Claude令牌（不重复提交）")
     const r = await post({ grant_type: "authorization_code", code, redirect_uri: d.redirect, client_id: CLIENT, code_verifier: d.verifier, state: d.state })
+    if (r.status === 429) throw await tokenRateLimit(r)
     if (r.status !== 200) throw new Error(`Claude授权交换失败（HTTP ${r.status}），请重新开始`)
     const tokens = tokenBody(await json(r))
     active(d); if (!stillActive()) throw new Error("Claude本次授权已取消")
@@ -881,6 +913,8 @@ export type ClaudeLogin = ClaudeOAuth.ClaudeLogin
 export const claudeAccounts = ClaudeOAuth.claudeAccounts
 export const loadClaudeAccounts = ClaudeOAuth.loadClaudeAccounts
 export const logoutClaude = ClaudeOAuth.logoutClaude
+export const claudeCooldownUntil = ClaudeOAuth.claudeCooldownUntil
+export const claudeCooldownMessage = ClaudeOAuth.claudeCooldownMessage
 export const beginClaudeLogin = ClaudeOAuth.beginClaudeLogin
 export const cancelClaudeLogin = ClaudeOAuth.cancelClaudeLogin
 export const finishClaudeLogin = ClaudeOAuth.finishClaudeLogin

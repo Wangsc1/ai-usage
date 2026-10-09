@@ -5,9 +5,9 @@ import {
 } from "scripting"
 import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
-import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin } from "./api"
+import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.8.7"
+const VERSION = "1.8.8"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -163,6 +163,13 @@ function SettingsView() {
   const [claude, setClaude] = useState<ClaudeLogin | null>(null)
   const [claudeCode, setClaudeCode] = useState("")
   const [claudeProgress, setClaudeProgress] = useState("")
+  const [cooldownTick, setCooldownTick] = useState(0)
+  const claudeCooling = claudeCooldownUntil() > 0
+  useEffect(() => {
+    if (source !== "official" || loginProvider !== "claude" || !claudeCooldownUntil()) return
+    const timer = setTimeout(() => setCooldownTick(cooldownTick + 1), 1000)
+    return () => clearTimeout(timer)
+  }, [source, loginProvider, cooldownTick, claudeCooling])
   const [logins, setLogins] = useState(officialAccounts())
   const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
   const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
@@ -214,6 +221,7 @@ function SettingsView() {
 
   function startClaude(manual = false) {
     if (auth.running) return
+    if (claudeCooldownUntil()) { setStatus(claudeCooldownMessage()); return }
     stopAuth(); setBrowserError("")
     try {
       const d = beginClaudeLogin(() => { if (auth.claude === d && auth.alive) void completeClaude(d) }, () => {
@@ -240,7 +248,9 @@ function SettingsView() {
     } catch (e: any) {
       if (valid()) {
         setStatus(e.message); setBrowserError(e.message)
-        if (attempt.consumed || attempt.cancelled) setClaudeProgress("Claude授权未完成，请查看错误提示")
+        if (attempt.consumed || attempt.cancelled) setClaudeProgress(e.message?.startsWith("Claude授权交换失败（HTTP 429")
+          ? "Claude授权已结束：令牌交换受限（HTTP 429），请勿立即重试"
+          : "Claude授权未完成，请查看错误提示")
         if (attempt.consumed || attempt.cancelled) {
           setClaudeCode("")
           auth.claude = null; setClaude(null); auth.releaseBrowser?.(); auth.releaseBrowser = null
@@ -391,7 +401,8 @@ function SettingsView() {
         <Picker title="登录服务" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
           <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text>
         </Picker>
-        {!device && !claude ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy} /> : null}
+        {!device && !claude ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
+        {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
         {loginProvider === "claude" && claudeProgress ? <Text>{claudeProgress}</Text> : null}
         {claude ? <>
           <Text>{claude.manual ? "Claude官方手动授权码：完成授权后粘贴完整code#state" : "Claude本机回调：完成网页授权后自动保存账号"}</Text>
