@@ -7,7 +7,7 @@ import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPc
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin } from "./api"
 
-const VERSION = "1.8.1"
+const VERSION = "1.8.2"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -236,8 +236,9 @@ function SettingsView() {
       setLogins(officialAccounts()); await test()
     } catch (e: any) {
       if (valid()) {
-        setStatus(e.message); setBrowserError(e.message); setClaudeCode("")
+        setStatus(e.message); setBrowserError(e.message)
         if (attempt.consumed || attempt.cancelled) {
+          setClaudeCode("")
           auth.claude = null; setClaude(null); auth.releaseBrowser?.(); auth.releaseBrowser = null
         }
       }
@@ -370,6 +371,7 @@ function SettingsView() {
       }}
     >
       <Section header={<Text>数据来源</Text>} footer={<Text>切换不删除另一来源的配置、账号或选择。普通 API Key 不能查询 Parrot 管理接口。</Text>}>
+        <LabeledContent title="当前脚本版本" value={VERSION} />
         <Picker title={"来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot密钥</Text>
           <Text tag={"official"}>官方OAuth（Codex/Claude）</Text>
@@ -389,7 +391,7 @@ function SettingsView() {
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
           {claude.manual ? <>
             <SecureField title="本次完整授权码" value={claudeCode} onChanged={setClaudeCode} prompt="code#state" />
-            <Button title="完成Claude授权" action={() => completeClaude()} disabled={busy} />
+            <Button title="完成Claude授权" action={() => completeClaude()} disabled={busy || !claudeCode.trim()} />
           </> : <Button title="改用手动授权码" action={() => startClaude(true)} disabled={busy} />}
           <Button title="取消Claude登录" action={() => { stopAuth(); setBusy(false); setStatus("已取消Claude登录") }} />
         </> : null}

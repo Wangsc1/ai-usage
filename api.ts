@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.1"
+export const VERSION = "1.8.2"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -681,11 +681,15 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
   const d: ClaudeLogin = { url: "", redirect: MANUAL, manual: true, fallback: null, verifier, state,
     expiresAt: Date.now() + 15 * 60 * 1000, cancelled: false, consumed: false, code: null, server: null, timer: null }
   if (!manual && typeof HttpServer !== "undefined" && typeof HttpServer === "function") {
-    const server = new HttpServer()
+    let server: any = null
+    let stage = "构造"
     try {
+      server = new HttpServer()
+      stage = "地址配置"
       // Never bind to LAN/wildcard. localhost is the exact official CLI redirect, not scripting://.
       server.listenAddressIPv4 = "127.0.0.1"
       if (server.listenAddressIPv4 !== "127.0.0.1") throw new Error()
+      stage = "注册handler"
       server.registerHandler("/callback", (req: any) => {
         const values = (key: string) => (req.queryParams ?? []).filter((x: any) => x.key === key).map((x: any) => x.value)
         const codes = values("code"), states = values("state")
@@ -697,11 +701,17 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
         Promise.resolve().then(onCode)
         return HttpResponse.ok(HttpResponseBody.text("已收到本次授权回调，请返回脚本等待账号保存。此页面不代表授权已完成。"))
       })
+      stage = "启动"
       const error = server.start({ port: 0, forceIPv4: true })
-      if (error || !server.port) throw new Error()
+      if (error) throw new Error()
+      stage = "端口"
+      if (!server.port) throw new Error()
       d.server = server; d.manual = false; d.redirect = `http://localhost:${server.port}/callback`
-    } catch { server.stop(); d.fallback = "本机回调不可用，使用Claude官方手动授权码页" }
-  } else if (!manual) d.fallback = "当前Scripting没有本机回调API，使用Claude官方手动授权码页"
+    } catch {
+      try { server?.stop() } catch { /* no raw native error output */ }
+      d.fallback = `本机回调不可用（阶段：${stage}），使用Claude官方手动授权码页`
+    }
+  } else if (!manual) d.fallback = "本机回调不可用（阶段：缺API），使用Claude官方手动授权码页"
   // Parameters are those in the official CLI buildAuthUrl; no cookie extraction or invented redirect.
   const params: Record<string, string> = { code: "true", client_id: CLIENT, response_type: "code", redirect_uri: d.redirect,
     scope: SCOPE, code_challenge: challenge, code_challenge_method: "S256", state }
@@ -730,8 +740,12 @@ export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive
   if (!stillActive()) throw new Error("Claude本次授权已取消")
   let code = d.code
   if (d.manual) {
-    const parts = pasted.trim().split("#")
-    if (parts.length !== 2 || !parts[0] || parts[1] !== d.state) throw new Error("Claude授权码格式或state不匹配，请粘贴本次页面提供的完整code#state")
+    const input = pasted.trim()
+    if (!input) throw new Error("Claude授权码输入为空，请先粘贴本次完整code#state")
+    if (!input.includes("#")) throw new Error("Claude授权码缺少#分隔符，请粘贴完整code#state")
+    const parts = input.split("#")
+    if (parts.length !== 2 || !parts[0] || !parts[1]) throw new Error("Claude授权码格式错误，需要且仅需要code#state两部分")
+    if (parts[1] !== d.state) throw new Error("Claude授权码state不匹配，未提交令牌交换；请确认来自当前授权页")
     code = parts[0]
   }
   if (!code) throw new Error("尚未收到Claude回调，请完成网页授权或改用手动授权码")

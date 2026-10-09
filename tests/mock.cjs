@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.1')
+  assert.equal(api.VERSION,'1.8.2')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1109,11 +1109,13 @@ async function main() {
   context.Data.fromRawString=value=>binary(Buffer.from(value))
   context.Crypto={generateSymmetricKey:bits=>{assert.equal(bits,256);return binary(nodeCrypto.randomBytes(bits/8))},sha256:data=>binary(nodeCrypto.createHash('sha256').update(data.bytes).digest())}
   context.HttpResponseBody={text:text=>text};context.HttpResponse={ok:body=>({body})}
-  let serverError=false
+  let serverError=false,diagnosticStage=null
   context.HttpServer=class {
-    constructor(){this.stops=0;this.handlers={};claudeServers.push(this)}
-    registerHandler(path,handler){this.handlers[path]=handler}
-    start(options){assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(options.forceIPv4,true);assert.equal(options.port,0);this.port=45678;return serverError?'mock-bind-failure':null}
+    constructor(){if(diagnosticStage==='构造')throw new Error('SECRET-native-url-token');this.stops=0;this.handlers={};claudeServers.push(this)}
+    set listenAddressIPv4(value){if(diagnosticStage==='地址配置')throw new Error('SECRET-address');this.address=value}
+    get listenAddressIPv4(){return diagnosticStage==='地址读回'?null:this.address}
+    registerHandler(path,handler){if(diagnosticStage==='注册handler')throw new Error('SECRET-register');this.handlers[path]=handler}
+    start(options){assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(options.forceIPv4,true);assert.equal(options.port,0);this.port=diagnosticStage==='端口'?null:45678;return serverError||diagnosticStage==='启动'?'SECRET-start-url':null}
     stop(){this.stops++}
   }
   kc.delete('ai_usage_claude_oauth_v1')
@@ -1335,6 +1337,48 @@ async function main() {
     assert.ok(!exitRow(render(),target.id))
   }
   console.log('PASS: Codex/Claude provider from separate real record collections (legacy Codex supported); plain complete-email label/Spacer/right independent borderless 点击退出; long-email wrapping; busy/device/Claude disables; each exact-ID button preserves other providers/cache/credentials')
+  // Diagnostics expose only a fixed stage, never a native exception/URL/code/state.
+  for(const stage of ['构造','地址配置','地址读回','注册handler','启动','端口','缺API']){
+    diagnosticStage=stage;const savedServer=context.HttpServer
+    if(stage==='缺API')delete context.HttpServer
+    const beforeServers=claudeServers.length,attempt=api.beginClaudeLogin()
+    const expectedStage=stage==='地址读回'?'地址配置':stage
+    assert.equal(attempt.manual,true);assert.equal(attempt.fallback,`本机回调不可用（阶段：${expectedStage}），使用Claude官方手动授权码页`)
+    assert.ok(!attempt.fallback.includes('SECRET'));assert.ok(!attempt.fallback.includes(attempt.state));assert.ok(!attempt.fallback.includes(attempt.verifier))
+    if(claudeServers.length>beforeServers)assert.equal(claudeServers.at(-1).stops,1)
+    api.cancelClaudeLogin(attempt);assert.equal(claudeTimers.size,0)
+    authUI=await startClaudeUI()
+    assert.ok(authUI.includes(`本机回调不可用（阶段：${expectedStage}），使用Claude官方手动授权码页`))
+    authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    context.HttpServer=savedServer;assert.equal(claudeTimers.size,0)
+  }
+  diagnosticStage=null
+  // Exact manual validation branch is visible and input is retained without a token exchange.
+  authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
+  authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.2'))
+  const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
+  for(const [input,expected] of validationCases){
+    authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
+    authUI=render();const button=authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权')
+    assert.equal(button.props.disabled,!input.trim());before=calls.length
+    // Explicitly call disabled action to test API defense too; native UI prevents the empty tap.
+    await button.props.action();authUI=render()
+    assert.equal(calls.length,before);assert.equal(authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.value,input)
+    const err=authUI.find(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed');assert.ok(err.props.children.startsWith(expected))
+    assert.ok(!err.props.children.includes('secret'));assert.ok(!err.props.children.includes('different-state'))
+    assert.equal(uiAttempt().state,diagnosticState);assert.equal(diagnosticAttempt.consumed,false);assert.equal(diagnosticAttempt.cancelled,false)
+  }
+  // Corrected input can succeed in the SAME flow; fatal exchange failures clear/removes input instead.
+  claudeAccount='diagnostic-success';claudeEmail='diagnostic@example.test'
+  authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-corrected#'+diagnosticState)
+  await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
+  assert.ok(api.officialAccounts().some(a=>a.name==='diagnostic@example.test'));assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'))
+  authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action();authUI=render()
+  authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-fatal#'+uiAttempt().state)
+  claudePostFailure=true;await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action();claudePostFailure=false
+  assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'));assert.equal(claudeTimers.size,0)
+  console.log('PASS: callback fixed safe stage labels (construct/address/readback/register/start/port/missing API) with cleanup; distinct empty/hash/format/state manual errors; retained secure input/no exchange/no state regeneration; empty disabled; same-flow correction; fatal clears; visible runtime version')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
