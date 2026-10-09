@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.6"
+export const VERSION = "1.8.7"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -683,6 +683,11 @@ export type ClaudeLogin = {
   url: string; redirect: string; manual: boolean; fallback: string | null
   verifier: string; state: string; expiresAt: number; cancelled: boolean; consumed: boolean
   code: string | null; server: any; timer: any
+  progress: string; onProgress?: (stage: string) => void
+}
+function loginProgress(d: ClaudeLogin, stage: string) {
+  d.progress = stage
+  d.onProgress?.(stage)
 }
 function credentials(): Credential[] {
   const raw = Keychain.get(KEY)
@@ -709,7 +714,7 @@ export function cancelClaudeLogin(d: ClaudeLogin) {
   if (d.timer != null) { clearTimeout(d.timer); d.timer = null }
   if (d.server) { d.server.stop(); d.server = null }
 }
-export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => void = () => {}, manual = false): ClaudeLogin {
+export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => void = () => {}, manual = false, onProgress?: (stage: string) => void): ClaudeLogin {
   if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function" || typeof Crypto.sha256 !== "function")
     throw new Error("当前Scripting不支持Claude PKCE加密，请更新Scripting")
   const verifier = base64url(Crypto.generateSymmetricKey(256)), state = base64url(Crypto.generateSymmetricKey(256))
@@ -717,7 +722,8 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
   if (!input) throw new Error("无法生成Claude PKCE")
   const challenge = base64url(Crypto.sha256(input))
   const d: ClaudeLogin = { url: "", redirect: MANUAL, manual: true, fallback: null, verifier, state,
-    expiresAt: Date.now() + 15 * 60 * 1000, cancelled: false, consumed: false, code: null, server: null, timer: null }
+    expiresAt: Date.now() + 15 * 60 * 1000, cancelled: false, consumed: false, code: null, server: null, timer: null,
+    progress: "等待Claude回调（尚未收到）", onProgress }
   if (!manual && typeof HttpServer !== "undefined" && typeof HttpServer === "function") {
     let server: any = null
     let stage = "构造"
@@ -736,9 +742,13 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
         const codes = values("code"), states = values("state")
         const ok = req.method === "GET" && !d.cancelled && !d.consumed && Date.now() < d.expiresAt &&
           states.length === 1 && states[0] === d.state && codes.length === 1 && typeof codes[0] === "string" && !!codes[0] && !d.code
-        if (!ok) return HttpResponse.ok(HttpResponseBody.text("本次回调无效或已失效。请返回脚本检查授权。"))
+        if (!ok) {
+          if (!d.cancelled && !d.consumed && !d.code) loginProgress(d, "收到Claude回调，但未通过本次校验")
+          return HttpResponse.ok(HttpResponseBody.text("本次回调无效或已失效。请返回脚本检查授权。"))
+        }
         d.code = codes[0]
-        // Respond without echoing code/state. Schedule exchange AFTER returning the local response.
+        loginProgress(d, "收到Claude回调，已通过本次校验")
+        // Return a synchronous response without awaiting exchange. Native socket flush timing is platform-owned.
         Promise.resolve().then(onCode)
         return HttpResponse.ok(HttpResponseBody.text("已收到本次授权回调，请返回脚本等待账号保存。此页面不代表授权已完成。"))
       })
@@ -765,6 +775,7 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
   const params: Record<string, string> = { code: "true", client_id: CLIENT, response_type: "code", redirect_uri: d.redirect,
     scope: SCOPE, code_challenge: challenge, code_challenge_method: "S256", state }
   d.url = "https://claude.com/cai/oauth/authorize?" + Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&")
+  if (d.manual) d.progress = "等待Claude手动授权码"
   d.timer = setTimeout(() => { if (!d.cancelled) { cancelClaudeLogin(d); onExpire() } }, 15 * 60 * 1000)
   return d
 }
@@ -800,10 +811,12 @@ export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive
   if (!code) throw new Error("尚未收到Claude回调，请完成网页授权或改用手动授权码")
   d.consumed = true
   try {
+    loginProgress(d, "正在交换Claude令牌（不重复提交）")
     const r = await post({ grant_type: "authorization_code", code, redirect_uri: d.redirect, client_id: CLIENT, code_verifier: d.verifier, state: d.state })
     if (r.status !== 200) throw new Error(`Claude授权交换失败（HTTP ${r.status}），请重新开始`)
     const tokens = tokenBody(await json(r))
     active(d); if (!stillActive()) throw new Error("Claude本次授权已取消")
+    loginProgress(d, "正在读取Claude账号资料")
     const profile = await request(API + "/profile", { headers: { Authorization: `Bearer ${tokens.access}`, "Content-Type": "application/json" } })
     if (profile.status !== 200) throw new Error(`Claude账号资料读取失败（HTTP ${profile.status}），请重新开始`)
     const p = await json(profile)
@@ -813,10 +826,12 @@ export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive
     const item: Credential = { id, accountId: p.account.uuid, organizationId: p.organization.uuid,
       email: typeof p.account.email === "string" && p.account.email.includes("@") ? p.account.email : "", ...tokens }
     active(d); if (!stillActive()) throw new Error("Claude本次授权已取消")
+    loginProgress(d, "正在保存Claude账号到本机")
     const items = credentials(), index = items.findIndex(x => x.id === id)
     if (index < 0) items.push(item)
     else { if (!item.email) item.email = items[index].email; items[index] = item }
     persist(items)
+    loginProgress(d, "Claude账号已保存")
     return id
   } finally { cancelClaudeLogin(d) }
 }

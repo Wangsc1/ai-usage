@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.6')
+  assert.equal(api.VERSION,'1.8.7')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1108,7 +1108,7 @@ async function main() {
   const binary=buf=>({toBase64String:()=>Buffer.from(buf).toString('base64'),toRawString:()=>Buffer.from(buf).toString(),bytes:Buffer.from(buf)})
   context.Data.fromRawString=value=>binary(Buffer.from(value))
   context.Crypto={generateSymmetricKey:bits=>{assert.equal(bits,256);return binary(nodeCrypto.randomBytes(bits/8))},sha256:data=>binary(nodeCrypto.createHash('sha256').update(data.bytes).digest())}
-  context.HttpResponseBody={text:text=>text};context.HttpResponse={ok:body=>({body})}
+  context.HttpResponseBody={text:text=>text};context.HttpResponse={ok:body=>({statusCode:200,reasonPhrase:'OK',body})}
   let serverError=false,diagnosticStage=null,startNativeError=null,startThrows=false,startCalls=0,startScenario=null
   context.HttpServer=class {
     constructor(){if(diagnosticStage==='构造')throw new Error('SECRET-native-url-token');this.stops=0;this.port=null;this.state='stopped';this.handlers={};claudeServers.push(this)}
@@ -1367,7 +1367,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.6'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.7'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1529,6 +1529,63 @@ async function main() {
   const thrownDescriptionFlow=api.beginClaudeLogin();assert.ok(!thrownDescriptionFlow.fallback.includes('启动描述'));assert.ok(!thrownDescriptionFlow.fallback.includes('Argument mismatch'))
   api.cancelClaudeLogin(thrownDescriptionFlow);startNativeError=null;startThrows=false
   console.log('PASS: actual local start return argument/listen error text visible; controls removed/240-char cap; full-input secret/URL filtering before truncation; thrown/native objects not echoed; add-only UI/no account requests/no persistent error records; cleanup')
+  // Synchronous callback response MUST exist even while token/profile promises are unresolved.
+  handler=claudeHandler;claudeAccount='stage-auto';claudeEmail='stage-auto@example.test'
+  authUI=await startClaudeUI();let stageAttempt=uiAttempt(),stageServer=claudeServers.at(-1)
+  assert.ok(authUI.includes('等待Claude回调（尚未收到）'))
+  const delayedBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
+  const invalidReply=stageServer.handlers['/callback'](callback('mock-wrong-current-state'))
+  assert.equal(invalidReply.statusCode,200);assert.equal(typeof invalidReply.then,'undefined')
+  assert.ok(render().includes('收到Claude回调，但未通过本次校验'))
+  holdToken=true;holdProfile=true;releaseClaudeRequest=null;before=calls.length
+  const actualCallback={path:'/callback',target:'/callback?code=mock-stage-code&state='+stageAttempt.state,method:'GET',address:'127.0.0.1',headers:{},queryParams:[{key:'code',value:'mock-stage-code'},{key:'state',value:stageAttempt.state}]}
+  const immediateReply=stageServer.handlers['/callback'](actualCallback)
+  assert.equal(immediateReply.statusCode,200);assert.equal(typeof immediateReply.then,'undefined')
+  assert.equal(calls.length,before);assert.ok(render().includes('收到Claude回调，已通过本次校验'))
+  assert.ok(!immediateReply.body.includes(stageAttempt.state));assert.ok(!immediateReply.body.includes('mock-stage-code'))
+  for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
+  assert.ok(render().includes('正在交换Claude令牌（不重复提交）'));assert.equal(stageAttempt.consumed,true)
+  stageServer.handlers['/callback'](actualCallback) // duplicate must not regress progress or exchange twice
+  closeClaudeModal();await delayedBrowser
+  assert.ok(render().includes('正在交换Claude令牌（不重复提交）'))
+  assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.disabled)
+  assert.ok(!api.officialAccounts().some(a=>a.email==='stage-auto@example.test'));assert.equal(stageServer.stops,0)
+  const releaseTokenStage=releaseClaudeRequest;releaseClaudeRequest=null;holdToken=false;releaseTokenStage()
+  for(let i=0;i<30&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
+  assert.ok(render().includes('正在读取Claude账号资料'));assert.equal(stageServer.stops,0)
+  const releaseProfileStage=releaseClaudeRequest;releaseClaudeRequest=null;holdProfile=false;releaseProfileStage()
+  for(let i=0;i<100;i++)await Promise.resolve()
+  assert.ok(render().includes('Claude账号已保存'));assert.ok(api.officialAccounts().some(a=>a.email==='stage-auto@example.test'))
+  assert.equal(stageServer.stops,1);assert.equal(claudeTimers.size,0)
+  assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
+  assert.equal(lastExchange.redirect_uri,stageAttempt.redirect)
+  // Saving stage is emitted by the real API just before Keychain persist; all signals are fixed labels.
+  const orderedStages=[];claudeAccount='stage-order';claudeEmail='stage-order@example.test'
+  let signalFlow
+  signalFlow=api.beginClaudeLogin(()=>void api.finishClaudeLogin(signalFlow),()=>{},false,s=>orderedStages.push(s))
+  const signalServer=claudeServers.at(-1);signalServer.handlers['/callback'](callback(signalFlow.state))
+  for(let i=0;i<100;i++)await Promise.resolve()
+  assert.deepEqual(orderedStages,['收到Claude回调，已通过本次校验','正在交换Claude令牌（不重复提交）','正在读取Claude账号资料','正在保存Claude账号到本机','Claude账号已保存'])
+  // Browser close WITHOUT callback keeps waiting; cancellation suppresses late signals and late token saves.
+  authUI=await startClaudeUI();const emptyBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
+  closeClaudeModal();await emptyBrowser;assert.ok(render().includes('等待Claude回调（尚未收到）'))
+  render().find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+  for(const stop of ['cancel','source']){
+    authUI=await startClaudeUI();stageAttempt=uiAttempt();stageServer=claudeServers.at(-1);holdToken=true;releaseClaudeRequest=null
+    const credentialsBefore=kc.get('ai_usage_claude_oauth_v1')
+    stageServer.handlers['/callback'](callback(stageAttempt.state))
+    for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
+    authUI=render()
+    if(stop==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    else authUI.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('parrot')
+    assert.ok(!render().includes('正在交换Claude令牌（不重复提交）'))
+    stageServer.handlers['/callback'](actualCallback)
+    releaseClaudeRequest();holdToken=false;releaseClaudeRequest=null
+    for(let i=0;i<100;i++)await Promise.resolve()
+    assert.equal(kc.get('ai_usage_claude_oauth_v1'),credentialsBefore);assert.equal(stageServer.stops,1)
+    assert.ok(!render().includes('Claude账号已保存'));assert.equal(claudeTimers.size,0)
+  }
+  console.log('PASS: document-shaped synchronous HttpResponse returned before unresolved token/profile; callback received/verified/exchange/profile/save ordered signals; modal-close keeps in-flight busy; close without callback remains waiting; no duplicate exchange; cancel/source suppress late progress/save; dynamic redirect matches')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

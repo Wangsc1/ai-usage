@@ -7,7 +7,7 @@ import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPc
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin } from "./api"
 
-const VERSION = "1.8.6"
+const VERSION = "1.8.7"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "widget.tsx", "index.tsx"]
@@ -162,9 +162,10 @@ function SettingsView() {
   const [loginProvider, setLoginProvider] = useState("codex")
   const [claude, setClaude] = useState<ClaudeLogin | null>(null)
   const [claudeCode, setClaudeCode] = useState("")
+  const [claudeProgress, setClaudeProgress] = useState("")
   const [logins, setLogins] = useState(officialAccounts())
   const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
-  const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode("") }
+  const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const cur = getConfig()
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
@@ -217,8 +218,10 @@ function SettingsView() {
     try {
       const d = beginClaudeLogin(() => { if (auth.claude === d && auth.alive) void completeClaude(d) }, () => {
         if (auth.claude === d && auth.alive) { stopAuth(); setBusy(false); setStatus("Claude授权已过期，请重新开始") }
-      }, manual)
-      auth.claude = d; setClaude(d); setClaudeCode("")
+      }, manual, stage => {
+        if (auth.claude === d && auth.alive && getSource() === "official") setClaudeProgress(stage)
+      })
+      auth.claude = d; setClaude(d); setClaudeCode(""); setClaudeProgress(d.progress)
       setStatus(d.fallback || (d.manual ? "请完成Claude官方页面授权并粘贴完整code#state" : "请打开Claude授权页；本机回调成功后自动检查并保存"))
     } catch (e: any) { setStatus(e.message); setBrowserError(e.message) }
   }
@@ -237,6 +240,7 @@ function SettingsView() {
     } catch (e: any) {
       if (valid()) {
         setStatus(e.message); setBrowserError(e.message)
+        if (attempt.consumed || attempt.cancelled) setClaudeProgress("Claude授权未完成，请查看错误提示")
         if (attempt.consumed || attempt.cancelled) {
           setClaudeCode("")
           auth.claude = null; setClaude(null); auth.releaseBrowser?.(); auth.releaseBrowser = null
@@ -261,7 +265,12 @@ function SettingsView() {
       const message = e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载") ? e.message : "无法打开Claude授权页，请重试或使用Safari备用"
       setBrowserError(message); setStatus(message)
     } }
-    finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
+    finally {
+      // Closing the browser must not unlock an exchange/profile request still in flight.
+      if (auth.alive && epoch === auth.epoch && !(auth.claude === d && d.consumed && !d.cancelled)) {
+        auth.running = false; setBusy(false)
+      }
+    }
   }
 
   async function checkOfficial(browser: boolean | "safari" = false) {
@@ -383,6 +392,7 @@ function SettingsView() {
           <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text>
         </Picker>
         {!device && !claude ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy} /> : null}
+        {loginProvider === "claude" && claudeProgress ? <Text>{claudeProgress}</Text> : null}
         {claude ? <>
           <Text>{claude.manual ? "Claude官方手动授权码：完成授权后粘贴完整code#state" : "Claude本机回调：完成网页授权后自动保存账号"}</Text>
           {claude.fallback ? <Text font={12} foregroundStyle="secondaryLabel">{claude.fallback}</Text> : null}
