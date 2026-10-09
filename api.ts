@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.9.0"
+export const VERSION = "1.9.1"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -482,6 +482,13 @@ export function loadUsage(): Promise<LoadResult> {
 }
 
 // ---------- 格式化 ----------
+// Display-only; deadlines remain epoch milliseconds and statistics keep their configured timezone.
+export function formatBeijingDeadline(at: number): string {
+  const parts = new Intl.DateTimeFormat("en", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(at))
+  const value = (type: string) => parts.find(p => p.type === type)?.value ?? ""
+  return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")}:${value("second")}`
+}
 export function fmtTokens(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B"
   if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e8 ? 0 : 1) + "M"
@@ -795,7 +802,7 @@ export function claudeCooldownUntil(): number {
 }
 export function claudeCooldownMessage(): string {
   const until = claudeCooldownUntil()
-  return until ? `Claude授权冷却中，剩余${Math.ceil((until - Date.now()) / 1000)}秒；可重新授权时间：${new Date(until).toISOString()}` : ""
+  return until ? `Claude授权冷却中，剩余${Math.ceil((until - Date.now()) / 1000)}秒；可重新授权时间：${formatBeijingDeadline(until)}` : ""
 }
 async function tokenRateLimit(r: any): Promise<Error> {
   const header = (name: string): string => { try { return r.headers?.get(name) || "" } catch { return "" } }
@@ -1073,7 +1080,7 @@ function remember429(key: string, id: string, r: any): number {
   Storage.set(key, { ...all, [id]: Math.max(until, deadline(key, id)) })
   return until
 }
-const waitText = (until: number) => `冷却至${new Date(until).toISOString()}，剩余${Math.ceil((until - Date.now()) / 1000)}秒`
+const waitText = (until: number) => `冷却至${formatBeijingDeadline(until)}，剩余${Math.ceil((until - Date.now()) / 1000)}秒`
 type CardCache = Record<string, { count: number | null; at: number }>
 const claudeLoads = new Map<string, Promise<Account>>()
 export function forgetClaudeUsageState(id: string) {

@@ -695,7 +695,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.0')
+  assert.equal(api.VERSION,'1.9.1')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1093,6 +1093,33 @@ async function main() {
   assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
   assert.equal(presented.tree.props.data.today.requests,23);assert.ok(presented.tree.props.data.accounts.every(a=>a.id.startsWith('combined-official-')))
   assert.equal(presented.options.reloadPolicy.policy,'after')
+  // Actual Settings Picker -> persisted minutes -> reloadAll -> widget entry passes a Date (ms), not a numeric timer.
+  {
+    const savedRefresh=storage.get('ai_usage_refresh_minutes_v1'),savedReload=scripting.Widget.reloadAll
+    let reloads=0;scripting.Widget.reloadAll=async()=>{reloads++}
+    storage.delete('ai_usage_refresh_minutes_v1');assert.equal(api.getRefreshMinutes(),15)
+    await load('widget.tsx').runWidget();assert.equal(presented.options.reloadPolicy.date.getTime(),now+15*60000)
+    for(const minutes of [5,15,30,60]){
+      states.length=0;const settings=render(),picker=settings.find(x=>x.type==='Picker'&&x.props.title==='刷新间隔')
+      await picker.props.onChanged(String(minutes));assert.equal(storage.get('ai_usage_refresh_minutes_v1'),minutes);assert.equal(api.getRefreshMinutes(),minutes)
+      const started=now;await load('widget.tsx').runWidget()
+      assert.equal(presented.options.reloadPolicy.policy,'after');assert.equal(presented.options.reloadPolicy.date.getTime(),started+minutes*60000)
+      assert.ok(presented.options.reloadPolicy.date instanceof context.Date)
+      // Opening a new settings view retains the saved setting.
+      states.length=0;assert.equal(render().find(x=>x.type==='Picker'&&x.props.title==='刷新间隔').props.value,String(minutes))
+    }
+    assert.equal(reloads,4)
+    api.saveRefreshMinutes(7);assert.equal(api.getRefreshMinutes(),60)
+    storage.set('ai_usage_refresh_minutes_v1',999);assert.equal(api.getRefreshMinutes(),15)
+    api.saveRefreshMinutes(30);const beforeManual=now
+    await registeredIntents.get('RefreshUsageIntent').perform(undefined);assert.equal(api.getRefreshMinutes(),30);assert.equal(reloads,5)
+    now+=2000;await load('widget.tsx').runWidget();assert.equal(presented.options.reloadPolicy.date.getTime(),now+30*60000)
+    assert.ok(presented.options.reloadPolicy.date.getTime()>beforeManual+30*60000) // next generated timeline anchored to new render
+    if(savedRefresh==null)storage.delete('ai_usage_refresh_minutes_v1');else storage.set('ai_usage_refresh_minutes_v1',savedRefresh)
+    scripting.Widget.reloadAll=savedReload;states.length=0
+  }
+  console.log('PASS: real Settings interval Picker persists/reloads; default15/5/15/30/60/invalid; Widget.present reloadPolicy after Date at render+minutes*60000; reopened settings retains; manual intent leaves setting unchanged and next timeline uses new render time; NOT native scheduling proof')
+
   // App uses the same composed path and reports source/freshness independently.
   states.length=0;authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
@@ -1193,7 +1220,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.0')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.1')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1427,7 +1454,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.0'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.1'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1646,6 +1673,10 @@ async function main() {
     assert.ok(!render().includes('Claude账号已保存'));assert.equal(claudeTimers.size,0)
   }
   console.log('PASS: document-shaped synchronous HttpResponse returned before unresolved token/profile; callback received/verified/exchange/profile/save ordered signals; modal-close keeps in-flight busy; close without callback remains waiting; no duplicate exchange; cancel/source suppress late progress/save; dynamic redirect matches')
+  for(const [utc,beijing] of [['2026-10-09T06:39:41.420Z','2026-10-09 14:39:41'],['2026-10-09T16:00:00Z','2026-10-10 00:00:00'],['2026-12-31T23:59:59Z','2027-01-01 07:59:59']]){
+    assert.equal(api.formatBeijingDeadline(Date.parse(utc)),beijing)
+    assert.ok(!/[TZ+]|UTC/.test(api.formatBeijingDeadline(Date.parse(utc))))
+  }
   const cooldownKey='ai_usage_claude_login_cooldown_v1',baseRateNow=now
   const rateCases=[
     ['120','application/json',{error:{type:'rate_limit_error',message:'SECRET-token-body'}},120000,'JSON','rate_limit'],
@@ -1674,6 +1705,7 @@ async function main() {
     assert.equal(api.claudeCooldownUntil(),wait?now+wait:0)
     if(wait){
       assert.ok(rateError.includes('冷却中'));assert.ok(!rateError.includes('请重新开始'));assert.equal(storage.get(cooldownKey),now+wait)
+      assert.ok(rateError.includes('可重新授权时间：'+api.formatBeijingDeadline(now+wait)));assert.ok(!rateError.includes('Z'));assert.ok(!rateError.includes('UTC+8'))
       const serversBefore=claudeServers.length;assert.throws(()=>api.beginClaudeLogin(),/冷却中/);assert.throws(()=>api.beginClaudeLogin(()=>{},()=>{},true),/冷却中/)
       assert.equal(claudeServers.length,serversBefore)
       authUI=await startClaudeUI();assert.ok(authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled)
@@ -1726,7 +1758,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.0')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.1')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1736,7 +1768,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.0 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.1 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1843,14 +1875,14 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.9.0'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.9.1'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.0'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.1'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
@@ -1903,8 +1935,16 @@ async function main() {
     assert.ok(limited.error.includes('HTTP 429，GET /api/oauth/usage'));assert.ok(limited.error.includes('不自动重试'))
     assert.ok([Math.round(ms/1000),Math.round(ms/1000)-1].some(n=>limited.error.includes('剩余'+n+'秒')),limited.error);assert.ok(!limited.error.includes('cedar_ember'))
     const stored=storage.get('ai_usage_claude_usage_cooldown_v1');assert.ok(Object.values(stored).some(v=>Math.abs(v-(now+ms))<1000))
+    assert.ok(Object.values(stored).some(v=>limited.error.includes('冷却至'+api.formatBeijingDeadline(v))));assert.ok(!limited.error.includes('Z'));assert.ok(!limited.error.includes('UTC+8'))
     usageMode='ok';before=calls.length;const cooling=await api.loadOfficialUsage()
     assert.equal(countCalls(before).usage,0);assert.equal(cooling.stale,true);assert.ok(cooling.error.includes('本次未发送请求'))
+    // Widget interval is a timeline request; it never overrides Claude's independent request cooldown.
+    const oldInterval=api.getRefreshMinutes();api.saveRefreshMinutes(5)
+    before=calls.length;await load('widget.tsx').runWidget();assert.equal(countCalls(before).usage,0)
+    assert.equal(presented.options.reloadPolicy.date.getTime(),now+5*60000);assert.equal(api.officialCached().fetchedAt,cachedAt)
+    assert.ok(Object.values(stored).some(v=>presented.tree.props.error.includes(api.formatBeijingDeadline(v))))
+    api.saveRefreshMinutes(oldInterval)
+
     // AppIntent button during cooldown performs a local cache result + reload, zero Claude requests.
     let intentReloads=0;const savedReload=scripting.Widget.reloadAll;scripting.Widget.reloadAll=async()=>{intentReloads++}
     before=calls.length;await registeredIntents.get('RefreshUsageIntent').perform(undefined)
