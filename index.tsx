@@ -3,11 +3,11 @@ import {
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, clearConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.8.16"
+const VERSION = "1.9.0"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
@@ -101,7 +101,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
     await Widget.reloadAll()
   }
   return <Form navigationTitle="小组件用户名" navigationBarTitleDisplayMode="inline">
-    <Section header={<Text>{account.name}</Text>} footer={<Text>仅修改本机小组件显示，所有尺寸共用。留空保存恢复原名；不修改远端账号。两种来源独立保存。</Text>}>
+    <Section header={<Text>{account.name}</Text>} footer={<Text>仅修改本机小组件显示，所有尺寸共用。留空保存恢复原名；不修改远端账号。三种额度来源独立保存。</Text>}>
       <TextField title="小组件用户名" value={name} onChanged={value => { setName(value); setSaved(false) }} prompt="留空使用原名" />
       <Button title="保存" action={save} />
       {saved ? <Text>已保存</Text> : null}
@@ -174,6 +174,12 @@ function SettingsView() {
   const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
   const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
+  const [statisticsSource, setStatisticsSource] = useState<StatisticsSource>(getStatisticsSource())
+  const subCur = getSub2APIConfig()
+  const [subUrl, setSubUrl] = useState(subCur.baseUrl ?? "")
+  const [subKey, setSubKey] = useState("")
+  const [subTimezone, setSubTimezone] = useState(subCur.timezone)
+  const [hasSubKey, setHasSubKey] = useState(!!subCur.adminKey)
   const cur = getConfig()
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
   const [key, setKey] = useState("")
@@ -187,7 +193,7 @@ function SettingsView() {
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
   useEffect(() => {
-    if (getSource() === "official" || cur.managementKey) test()
+    if (getSource() === "official" || getSource() === "sub2api" && subCur.adminKey || cur.managementKey) test()
   }, [])
 
   useEffect(() => () => { auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
@@ -336,28 +342,29 @@ function SettingsView() {
   }
 
   async function test() {
-    const requestSource = getSource()
+    const requestSource = getSource(), requestStats = getStatisticsSource()
+    const statsName = requestStats === "sub2api" ? "Sub2API" : "Parrot"
     setBusy(true)
     setStatus("连接中…")
     setLines([])
     try {
       const r = await loadUsage()
       // A late refresh from the previous source must not replace this source's account list/status.
-      if (!auth.alive || getSource() !== requestSource) return
+      if (!auth.alive || getSource() !== requestSource || getStatisticsSource() !== requestStats) return
       if (r.data) {
         setAccounts(r.data.accounts)
       }
       if (r.data) {
         const d = r.data
-        setStatus(r.stale ? "❌ 额度使用缓存：" + (r.error ?? "读取失败") : d.statistics?.error ? "⚠️ 额度已刷新；Parrot统计独立读取失败" : "✅ 连接成功")
+        setStatus(r.stale ? "❌ 额度使用缓存：" + (r.error ?? "读取失败") : d.statistics?.error ? `⚠️ 额度已刷新；${statsName}统计独立读取失败` : "✅ 连接成功")
         setLines([
-          `统计：Parrot全部账号汇总；额度：${requestSource === "official" ? "官方OAuth（Codex/Claude）" : "Parrot"}`,
-          ...(d.statistics ? [d.statistics.fetchedAt == null ? "Parrot统计未提供" : `Parrot统计${d.statistics.stale ? "缓存" : "更新时间"}：${new Date(d.statistics.fetchedAt).toLocaleString()}`,
-            ...(d.statistics.error ? [`Parrot统计错误：${d.statistics.error}`] : [])] : []),
+          `统计：${statsName}全部账号汇总；额度：${requestSource === "official" ? "官方OAuth（Codex/Claude）" : requestSource === "sub2api" ? "Sub2API" : "Parrot"}`,
+          ...(d.statistics ? [d.statistics.fetchedAt == null ? `${statsName}统计未提供` : `${statsName}统计${d.statistics.stale ? "缓存" : "更新时间"}：${new Date(d.statistics.fetchedAt).toLocaleString()}`,
+            ...(d.statistics.error ? [`${statsName}统计错误：${d.statistics.error}`] : [])] : []),
           ...(d.today && d.month ? [
             `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
             `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
-          ] : ["Parrot今日/本月Token及花费统计未提供"]),
+          ] : [`${statsName}今日/本月Token及花费统计未提供`]),
           ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "Codex"} ${a.name}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
         ])
         await Widget.reloadAll()
@@ -395,8 +402,28 @@ function SettingsView() {
         <Picker title={"来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot密钥</Text>
           <Text tag={"official"}>官方OAuth（Codex/Claude）</Text>
+          <Text tag="sub2api">Sub2API</Text>
         </Picker>
       </Section>
+
+      <Section header={<Text>统计来源</Text>} footer={<Text>与额度来源独立，Parrot/Sub2API二选一不合计。均为该服务全部账号汇总，不按小组件账号过滤；重置卡只跟随额度来源。切换不清除配置或凭据。</Text>}>
+        <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async value => {
+          saveStatisticsSource(value as StatisticsSource); setStatisticsSource(value as StatisticsSource); setLines([]); await test()
+        }}>
+          <Text tag="parrot">Parrot</Text><Text tag="sub2api">Sub2API</Text>
+        </Picker>
+      </Section>
+      {statisticsSource === "sub2api" || source === "sub2api" ? <Section header={<Text>Sub2API连接</Text>} footer={<Text>额度与统计共用部署根地址和Admin API Key（不是普通用户Key）。统计为全站汇总，花费为actual_cost实际扣费；时区决定今日/自然月边界。管理员凭据仅存本机钥匙串，权限较高，建议HTTPS。只GET查询，不兑换重置卡、不重置额度。账号仅显示Claude OAuth/SetupToken和Codex OAuth；缺少字段显示未知。</Text>}>
+        <TextField title="Sub2API地址" value={subUrl} onChanged={setSubUrl} prompt="https://你的部署地址" />
+        <SecureField title="Sub2API管理员密钥" value={subKey} onChanged={setSubKey} prompt={hasSubKey ? "已保存，留空沿用" : "Admin API Key"} />
+        <TextField title="统计时区" value={subTimezone} onChanged={setSubTimezone} prompt="Asia/Shanghai" />
+        <Button title="保存Sub2API并测试" disabled={busy} action={async () => {
+          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subTimezone); setSubKey(""); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
+          catch (e: any) { setStatus(String(e?.message ?? "Sub2API配置无效")) }
+        }} />
+        {hasSubKey ? <Button title="测试Sub2API连接" action={test} disabled={busy} /> : null}
+        {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubUrl(""); setHasSubKey(false); setLines([]); setAccounts(cachedAccounts()); await test() }} /> : null}
+      </Section> : null}
 
       {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>默认临时会话不保留登录Cookie，便于添加不同账号；支持独立Codex与Claude登录。Claude自动接收本机回调，无法使用时可重新发起手动授权码流程。Google/Apple等可能限制嵌入登录，可用Safari备用（可能复用旧会话）。Codex也可在外部无痕窗口打开下方网址输入本次代码后返回检查；Claude可重新发起手动授权码流程。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
         <Picker title="登录服务" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
@@ -448,19 +475,20 @@ function SettingsView() {
         }} />
         </HStack>)}
         <Button title={"刷新官方额度"} action={test} disabled={busy || !!device || !!claude} />
-      </Section> : <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
+      </Section> : null}
+      {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
         <SecureField title={"管理密钥"} value={key} onChanged={setKey} prompt={hasKey ? "已保存，留空沿用" : "managementKey"} />
         <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
         {hasKey ? <Button title={"测试连接"} action={test} disabled={busy} /> : null}
-      </Section>}
+      </Section> : null}
 
       <Section header={<Text>状态</Text>}>
         <Text>{status}</Text>
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
-      <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。点“账号排序”进入单独页面，长按账号卡片拖动排序，松手即保存。默认按此列表顺序显示，小号前2个、中大号前4个，不按启用状态过滤。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。两种来源的排序独立保存。</Text>}>
+      <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。点“账号排序”进入单独页面，长按账号卡片拖动排序，松手即保存。默认按此列表顺序显示，小号前2个、中大号前4个，不按启用状态过滤。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。三种额度来源的排序独立保存。</Text>}>
         {accounts.map((a, i) => <NavigationLink key={a.id}
           destination={<WidgetNamePage account={a} source={source} onSaved={() => setAccounts(cachedAccounts())} />}>
           <VStack alignment="leading" spacing={3}>

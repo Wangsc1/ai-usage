@@ -695,7 +695,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.16')
+  assert.equal(api.VERSION,'1.9.0')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1147,6 +1147,7 @@ async function main() {
   assert.ok(render().some(x=>typeof x==='string'&&x.includes('only-parrot')))
   handler=combinedHandler;api.saveSource('official')
   // Full Parrot cache can seed legacy stats fallback but its account IDs never leak.
+  storage.set('ai_usage_cache_v1',{...storage.get('ai_usage_cache_v1'),...storage.get('ai_usage_parrot_stats_v1')}) // actual legacy full cache
   storage.delete('ai_usage_parrot_stats_v1');statsFailure=true;combined=await api.loadUsage()
   assert.equal(combined.data.today.requests,23);assert.equal(combined.data.statistics.stale,true);assert.ok(combined.data.accounts.every(a=>a.id.startsWith('combined-official-')))
   api.clearConfig();assert.equal(storage.get('ai_usage_parrot_stats_v1'),undefined);assert.ok(api.officialCached())
@@ -1192,7 +1193,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.16')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.0')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1426,7 +1427,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.16'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.0'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1725,7 +1726,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.16')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.0')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1735,7 +1736,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.16 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.0 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1842,14 +1843,14 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.8.16'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.9.0'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.8.16'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.0'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
@@ -1980,6 +1981,147 @@ async function main() {
     scripting.Widget.family='systemLarge';scripting.Widget.parameter='';scripting.Widget.displaySize={width:358,height:376}
   }
   console.log('PASS: accessoryRectangular/Circular/Inline render exactly the first account after parameter/sort (one title, 5 h/每周 rows; one gauge; one inline line); no grid/divider/stats/background/footer button; empty/no-data/bad-parameter compact; systemSmall/Medium/Large/ExtraLarge trees identical except requested refresh icon/font/hit frame to baseline for all selections')
+  // Sub2API admin contracts: all-site stats, calendar dates, pagination, GET-only + x-api-key, no user-key/JWT.
+  {
+    const fixture=JSON.parse(fs.readFileSync(path.join(root,'tests/fixtures/sub2api-admin.json'),'utf8'))
+    assert.equal(api.getStatisticsSource(),'parrot') // legacy default without changing either config
+    const savedSource=api.getSource(),savedClaude=kc.get('ai_usage_claude_oauth_v1'),savedCodex=kc.get('ai_usage_official_oauth_v1')
+    kc.delete('ai_usage_claude_oauth_v1');kc.set('ai_usage_official_oauth_v1',JSON.stringify(quotaItems.map(a=>({...a,expiresAt:now+86400000}))))
+    api.saveConfig('mock-base','mock-management');api.saveSub2APIConfig('https://sub.example.test/','mock-admin','Asia/Shanghai')
+    let failStats=false,failList=false,failClaude=false,failCards=false,omitCounts=false,holdStats=false,releaseStats=[]
+    const ok=data=>resp(200,{code:0,message:'success',data})
+    const route=async(u,o)=>{
+      if(!u.startsWith('https://sub.example.test/'))return combinedHandler(u,o)
+      assert.ok(!o.method||o.method==='GET');assert.equal(o.headers['x-api-key'],'mock-admin')
+      assert.equal(o.headers.Authorization,undefined);assert.equal(o.headers['ChatGPT-Account-ID'],undefined)
+      const url=new URL(u),p=url.pathname
+      if(p==='/api/v1/admin/usage/stats'){
+        assert.equal(url.searchParams.get('timezone'),'Asia/Shanghai');assert.equal(url.searchParams.has('period'),false)
+        assert.ok(![...url.searchParams.keys()].some(k=>['account_id','user_id','api_key_id','group_id','model'].includes(k)))
+        if(holdStats)await new Promise(r=>releaseStats.push(r))
+        if(failStats)return resp(503,{message:'SECRET-admin-body'})
+        return ok({...fixture.stats,total_requests:url.searchParams.get('start_date').endsWith('-01')?120:12})
+      }
+      if(p==='/api/v1/admin/accounts'){
+        if(failList)return resp(502)
+        assert.equal(url.searchParams.get('lite'),'true');assert.equal(url.searchParams.get('page_size'),'100')
+        const page=Number(url.searchParams.get('page'));assert.ok(page===1||page===2)
+        return ok({items:page===1?fixture.accounts.slice(0,2):fixture.accounts.slice(2),total:5,page,page_size:100,pages:2})
+      }
+      if(p==='/api/v1/admin/accounts/11/usage'){if(failClaude)return resp(429);return ok(fixture.claudeUsage)}
+      if(p==='/api/v1/admin/accounts/55/usage')return ok({five_hour:null,seven_day:null})
+      if(p==='/api/v1/admin/accounts/11/claude/reset-credits'){if(failCards)return resp(503);return ok(omitCounts?{}:fixture.claudeCredits)}
+      if(p==='/api/v1/admin/openai/accounts/22/quota')return ok({...fixture.codexQuota,rate_limit_reset_credits:omitCounts?{}:fixture.codexQuota.rate_limit_reset_credits})
+      throw Error('unexpected Sub2API GET '+p)
+    }
+    handler=route;statsFailure=false;quotaFailure=false;missingOverall=false
+    // Auth/source/cache/RE isolation for all 3 quota x 2 stats combinations.
+    for(const source of ['parrot','official','sub2api'])for(const stats of ['parrot','sub2api']){
+      api.saveSource(source);api.saveStatisticsSource(stats);before=calls.length
+      const r=await api.loadUsage();assert.ok(r.data);assert.equal(r.stale,false,r.error);assert.equal(r.data.statistics.error,null)
+      assert.equal(r.data.today.requests,stats==='sub2api'?12:23)
+      assert.equal(r.data.today.costUsd,stats==='sub2api'?4.5:7.8) // actual_cost, NOT standard or upstream account cost
+      if(stats==='sub2api'){assert.equal(r.data.today.totalTokens,640);assert.equal(r.data.today.cacheReadTokens,300);assert.equal(r.data.today.cacheCreationTokens,40)}
+      if(source==='parrot'){assert.deepEqual(Array.from(r.data.accounts,a=>a.id),['combined-parrot']);assert.equal(r.data.accounts[0].resetCredits,0)}
+      if(source==='official'){assert.ok(r.data.accounts.every(a=>a.id.startsWith('combined-official-')));assert.ok(r.data.accounts.every(a=>a.resetCredits===1))}
+      if(source==='sub2api'){
+        assert.deepEqual(Array.from(r.data.accounts,a=>a.id),['sub2api:11','sub2api:22','sub2api:55'])
+        assert.equal(r.data.accounts[0].resetCredits,7);assert.equal(r.data.accounts[1].resetCredits,4);assert.equal(r.data.accounts[2].resetCredits,null)
+        assert.equal(r.data.accounts[0].fiveHour.remainingPercent,75);assert.equal(r.data.accounts[0].sevenDay.remainingPercent,40)
+        assert.equal(r.data.accounts[1].fiveHour.remainingPercent,85);assert.equal(r.data.accounts[1].sevenDay.remainingPercent,20)
+        assert.equal(r.data.accounts[2].enabled,false);assert.equal(r.data.accounts[2].fiveHour.remainingPercent,null)
+      }
+      const b=calls.slice(before);assert.equal(b.filter(c=>c.url.includes('/admin/usage/stats')).length,stats==='sub2api'?2:0)
+      assert.equal(b.filter(c=>c.url.includes('/stats/summary')).length,stats==='parrot'?2:0)
+      assert.ok(b.filter(c=>c.url.startsWith('https://sub.example.test')).every(c=>!c.options.method||c.options.method==='GET'))
+      // Statistics paths cannot fetch account/reset-card data unless quota source is Sub2API.
+      if(source!=='sub2api')assert.ok(!b.some(c=>c.url.includes('/admin/accounts')||c.url.includes('/admin/openai')))
+      for(const family of ['systemSmall','systemMedium','systemLarge','systemExtraLarge','accessoryRectangular','accessoryCircular','accessoryInline']){
+        scripting.Widget.family=family;scripting.Widget.parameter=source==='sub2api'?'2,1':'1'
+        const tree=expand(Root({data:r.data,stale:r.stale,error:r.error}));assert.ok(tree.length>0)
+        if(family.startsWith('accessory'))assert.ok(!tree.some(x=>x.type==='Button'))
+      }
+    }
+    // Schema gaps unknown (not zero), standard cost and wallet balance never substituted.
+    const broken={...fixture.stats};delete broken.total_cache_read_tokens
+    assert.throws(()=>api.parseSub2APIStats(broken,fixture.stats),/字段缺失/)
+    const badCost={...fixture.stats,total_actual_cost:NaN};assert.throws(()=>api.parseSub2APIStats(badCost,fixture.stats),/字段缺失/)
+    const unknown=api.mapSub2APIAccount(fixture.accounts[1],{credits:{balance:'999'},rate_limit:{primary_window:{used_percent:4,limit_window_seconds:3600}}},{available_count:99})
+    assert.equal(unknown.fiveHour.remainingPercent,null);assert.equal(unknown.sevenDay.remainingPercent,null);assert.equal(unknown.resetCredits,null)
+    assert.equal(api.mapSub2APIAccount(fixture.accounts[0],fixture.claudeUsage,{}).resetCredits,null)
+    assert.equal(api.mapSub2APIAccount(fixture.accounts[0],fixture.claudeUsage,{available_count:0}).resetCredits,0)
+    // calendar dates use explicit selected timezone; January month start, never rolling month.
+    api.saveSource('sub2api');api.saveStatisticsSource('sub2api');before=calls.length;await api.loadUsage()
+    const dates=calls.slice(before).filter(c=>c.url.includes('/admin/usage/stats')).map(c=>new URL(c.url).searchParams)
+    assert.ok(dates.some(d=>d.get('start_date')===d.get('end_date')));assert.ok(dates.some(d=>d.get('start_date')===d.get('end_date').slice(0,8)+'01'))
+    const keepNow=now;now=Date.parse('2027-01-31T16:30:00Z') // February 1 in Asia/Shanghai
+    before=calls.length;await api.loadUsage();const firstDay=calls.slice(before).filter(c=>c.url.includes('/admin/usage/stats'))
+    assert.equal(firstDay.length,1);const firstDate=new URL(firstDay[0].url).searchParams
+    assert.equal(firstDate.get('start_date'),'2027-02-01');assert.equal(firstDate.get('end_date'),'2027-02-01');now=keepNow
+    const allZero=Object.fromEntries(Object.keys(fixture.stats).map(k=>[k,0]));assert.equal(api.parseSub2APIStats(allZero,allZero).today.totalTokens,0)
+    // Same-process App/widget/intent dedup: two stats GETs and one two-page account list shared.
+    holdStats=true;releaseStats=[];before=calls.length
+    const flights=[api.loadUsage(),api.loadUsage(),api.loadUsage()]
+    for(let i=0;i<40&&releaseStats.length<2;i++)await Promise.resolve()
+    assert.equal(releaseStats.length,2);holdStats=false;releaseStats.forEach(r=>r());const shared=await Promise.all(flights)
+    assert.equal(shared[0],shared[1]);assert.equal(calls.slice(before).filter(c=>c.url.includes('/admin/usage/stats')).length,2)
+    assert.equal(calls.slice(before).filter(c=>new URL(c.url).pathname==='/api/v1/admin/accounts').length,2)
+    // Independent stats failure retains same-provider stats timestamp, does not block quota.
+    const statsAt=storage.get('ai_usage_sub2api_stats_v1').fetchedAt;now+=1000;failStats=true
+    let r=await api.loadUsage();assert.equal(r.stale,false);assert.equal(r.data.statistics.stale,true);assert.equal(r.data.statistics.fetchedAt,statsAt)
+    assert.ok(r.data.statistics.error.includes('HTTP 503'));assert.ok(!r.data.statistics.error.includes('SECRET'))
+    failStats=false
+    // Partial per-account quota failure keeps every account and old quota, reports exact failing path; no cross-source replacement.
+    const priorSubAt=storage.get('ai_usage_sub2api_quota_v1').fetchedAt;now+=1000;failClaude=true;r=await api.loadUsage()
+    assert.equal(r.stale,true);assert.equal(r.data.accounts.length,3);assert.equal(r.data.accounts.find(a=>a.id==='sub2api:11').fiveHour.remainingPercent,75)
+    assert.equal(r.data.fetchedAt,priorSubAt);assert.ok(r.error.includes('sub2api:11'));assert.ok(r.error.includes('GET /api/v1/admin/accounts/11/usage'));failClaude=false
+    failList=true;r=await api.loadUsage();assert.equal(r.stale,true);assert.equal(r.data.accounts.length,3);assert.equal(r.data.statistics.error,null);failList=false
+    // Source-specific aliases/order survive switching; no order/RE from stats provider.
+    api.saveWidgetName('sub2api:22','S alias','sub2api');api.saveAccountOrder(['sub2api:22','sub2api:11','sub2api:55'],'sub2api')
+    api.saveSource('official');assert.equal(api.getWidgetName('sub2api:22'),'');api.saveSource('sub2api');assert.equal(api.getWidgetName('sub2api:22'),'S alias')
+    assert.equal(api.cachedAccounts()[0].id,'sub2api:22');assert.equal(api.widgetAccounts(r.data.accounts,'1')[0].id,'sub2api:22')
+    // Card failure is quota-local: unknown without its own cache; never use Parrot/official counts.
+    storage.delete('ai_usage_sub2api_cards_v1');failCards=true;omitCounts=true;api.saveStatisticsSource('parrot');r=await api.loadUsage()
+    assert.equal(r.data.accounts.find(a=>a.id==='sub2api:11').resetCredits,null);assert.equal(r.data.accounts.find(a=>a.id==='sub2api:22').resetCredits,null)
+    assert.ok(r.error.includes('重置卡'));assert.equal(r.data.statistics.error,null)
+    before=calls.length;r=await api.loadUsage();assert.ok(r.error.includes('重置卡'));assert.ok(!calls.slice(before).some(c=>c.url.includes('/claude/reset-credits')))
+    failCards=false;omitCounts=false
+    // Widget run + registered RefreshUsageIntent call the same selected-provider loader.
+    api.saveStatisticsSource('sub2api');let reloaded=0,presented=null;const reload=scripting.Widget.reloadAll,present=scripting.Widget.present
+    scripting.Widget.reloadAll=async()=>{reloaded++};scripting.Widget.present=(node,opts)=>{presented={node,opts}}
+    before=calls.length;await registeredIntents.get('RefreshUsageIntent').perform(undefined);assert.equal(reloaded,1);assert.equal(calls.slice(before).filter(c=>c.url.includes('/admin/usage/stats')).length,2)
+    before=calls.length;await load('widget.tsx').runWidget();assert.ok(presented);assert.equal(calls.slice(before).filter(c=>c.url.includes('/admin/usage/stats')).length,2)
+    scripting.Widget.reloadAll=reload;scripting.Widget.present=present
+    // App exposes independent selectors, saved-key redaction, Sub2API save/reload, and does not modify quota when choosing stats.
+    states.length=0;let ui=render();const selectors=ui.filter(x=>x.type==='Picker');assert.ok(selectors.some(x=>x.props.title==='统计来源'))
+    const quotaSelector=selectors.find(x=>x.props.title==='来源');assert.ok(expand(quotaSelector).some(x=>x==='Sub2API'))
+    assert.ok(ui.some(x=>x.type==='SecureField'&&x.props.title==='Sub2API管理员密钥'&&x.props.value===''))
+    assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('mock-admin')))
+    ui.find(x=>x.type==='TextField'&&x.props.title==='Sub2API地址').props.onChanged('https://sub.example.test/')
+    ui.find(x=>x.type==='SecureField'&&x.props.title==='Sub2API管理员密钥').props.onChanged('mock-admin')
+    ui=render();await ui.find(x=>x.type==='Button'&&x.props.title==='保存Sub2API并测试').props.action()
+    assert.equal(api.getSub2APIConfig().baseUrl,'https://sub.example.test');assert.equal(api.getSub2APIConfig().adminKey,'mock-admin')
+    assert.ok(render().some(x=>x.type==='SecureField'&&x.props.title==='Sub2API管理员密钥'&&x.props.value===''))
+    await selectors.find(x=>x.props.title==='统计来源').props.onChanged('parrot');assert.equal(api.getSource(),'sub2api');assert.equal(api.getStatisticsSource(),'parrot')
+    ui=render();assert.ok(ui.some(x=>x.type==='TextField'&&x.props.title==='地址')) // Parrot config visible for selected stats
+    await ui.find(x=>x.type==='Picker'&&x.props.title==='来源').props.onChanged('official');assert.equal(api.getStatisticsSource(),'parrot');assert.equal(api.getSub2APIConfig().adminKey,'mock-admin')
+    // Config changes erase only Sub2API caches, and pending old reads cannot repopulate them.
+    api.saveSource('sub2api');api.saveStatisticsSource('sub2api');holdStats=true;releaseStats=[];const oldFlight=api.loadUsage()
+    for(let i=0;i<40&&releaseStats.length<2;i++)await Promise.resolve();assert.equal(releaseStats.length,2)
+    const parrotStatsCache=JSON.stringify(storage.get('ai_usage_parrot_stats_v1')),officialCache=JSON.stringify(api.officialCached())
+    api.saveSub2APIConfig('https://changed.example.test','other-admin','UTC')
+    assert.equal(storage.get('ai_usage_sub2api_stats_v1'),undefined);assert.equal(storage.get('ai_usage_sub2api_quota_v1'),undefined)
+    holdStats=false;releaseStats.forEach(r=>r());await oldFlight
+    assert.equal(storage.get('ai_usage_sub2api_stats_v1'),undefined);assert.equal(storage.get('ai_usage_sub2api_quota_v1'),undefined)
+    assert.equal(JSON.stringify(storage.get('ai_usage_parrot_stats_v1')),parrotStatsCache);assert.equal(JSON.stringify(api.officialCached()),officialCache)
+    assert.throws(()=>api.saveSub2APIConfig('https://user:pass@example.test','x','UTC'),/地址/);assert.throws(()=>api.saveSub2APIConfig('https://example.test','x','not-a-tz'),/时区/)
+    api.clearSub2APIConfig();assert.equal(api.getSub2APIConfig().adminKey,null);assert.equal(api.getConfig().managementKey,'mock-management')
+    assert.ok(!JSON.stringify([...storage.values()]).includes('mock-admin'));assert.ok(!JSON.stringify([...storage.values()]).includes('other-admin'))
+    if(savedClaude!=null)kc.set('ai_usage_claude_oauth_v1',savedClaude);if(savedCodex!=null)kc.set('ai_usage_official_oauth_v1',savedCodex)
+    api.saveSource(savedSource);api.saveStatisticsSource('parrot');handler=claudeHandler;states.length=0
+    scripting.Widget.family='systemLarge';scripting.Widget.parameter='';scripting.Widget.displaySize={width:358,height:376}
+  }
+  console.log('PASS: Sub2API upstream admin schema/x-api-key GET-only; unfiltered full-site actual_cost/calendar day+month/timezone; complete pagination/only real Claude+Codex windows; 3 quota x 2 stats/RE no cross-source; partial-account/cache/list/stats failures; aliases/order; defaults; App+widget+intent real selected-source entry; dedup; config changes/redaction/late-read guards; all family layouts unchanged')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

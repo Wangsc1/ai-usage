@@ -1,0 +1,15 @@
+{
+  "source": "Wei-Shaw/sub2api@3a6fd1c9db07203ca308aaba69e502bc1f35b307",
+  "schemaPaths": ["backend/internal/pkg/usagestats/usage_log_types.go", "backend/internal/handler/dto/types.go", "backend/internal/service/account_usage_service.go", "backend/internal/service/claude_reset_credits.go", "frontend/src/api/admin/accounts.ts"],
+  "stats": {"total_requests": 12, "total_input_tokens": 100, "total_output_tokens": 200, "total_cache_read_tokens": 300, "total_cache_creation_tokens": 40, "total_cache_tokens": 340, "total_tokens": 640, "total_cost": 9, "total_actual_cost": 4.5, "total_account_cost": 2},
+  "accounts": [
+    {"id": 11, "name": "SubClaude", "platform": "anthropic", "type": "oauth", "status": "active", "schedulable": true},
+    {"id": 22, "name": "SubCodex", "platform": "openai", "type": "oauth", "status": "active", "schedulable": true},
+    {"id": 33, "name": "NotQuota", "platform": "gemini", "type": "oauth", "status": "active"},
+    {"id": 44, "name": "NotOAuth", "platform": "openai", "type": "apikey", "status": "active"},
+    {"id": 55, "name": "Setup", "platform": "anthropic", "type": "setup-token", "status": "disabled"}
+  ],
+  "claudeUsage": {"five_hour": {"utilization": 25, "resets_at": "2027-01-15T15:00:00Z"}, "seven_day": {"utilization": 60, "resets_at": "2027-01-20T15:00:00Z"}, "seven_day_sonnet": {"utilization": 99}},
+  "claudeCredits": {"eligible": true, "available_count": 7, "credits": [], "fetched_at": "2027-01-15T12:00:00Z"},
+  "codexQuota": {"rate_limit": {"primary_window": {"used_percent": 15, "limit_window_seconds": 18000, "reset_at": 1800003600}, "secondary_window": {"used_percent": 80, "limit_window_seconds": 604800, "reset_at": 1800600000}}, "rate_limit_reset_credits": {"available_count": 4}, "credits": {"balance": "999"}, "fetched_at": 1800000000}
+}

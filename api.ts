@@ -1,10 +1,29 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.16"
-export type DataSource = "parrot" | "official"
-export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
+export const VERSION = "1.9.0"
+export type DataSource = "parrot" | "official" | "sub2api"
+export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
+
+// Statistics selection is independent of account/quota source. Existing installs default to Parrot.
+export type StatisticsSource = "parrot" | "sub2api"
+const KEY_STAT_SOURCE = "ai_usage_statistics_source_v1"
+const KEY_SUB_URL = "ai_usage_sub2api_url_v1", KEY_SUB_KEY = "ai_usage_sub2api_admin_key_v1", KEY_SUB_TZ = "ai_usage_sub2api_timezone_v1"
+const KEY_SUB_STATS = "ai_usage_sub2api_stats_v1", KEY_SUB_CACHE = "ai_usage_sub2api_quota_v1", KEY_SUB_CARDS = "ai_usage_sub2api_cards_v1"
+export function getStatisticsSource(): StatisticsSource { return Storage.get<string>(KEY_STAT_SOURCE) === "sub2api" ? "sub2api" : "parrot" }
+export function saveStatisticsSource(source: StatisticsSource) { Storage.set(KEY_STAT_SOURCE, source) }
+export function getSub2APIConfig() { return { baseUrl: Keychain.get(KEY_SUB_URL), adminKey: Keychain.get(KEY_SUB_KEY), timezone: Keychain.get(KEY_SUB_TZ) || "Asia/Shanghai" } }
+export function saveSub2APIConfig(baseUrl: string, adminKey: string, timezone: string) {
+  const url = baseUrl.trim().replace(/\/+$/, ""), key = adminKey.trim(), tz = timezone.trim()
+  if (!/^https?:\/\/[^\s?#]+$/i.test(url) || /https?:\/\/[^/]*@/i.test(url)) throw new Error("Sub2API地址应为部署根地址，不含凭据、查询参数或片段")
+  if (!key) throw new Error("请填写Sub2API管理员密钥")
+  try { new Intl.DateTimeFormat("en", { timeZone: tz }).format(new Date()) } catch { throw new Error("请填写有效IANA统计时区，如Asia/Shanghai") }
+  const old = getSub2APIConfig()
+  if (old.baseUrl !== url || old.adminKey !== key || old.timezone !== tz) { Storage.remove(KEY_SUB_STATS); Storage.remove(KEY_SUB_CACHE); Storage.remove(KEY_SUB_CARDS) }
+  Keychain.set(KEY_SUB_URL, url); Keychain.set(KEY_SUB_KEY, key); Keychain.set(KEY_SUB_TZ, tz)
+}
+export function clearSub2APIConfig() { Keychain.remove(KEY_SUB_URL); Keychain.remove(KEY_SUB_KEY); Keychain.remove(KEY_SUB_TZ); Storage.remove(KEY_SUB_STATS); Storage.remove(KEY_SUB_CACHE); Storage.remove(KEY_SUB_CARDS) }
 
 // Local widget-only names: stable account ID within the explicitly separate data source.
 const widgetNameKey = (source: DataSource) => `ai_usage_widget_names_${source}_v1`
@@ -62,7 +81,7 @@ export type UsageData = {
   monthByFamily: Record<string, Metric>
   accounts: Account[]
   fetchedAt: number
-  // Separate from quota freshness; only composed results carry this Parrot statistics status.
+  // Statistics freshness is independent of account/quota freshness.
   statistics?: { fetchedAt: number | null; stale: boolean; error: string | null }
 }
 
@@ -79,7 +98,7 @@ export function saveRefreshMinutes(minutes: number) {
   if (REFRESH_OPTIONS.includes(minutes)) Storage.set(KEY_REFRESH, minutes)
 }
 
-function orderKey(source: DataSource) { return source === "official" ? "ai_usage_official_order_v1" : "ai_usage_parrot_order_v1" }
+function orderKey(source: DataSource) { return `ai_usage_${source}_order_v1` }
 export function saveAccountOrder(ids: string[], source: DataSource = getSource()) {
   Storage.set(orderKey(source), [...new Set(ids)])
 }
@@ -100,7 +119,7 @@ function syncAccountOrder(accounts: Account[], source: DataSource): Account[] {
   return sorted
 }
 export function cachedAccounts(): Account[] {
-  return sortAccounts((getSource() === "official" ? officialCached() : Storage.get<UsageData>(KEY_CACHE))?.accounts ?? [])
+  return sortAccounts((getSource() === "official" ? officialCached() : Storage.get<UsageData>(getSource() === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE))?.accounts ?? [])
 }
 export function widgetAccounts(accounts: Account[], parameter = ""): Account[] {
   // 参数序号与 App 账号列表从上到下一致，1 起算；支持英文/中文逗号或空格。
@@ -130,6 +149,8 @@ export function getConfig() {
 }
 
 export function saveConfig(baseUrl: string, managementKey: string) {
+  const old = getConfig()
+  if (old.baseUrl !== baseUrl.trim().replace(/\/+$/, "") || old.managementKey !== managementKey.trim()) { Storage.remove(KEY_CACHE); Storage.remove(KEY_STATS) }
   Keychain.set(KEY_BASE, baseUrl.trim().replace(/\/+$/, ""))
   Keychain.set(KEY_MGMT, managementKey.trim())
   Keychain.remove(KEY_SESSION)
@@ -155,7 +176,7 @@ class HttpError extends Error {
   }
 }
 
-async function login(baseUrl: string, managementKey: string): Promise<string> {
+async function loginRequest(baseUrl: string, managementKey: string): Promise<string> {
   const resp = await fetch(`${baseUrl}/api/management/v1/auth/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -167,8 +188,18 @@ async function login(baseUrl: string, managementKey: string): Promise<string> {
     throw new HttpError(resp.status, body?.error?.code ?? "LOGIN_FAILED")
   }
   const cred = body.data.credential as string
-  Keychain.set(KEY_SESSION, cred)
+  const current = getConfig()
+  if (current.baseUrl === baseUrl && current.managementKey === managementKey) Keychain.set(KEY_SESSION, cred)
   return cred
+}
+
+let parrotLogin: { url: string; key: string; promise: Promise<string> } | null = null
+function login(baseUrl: string, managementKey: string): Promise<string> {
+  if (parrotLogin?.url === baseUrl && parrotLogin.key === managementKey) return parrotLogin.promise
+  const promise = loginRequest(baseUrl, managementKey)
+  parrotLogin = { url: baseUrl, key: managementKey, promise }
+  promise.finally(() => { if (parrotLogin?.promise === promise) parrotLogin = null }).catch(() => {})
+  return promise
 }
 
 async function apiGet(baseUrl: string, path: string, cred: string): Promise<any> {
@@ -219,11 +250,7 @@ function toWindow(list: any[], name: string): QuotaWindow {
 }
 
 async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
-  const [today, month, accList] = await Promise.all([
-    apiGet(baseUrl, "/stats/summary?period=today", cred),
-    apiGet(baseUrl, "/stats/summary?period=month", cred),
-    apiGet(baseUrl, "/oauth/accounts?pageSize=50", cred),
-  ])
+  const accList = await apiGet(baseUrl, "/oauth/accounts?pageSize=50", cred)
   const all = [...(accList?.items ?? [])]
   for (let page = 2, pageLength = all.length; pageLength === 50; page++) {
     const next = await apiGet(baseUrl, `/oauth/accounts?pageSize=50&page=${page}`, cred)
@@ -251,7 +278,7 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
   accounts.sort((x, y) =>
     x.provider === y.provider ? x.name.localeCompare(y.name) : x.provider === "claude" ? -1 : y.provider === "claude" ? 1 : x.provider.localeCompare(y.provider)
   )
-  return { ...parseStats(today, month), accounts }
+  return { today: null, month: null, todayByFamily: {}, monthByFamily: {}, fetchedAt: Date.now(), accounts }
 }
 
 function parseStats(today: any, month: any): ParrotStats {
@@ -287,23 +314,17 @@ async function loadParrotStats(): Promise<{ data: ParrotStats | null; error: str
       cred = await login(baseUrl, managementKey)
       data = await fetchStats()
     }
+    const current = getConfig()
+    if (current.baseUrl !== baseUrl || current.managementKey !== managementKey) return { data: null, error: "Parrot统计配置已改变" }
     Storage.set(KEY_STATS, data)
     return { data, error: null }
   } catch (e: any) {
-    return { data: cached?.today && cached?.month ? statsOnly(cached) : null, error: String(e?.message ?? "Parrot统计读取失败") }
+    const current = getConfig(), same = current.baseUrl === baseUrl && current.managementKey === managementKey
+    return { data: same && cached?.today && cached?.month ? statsOnly(cached) : null, error: String(e?.message ?? "Parrot统计读取失败") }
   }
 }
 
-export async function loadUsage(): Promise<LoadResult> {
-  if (getSource() === "official") {
-    const [quota, stats] = await Promise.all([loadOfficialUsage(), loadParrotStats()])
-    if (!quota.data) return quota
-    return { ...quota, data: { ...quota.data,
-      today: stats.data?.today ?? null, month: stats.data?.month ?? null,
-      todayByFamily: stats.data?.todayByFamily ?? {}, monthByFamily: stats.data?.monthByFamily ?? {},
-      statistics: { fetchedAt: stats.data?.fetchedAt ?? null, stale: !!stats.error && !!stats.data, error: stats.error },
-    } }
-  }
+async function loadParrotQuota(): Promise<LoadResult> {
   const { baseUrl, managementKey } = getConfig()
   const rawCache = Storage.get<UsageData>(KEY_CACHE)
   const cached = rawCache ? { ...rawCache, accounts: sortAccounts(rawCache.accounts, "parrot") } : null
@@ -324,16 +345,140 @@ export async function loadUsage(): Promise<LoadResult> {
         data = await fetchAll(baseUrl, cred)
       } else throw e
     }
+    const current = getConfig()
+    if (current.baseUrl !== baseUrl || current.managementKey !== managementKey) return { data: null, stale: false, error: "Parrot额度配置已改变" }
     data.accounts = syncAccountOrder(data.accounts, "parrot")
     Storage.set(KEY_CACHE, data)
-    Storage.set(KEY_STATS, statsOnly(data))
     return { data, stale: false, error: null }
   } catch (e: any) {
     const msg = e instanceof HttpError
       ? (e.status === 401 || e.code === "AUTHENTICATION_FAILED" ? "管理密钥无效" : e.code === "RATE_LIMITED" ? "登录过于频繁" : e.message)
       : String(e?.message ?? e)
-    return { data: cached ?? null, stale: !!cached, error: msg }
+    const current = getConfig(), same = current.baseUrl === baseUrl && current.managementKey === managementKey
+    return { data: same ? cached : null, stale: same && !!cached, error: msg }
   }
+}
+
+// Sub2API @3a6fd1c9: admin usage/stats, accounts lite, Claude reset-credits, OpenAI quota. GET only.
+function sub2Date(tz: string, at = Date.now()): string {
+  const parts = new Intl.DateTimeFormat("en", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(at))
+  const part = (name: string) => parts.find(p => p.type === name)?.value ?? ""
+  return `${part("year")}-${part("month")}-${part("day")}`
+}
+function sameSub2Config(cfg: ReturnType<typeof getSub2APIConfig>) {
+  const c = getSub2APIConfig(); return c.baseUrl === cfg.baseUrl && c.adminKey === cfg.adminKey && c.timezone === cfg.timezone
+}
+async function sub2Get(cfg: ReturnType<typeof getSub2APIConfig>, path: string): Promise<any> {
+  const res = await fetch(`${cfg.baseUrl}/api/v1/admin${path}`, { headers: { "x-api-key": cfg.adminKey! }, timeout: 15 })
+  if (res.status !== 200) throw new Error(`Sub2API HTTP ${res.status}，GET /api/v1/admin${path.split("?")[0]}`)
+  const body = await res.json().catch(() => null)
+  if (body?.code !== 0 || body.data == null) throw new Error(`Sub2API响应无效，GET /api/v1/admin${path.split("?")[0]}`)
+  return body.data
+}
+export function parseSub2APIStats(today: any, month: any): ParrotStats {
+  const metric = (m: any): Metric => {
+    const fields: [keyof Metric, string][] = [["requests", "total_requests"], ["inputTokens", "total_input_tokens"], ["outputTokens", "total_output_tokens"], ["cacheReadTokens", "total_cache_read_tokens"], ["cacheCreationTokens", "total_cache_creation_tokens"], ["totalTokens", "total_tokens"], ["costUsd", "total_actual_cost"]]
+    if (!m || fields.some(([, k]) => typeof m[k] !== "number" || !Number.isFinite(m[k]) || m[k] < 0)) throw new Error("Sub2API今日/本月统计字段缺失或无效")
+    const out = {} as Metric; for (const [to, from] of fields) out[to] = m[from]
+    return out
+  }
+  return { today: metric(today), month: metric(month), todayByFamily: {}, monthByFamily: {}, fetchedAt: Date.now() }
+}
+async function loadSub2APIStats(): Promise<{ data: ParrotStats | null; error: string | null }> {
+  const cfg = getSub2APIConfig(), cached = Storage.get<ParrotStats>(KEY_SUB_STATS)
+  if (!cfg.baseUrl || !cfg.adminKey) return { data: null, error: "Sub2API统计未配置" }
+  try {
+    const end = sub2Date(cfg.timezone), first = end.slice(0, 8) + "01", tz = encodeURIComponent(cfg.timezone)
+    // Explicit calendar month: upstream period=month is rolling one month, not this month.
+    const path = (start: string) => `/usage/stats?start_date=${start}&end_date=${end}&timezone=${tz}`
+    const todayRead = sub2Get(cfg, path(end))
+    const [today, month] = await Promise.all([todayRead, first === end ? todayRead : sub2Get(cfg, path(first))])
+    const data = parseSub2APIStats(today, month)
+    if (!sameSub2Config(cfg)) return { data: null, error: "Sub2API统计配置已改变" }
+    Storage.set(KEY_SUB_STATS, data); return { data, error: null }
+  } catch (e: any) {
+    return { data: sameSub2Config(cfg) && cached?.today && cached?.month ? statsOnly(cached) : null,
+      error: typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API统计网络或解析失败" }
+  }
+}
+function sub2Window(window: any): QuotaWindow {
+  const v = window?.utilization
+  return { usedPercent: typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null,
+    remainingPercent: typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.max(0, 100 - v) : null,
+    resetsAt: typeof window?.resets_at === "string" && Number.isFinite(Date.parse(window.resets_at)) ? window.resets_at : null }
+}
+function sub2Count(value: any): number | null { return Number.isSafeInteger(value) && value >= 0 ? value : null }
+export function mapSub2APIAccount(row: any, usage: any, credits: any): Account {
+  const codex = row.platform === "openai"
+  const rateWindow = (seconds: number) => [usage?.rate_limit?.primary_window, usage?.rate_limit?.secondary_window].find(w => w?.limit_window_seconds === seconds)
+  const codexWindow = (seconds: number): QuotaWindow => {
+    const w = rateWindow(seconds)
+    return sub2Window({ utilization: w?.used_percent, resets_at: typeof w?.reset_at === "number" && Number.isFinite(w.reset_at) ? (Number.isFinite(new Date(w.reset_at * 1000).getTime()) ? new Date(w.reset_at * 1000).toISOString() : null) : null })
+  }
+  return { id: `sub2api:${row.id}`, name: String(row.name ?? row.id), provider: codex ? "openai" : "claude",
+    enabled: row.status !== "disabled", available: row.status === "active" && row.schedulable !== false && usage?.is_forbidden !== true,
+    fiveHour: codex ? codexWindow(18000) : sub2Window(usage?.five_hour), sevenDay: codex ? codexWindow(604800) : sub2Window(usage?.seven_day),
+    resetCredits: sub2Count(codex ? usage?.rate_limit_reset_credits?.available_count : credits?.available_count) }
+}
+async function loadSub2APIQuota(): Promise<LoadResult> {
+  const cfg = getSub2APIConfig(), cached = Storage.get<UsageData>(KEY_SUB_CACHE)
+  const fallback = cached ? { ...cached, accounts: sortAccounts(cached.accounts, "sub2api") } : null
+  if (!cfg.baseUrl || !cfg.adminKey) return { data: null, stale: false, error: "Sub2API额度未配置" }
+  try {
+    const rows: any[] = [], seen = new Set<number>()
+    for (let page = 1, pages = 1; page <= pages; page++) {
+      const result = await sub2Get(cfg, `/accounts?lite=true&page=${page}&page_size=100`)
+      if (!Array.isArray(result.items) || !Number.isSafeInteger(result.pages) || result.pages < page) throw new Error("Sub2API账号分页响应无效")
+      pages = result.pages
+      for (const row of result.items) {
+        if (!Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error("Sub2API账号ID重复或无效")
+        seen.add(row.id)
+        if ((row.platform === "anthropic" && ["oauth", "setup-token"].includes(row.type)) || (row.platform === "openai" && row.type === "oauth")) rows.push(row)
+      }
+    }
+    const errors: string[] = [], cards = Storage.get<Record<string, { count: number | null; at: number; error?: string }>>(KEY_SUB_CARDS) ?? {}
+    const accounts: Account[] = []
+    // Bounded sequential reads avoid a per-account upstream request burst. List remains complete if any read fails.
+    for (const row of rows) {
+      const id = `sub2api:${row.id}`, old = cached?.accounts.find(a => a.id === id)
+      let usage: any = null, credits: any = null, quotaFailed = false
+      try { usage = await sub2Get(cfg, row.platform === "openai" ? `/openai/accounts/${row.id}/quota` : `/accounts/${row.id}/usage`) }
+      catch (e: any) { quotaFailed = true; errors.push(`${id}额度：${typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API网络或解析失败"}`) }
+      if (row.platform === "anthropic" && row.type === "oauth") {
+        if (cards[id] && Date.now() - cards[id].at < 3600000) { credits = { available_count: cards[id].count }; if (cards[id].error) errors.push(cards[id].error!) }
+        else {
+          try { credits = await sub2Get(cfg, `/accounts/${row.id}/claude/reset-credits`); cards[id] = { count: sub2Count(credits?.available_count), at: Date.now() } }
+          catch (e: any) { const error = `${id}重置卡：${typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API网络或解析失败"}`; errors.push(error); cards[id] = { count: cards[id]?.count ?? null, at: Date.now(), error }; credits = { available_count: cards[id].count } }
+        }
+      }
+      const account = mapSub2APIAccount(row, usage, credits)
+      if (quotaFailed && old) { account.fiveHour = old.fiveHour; account.sevenDay = old.sevenDay; if (row.platform === "openai") account.resetCredits = old.resetCredits }
+      accounts.push(account)
+    }
+    if (!sameSub2Config(cfg)) return { data: null, stale: false, error: "Sub2API额度配置已改变" }
+    const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: syncAccountOrder(accounts, "sub2api"), fetchedAt: errors.length && cached ? cached.fetchedAt : Date.now() }
+    Storage.set(KEY_SUB_CACHE, data); Storage.set(KEY_SUB_CARDS, cards)
+    return { data, stale: errors.length > 0, error: errors.length ? errors.join("；") : null }
+  } catch (e: any) {
+    return { data: sameSub2Config(cfg) ? fallback : null, stale: sameSub2Config(cfg) && !!fallback,
+      error: typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API账号列表网络或解析失败" }
+  }
+}
+let usageFlight: { source: DataSource; stats: StatisticsSource; parrotURL: string | null; parrotKey: string | null; subURL: string | null; subKey: string | null; tz: string; promise: Promise<LoadResult> } | null = null
+export function loadUsage(): Promise<LoadResult> {
+  const source = getSource(), stats = getStatisticsSource(), pc = getConfig(), sc = getSub2APIConfig()
+  const f = usageFlight
+  if (f && f.source === source && f.stats === stats && f.parrotURL === pc.baseUrl && f.parrotKey === pc.managementKey && f.subURL === sc.baseUrl && f.subKey === sc.adminKey && f.tz === sc.timezone) return f.promise
+  const promise = (async (): Promise<LoadResult> => {
+    const [quota, result] = await Promise.all([source === "official" ? loadOfficialUsage() : source === "sub2api" ? loadSub2APIQuota() : loadParrotQuota(), stats === "sub2api" ? loadSub2APIStats() : loadParrotStats()])
+    if (!quota.data) return quota
+    return { ...quota, data: { ...quota.data, today: result.data?.today ?? null, month: result.data?.month ?? null,
+      todayByFamily: result.data?.todayByFamily ?? {}, monthByFamily: result.data?.monthByFamily ?? {},
+      statistics: { fetchedAt: result.data?.fetchedAt ?? null, stale: !!result.error && !!result.data, error: result.error } } }
+  })()
+  usageFlight = { source, stats, parrotURL: pc.baseUrl, parrotKey: pc.managementKey, subURL: sc.baseUrl, subKey: sc.adminKey, tz: sc.timezone, promise }
+  promise.finally(() => { if (usageFlight?.promise === promise) usageFlight = null }).catch(() => {})
+  return promise
 }
 
 // ---------- 格式化 ----------
