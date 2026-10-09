@@ -692,7 +692,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.5')
+  assert.equal(api.VERSION,'1.8.6')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1354,12 +1354,12 @@ async function main() {
     if(stage==='缺API')delete context.HttpServer
     const beforeServers=claudeServers.length,attempt=api.beginClaudeLogin()
     const expectedStage=stage==='地址读回'?'地址配置':stage==='启动'?'启动；返回错误/未知':stage
-    assert.equal(attempt.manual,true);assert.equal(attempt.fallback.replace(/；诊断：[^）]*/g,''),`本机回调不可用（阶段：${expectedStage}），使用Claude官方手动授权码页`)
+    assert.equal(attempt.manual,true);assert.equal(attempt.fallback.replace(/；诊断：.*(?=），使用Claude官方手动授权码页)/g,''),`本机回调不可用（阶段：${expectedStage}），使用Claude官方手动授权码页`)
     assert.ok(!attempt.fallback.includes('SECRET'));assert.ok(!attempt.fallback.includes(attempt.state));assert.ok(!attempt.fallback.includes(attempt.verifier))
     if(claudeServers.length>beforeServers)assert.equal(claudeServers.at(-1).stops,1)
     api.cancelClaudeLogin(attempt);assert.equal(claudeTimers.size,0)
     authUI=await startClaudeUI()
-    assert.ok(authUI.some(x=>typeof x==='string'&&x.replace(/；诊断：[^）]*/g,'')===`本机回调不可用（阶段：${expectedStage}），使用Claude官方手动授权码页`))
+    assert.ok(authUI.some(x=>typeof x==='string'&&x.replace(/；诊断：.*(?=），使用Claude官方手动授权码页)/g,'')===`本机回调不可用（阶段：${expectedStage}），使用Claude官方手动授权码页`))
     authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
     context.HttpServer=savedServer;assert.equal(claudeTimers.size,0)
   }
@@ -1367,7 +1367,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.5'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.6'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1427,10 +1427,10 @@ async function main() {
       startNativeError=throwing?new Error(error):error;startThrows=throwing
       before=calls.length;const startsBefore=startCalls,attempt=api.beginClaudeLogin()
       const expected=`本机回调不可用（阶段：启动；${throwing?'抛异常':'返回错误'}/${category}），使用Claude官方手动授权码页`
-      assert.equal(attempt.fallback.replace(/；诊断：[^）]*/g,''),expected);assert.equal(startCalls,startsBefore+1);assert.equal(calls.length,before)
+      assert.equal(attempt.fallback.replace(/；诊断：.*(?=），使用Claude官方手动授权码页)/g,''),expected);assert.equal(startCalls,startsBefore+1);assert.equal(calls.length,before)
       assert.equal(claudeServers.at(-1).stops,1);assert.ok(!attempt.fallback.includes('SECRET'));assert.ok(!attempt.fallback.includes('example.test'))
       api.cancelClaudeLogin(attempt);assert.equal(claudeTimers.size,0)
-      authUI=await startClaudeUI();assert.ok(authUI.some(x=>typeof x==='string'&&x.replace(/；诊断：[^）]*/g,'')===expected));authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+      authUI=await startClaudeUI();assert.ok(authUI.some(x=>typeof x==='string'&&x.replace(/；诊断：.*(?=），使用Claude官方手动授权码页)/g,'')===expected));authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
     }
   }
   startNativeError=null;startThrows=false
@@ -1494,6 +1494,41 @@ async function main() {
   }
   startScenario=null
   console.log('PASS: safe startup type/null/bool/object field flags and official state/port/IPv4 snapshot before stop; running truthy still rejected; undefined/false/null unchanged; no raw native secrets; add-only diagnosis/no account requests; original cleanup')
+  // Only local start RETURN strings may have a description; thrown errors/network bodies never do.
+  const descriptionCases=[
+    ['Argument mismatch: start expected port number','Argument mismatch: start expected port number'],
+    ['listen failed: EADDRINUSE (errno 48)','listen failed: EADDRINUSE (errno 48)'],
+    ['setsockopt: Invalid argument (errno 22)','setsockopt: Invalid argument (errno 22)'],
+    ['  bind\u0000 failed:   EADDRNOTAVAIL\u202e  ','bind failed: EADDRNOTAVAIL'],
+    ['x'.repeat(300),'x'.repeat(239)+'…'],
+    ['https://example.test/callback?code=private','已隐藏（含敏感模式）'],
+    ['failed ?state=private','已隐藏（含敏感模式）'],
+    ['access_token=private','已隐藏（含敏感模式）'],
+    ['refresh-token: private','已隐藏（含敏感模式）'],
+    ['code: private','已隐藏（含敏感模式）'],
+    ['state=private','已隐藏（含敏感模式）'],
+    ['code_verifier=private','已隐藏（含敏感模式）'],
+    ['verifier private','已隐藏（含敏感模式）'],
+    ['Bearer private','已隐藏（含敏感模式）'],
+    ['to\u0000ken=private','已隐藏（含敏感模式）'],
+    ['x'.repeat(300)+' token=private','已隐藏（含敏感模式）'],
+  ]
+  for(const [error,expected] of descriptionCases){
+    before=calls.length;const keysBefore=JSON.stringify([...kc]),storageBefore=JSON.stringify([...storage])
+    startNativeError=error;startThrows=false
+    const descriptionFlow=api.beginClaudeLogin(),descriptionServer=claudeServers.at(-1)
+    assert.ok(descriptionFlow.fallback.includes('；启动描述：'+expected))
+    if(expected.startsWith('已隐藏'))assert.ok(!descriptionFlow.fallback.includes('private'))
+    assert.equal(descriptionServer.stops,1);assert.equal(descriptionServer.state,'stopped')
+    api.cancelClaudeLogin(descriptionFlow);assert.equal(claudeTimers.size,0)
+    authUI=await startClaudeUI();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('；启动描述：'+expected)))
+    authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    assert.equal(calls.length,before);assert.equal(JSON.stringify([...kc]),keysBefore);assert.equal(JSON.stringify([...storage]),storageBefore)
+  }
+  startNativeError=new Error('Argument mismatch: do not echo thrown text');startThrows=true
+  const thrownDescriptionFlow=api.beginClaudeLogin();assert.ok(!thrownDescriptionFlow.fallback.includes('启动描述'));assert.ok(!thrownDescriptionFlow.fallback.includes('Argument mismatch'))
+  api.cancelClaudeLogin(thrownDescriptionFlow);startNativeError=null;startThrows=false
+  console.log('PASS: actual local start return argument/listen error text visible; controls removed/240-char cap; full-input secret/URL filtering before truncation; thrown/native objects not echoed; add-only UI/no account requests/no persistent error records; cleanup')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

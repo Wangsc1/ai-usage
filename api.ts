@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.8.5"
+export const VERSION = "1.8.6"
 export type DataSource = "parrot" | "official"
 export function getSource(): DataSource { return Storage.get<string>("ai_usage_source_v1") === "official" ? "official" : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -656,6 +656,14 @@ function startErrorCategory(error: unknown): string {
   if (["einval", "invalid argument", "unsupported parameter", "invalid port", "port 0 is not supported"].includes(known)) return "不支持参数"
   return "未知"
 }
+function safeStartDescription(error: string): string {
+  // Only the local start() RETURN string, before browser/code exchange; never network bodies or exceptions.
+  const text = error.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim()
+  if (/[a-z][a-z0-9+.-]*:\/\/|www\.|[?&][^\s=]+=/i.test(text) ||
+      /\b(?:access[_ -]?token|refresh[_ -]?token|token|bearer|secret|verifier|pkce|authorization)\b/i.test(text) ||
+      /\b(?:code|state)\s*[:=#]|\b(?:code[_ -]?verifier|access_token|refresh_token|client_secret)\b/i.test(text)) return "已隐藏（含敏感模式）"
+  return text.length > 240 ? text.slice(0, 239) + "…" : text || "空描述"
+}
 function startSnapshot(value: unknown, server: any, returned: boolean): string {
   // Snapshot before cleanup. Output only fixed types/enums/booleans, never native values or text.
   const read = (fn: () => string): string => { try { return fn() } catch { return "读取失败" } }
@@ -715,6 +723,7 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
     let stage = "构造"
     let startFailure = ""
     let snapshot = ""
+    let description = ""
     try {
       server = new HttpServer()
       stage = "地址配置"
@@ -738,14 +747,18 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
       try { error = server.start({ port: CALLBACK_PORT, forceIPv4: true }) }
       catch (e) { snapshot = startSnapshot(undefined, server, false); startFailure = `抛异常/${startErrorCategory(e)}`; throw new Error() }
       snapshot = startSnapshot(error, server, true)
-      if (error) { startFailure = `返回错误/${startErrorCategory(error)}`; throw new Error() }
+      if (error) {
+        startFailure = `返回错误/${startErrorCategory(error)}`
+        if (typeof error === "string") description = safeStartDescription(error)
+        throw new Error()
+      }
       stage = "端口"
       const port = server.port
       if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error()
       d.server = server; d.manual = false; d.redirect = `http://localhost:${port}/callback`
     } catch {
       try { server?.stop() } catch { /* no raw native error output */ }
-      d.fallback = `本机回调不可用（阶段：${stage}${startFailure ? `；${startFailure}` : ""}${snapshot ? `；诊断：${snapshot}` : ""}），使用Claude官方手动授权码页`
+      d.fallback = `本机回调不可用（阶段：${stage}${startFailure ? `；${startFailure}` : ""}${snapshot ? `；诊断：${snapshot}` : ""}${description ? `；启动描述：${description}` : ""}），使用Claude官方手动授权码页`
     }
   } else if (!manual) d.fallback = "本机回调不可用（阶段：缺API），使用Claude官方手动授权码页"
   // Parameters are those in the official CLI buildAuthUrl; no cookie extraction or invented redirect.
