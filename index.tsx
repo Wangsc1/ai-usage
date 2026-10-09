@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.4"
+const VERSION = "1.9.5"
 const RAW = "https://raw.githubusercontent.com/Wangsc1/ai-usage/main/"
 // script.json 不覆盖：保留 Scripting 导入时写入的本地元数据
 const FILES = ["api.ts", "app_intents.tsx", "widget.tsx", "index.tsx"]
@@ -503,11 +503,11 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>
 
-      <Section header={<Text>小组件背景</Text>} footer={<Text>仅改变此脚本主屏小组件，不更改系统全局外观；锁屏不受影响。默认保留渐变。Dock样式使用系统磨砂材质并叠加细高光描边；是否透出壁纸、透明度及着色模式下的显示由系统决定，不保证完全透明。</Text>}>
+      <Section header={<Text>小组件背景</Text>} footer={<Text>仅改变此脚本主屏小组件，不更改系统全局外观；锁屏不受影响。默认保留渐变。Dock样式使用系统磨砂材质并叠加细高光描边；当前真机反馈背景近白，尚未证实能透出壁纸；材质与着色模式显示由系统决定，不能保证Dock式透明。</Text>}>
         <Picker title="背景样式" value={backgroundStyle} onChanged={async (value: string) => {
           saveWidgetBackgroundStyle(value as WidgetBackgroundStyle); setBackgroundStyle(getWidgetBackgroundStyle()); await Widget.reloadAll()
         }}>
-          <Text tag="gradient">渐变背景</Text><Text tag="glass">玻璃背景（Dock样式）</Text>
+          <Text tag="gradient">渐变背景</Text><Text tag="glass">玻璃背景</Text>
         </Picker>
       </Section>
 

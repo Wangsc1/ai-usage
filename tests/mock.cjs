@@ -261,7 +261,7 @@ async function main() {
       assert.ok(icon);assert.equal(icon.props.font,9);assert.ok(!images.some(x=>x.props.systemName==='arrow.clockwise'||x.props.systemName==='wifi.slash'))
     }
   }
-  // Provider title AND explicit SVG fill respect enabled, never infer disabled from 0%/available/stale.
+  // All-zero fixture: title/SVG gray comes from quota, not enabled/available/stale.
   const gray={light:'#5E6068',dark:'#8E8E93'}, normal={light:'#1C1C1E',dark:'#FFFFFF'}
   const statusAccounts=Array.from({length:4},(_,i)=>({...accounts[1],id:'status'+i,provider:i%2?'openai':'claude',name:'状态'+i,enabled:i>=2,available:false,
     fiveHour:{usedPercent:100,remainingPercent:0,resetsAt:null},sevenDay:{usedPercent:100,remainingPercent:0,resetsAt:null}}))
@@ -272,14 +272,12 @@ async function main() {
       for(const stale of [false,true]){
         const statusTree=expand(Root({data:{...data,accounts:statusAccounts},stale,error:stale?'network failed':null}))
         const a=statusAccounts[i], title=statusTree.find(x=>x.type==='Text'&&x.props.fontWeight==='semibold'&&x.props.children===(a.provider==='claude'?'Claude':'Codex'))
-        assert.ok(title);assert.equal(JSON.stringify(title.props.foregroundStyle),JSON.stringify(a.enabled?normal:gray))
+        assert.ok(title);assert.equal(JSON.stringify(title.props.foregroundStyle),JSON.stringify(gray))
         const brand=statusTree.find(x=>x.type==='SVG'&&(typeof x.props.code==='string'?x.props.code:x.props.code?.light)?.includes('<path '))
         assert.ok(brand)
-        if(!a.enabled){assert.ok(brand.props.code.light.includes('fill="'+gray.light+'"'));assert.ok(brand.props.code.dark.includes('fill="'+gray.dark+'"'))}
-        else if(a.provider==='claude'){assert.ok(brand.props.code.includes('fill="#D97757"'))}
-        else{assert.ok(brand.props.code.light.includes('fill="#1C1C1E"'));assert.ok(brand.props.code.dark.includes('fill="#FFFFFF"'))}
+        {assert.ok(brand.props.code.light.includes('fill="'+gray.light+'"'));assert.ok(brand.props.code.dark.includes('fill="'+gray.dark+'"'))}
         assert.ok(!statusTree.some(x=>typeof x==='string'&&x.includes('已停用')))
-        // The same exhausted windows keep their quota colors/bars, irrespective of disabled title treatment.
+        // Changing enabled never changes quota colors/bars.
         const quota=JSON.stringify(statusTree.filter(x=>x.type==='RoundedRectangle'||(x.type==='SVG'&&!(typeof x.props.code==='string'?x.props.code:x.props.code?.light)?.includes('<path '))))
         const enabledTree=expand(Root({data:{...data,accounts:statusAccounts.map(b=>({...b,enabled:true}))},stale,error:null}))
         const enabledQuota=JSON.stringify(enabledTree.filter(x=>x.type==='RoundedRectangle'||(x.type==='SVG'&&!(typeof x.props.code==='string'?x.props.code:x.props.code?.light)?.includes('<path '))))
@@ -695,7 +693,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.4')
+  assert.equal(api.VERSION,'1.9.5')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1220,7 +1218,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.4')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.5')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1454,7 +1452,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.4'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.5'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1758,7 +1756,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.4')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.5')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1768,7 +1766,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.4 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.5 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1875,14 +1873,14 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.9.4'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.9.5'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.4'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.9.5'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
@@ -2162,7 +2160,7 @@ async function main() {
     scripting.Widget.family='systemLarge';scripting.Widget.parameter='';scripting.Widget.displaySize={width:358,height:376}
   }
   console.log('PASS: Sub2API upstream admin schema/x-api-key GET-only; unfiltered full-site actual_cost/calendar day+month/timezone; complete pagination/only real Claude+Codex windows; 3 quota x 2 stats/RE no cross-source; partial-account/cache/list/stats failures; aliases/order; defaults; App+widget+intent real selected-source entry; dedup; config changes/redaction/late-read guards; all family layouts unchanged')
-  // Renderer contract only: synthetic equivalent Account states across sources do NOT prove official disabled API support.
+  // Equivalent Account quota/state data must render identically across sources.
   {
     const savedSource=api.getSource(),savedParameter=scripting.Widget.parameter,savedFamily=scripting.Widget.family
     const {AccountTitle}=load('widget.tsx')
@@ -2177,9 +2175,9 @@ async function main() {
         api.saveSource(source)
         const tree=expand(AccountTitle({acc:a,font:11})),serialized=JSON.stringify(tree)
         if(baseline==null)baseline=serialized;else assert.equal(serialized,baseline)
-        const title=tree.find(x=>x.type==='Text'&&x.props.fontWeight==='semibold');assert.equal(title.props.foregroundStyle.light,state.enabled?'#1C1C1E':'#5E6068')
+        const title=tree.find(x=>x.type==='Text'&&x.props.fontWeight==='semibold');assert.equal(title.props.foregroundStyle.light,state.pct===0?'#5E6068':'#1C1C1E')
         const icon=tree.find(x=>x.type==='SVG');assert.ok(icon)
-        if(!state.enabled){assert.ok(icon.props.code.light.includes('fill="#5E6068"'));assert.ok(icon.props.code.dark.includes('fill="#8E8E93"'))}
+        if(state.pct===0){assert.ok(icon.props.code.light.includes('fill="#5E6068"'));assert.ok(icon.props.code.dark.includes('fill="#8E8E93"'))}
       }
       for(const family of ['systemSmall','systemMedium','systemLarge','systemExtraLarge','accessoryRectangular','accessoryCircular','accessoryInline']){
         scripting.Widget.family=family;scripting.Widget.parameter='1';let base=null
@@ -2195,7 +2193,42 @@ async function main() {
     assert.equal(unavailable.enabled,true);assert.equal(unavailable.available,false)
     api.saveSource(savedSource);scripting.Widget.parameter=savedParameter;scripting.Widget.family=savedFamily
   }
-  console.log('PASS: renderer contract ONLY (not official disabled API claim): three sources identical enabled/disabled/temporarily-unavailable/zero-percent title+SVG and all-family trees; actual Sub2API status disabled vs error distinct; Parrot option label exact, management credential unchanged')
+  console.log('PASS: shared quota-based renderer across sources; enabled state preserved but not visual driver; source/status mapping unchanged; Parrot option label exact')
+  // Exact-zero exhaustion grays the entire account, independent of enabled/available/source.
+  {
+    const saved=api.getSource(),family=scripting.Widget.family,param=scripting.Widget.parameter
+    const widget=load('widget.tsx')
+    for(const provider of ['claude','openai'])for(const [five,week,exhausted] of [[0,75,true],[75,0,true],[0,0,true],[0.1,75,false],[null,75,false],[null,null,false],[-1,75,false],[NaN,75,false]]){
+      for(const enabled of [true,false])for(const available of [true,false]){
+        const a={...accounts[0],id:'exact-zero-contract',name:'same',provider,enabled,available,resetCredits:2,
+          fiveHour:{remainingPercent:five,usedPercent:five==null?null:100-five,resetsAt:null},sevenDay:{remainingPercent:week,usedPercent:week==null?null:100-week,resetsAt:null}}
+        assert.equal(widget.isQuotaExhausted(a),exhausted)
+        for(const f of ['systemSmall','systemMedium','systemLarge','systemExtraLarge','accessoryRectangular','accessoryCircular','accessoryInline']){
+          scripting.Widget.family=f;scripting.Widget.parameter='1';let baseline
+          for(const source of ['parrot','official','sub2api']){
+            api.saveSource(source);const tree=expand(Root({data:{...singleData,accounts:[a]},stale:true,error:'HTTP429'}))
+            const serial=JSON.stringify(tree);if(baseline)assert.equal(serial,baseline);else baseline=serial
+            if(f==='accessoryCircular'){
+              const gauge=tree.find(x=>x.type==='Gauge');assert.equal(gauge.props.foregroundStyle?.light,exhausted?'#5E6068':undefined)
+            }else if(f==='accessoryInline'){
+              assert.equal(tree.find(x=>x.type==='Text').props.foregroundStyle?.light,exhausted?'#5E6068':undefined)
+            }else{
+              const title=tree.find(x=>x.type==='Text'&&x.props.fontWeight==='semibold'&&x.props.children===(provider==='claude'?'Claude':'Codex'));assert.equal(title.props.foregroundStyle.light,exhausted?'#5E6068':'#1C1C1E')
+              if(exhausted){
+                const svgs=tree.filter(x=>x.type==='SVG');assert.equal(svgs.length,3)
+                for(const svg of svgs){assert.ok(!svg.props.code.light.match(/fill="(?!#5E6068)[^"]+"/));assert.ok(!svg.props.code.dark.match(/fill="(?!#8E8E93)[^"]+"/))}
+                const pct=tree.filter(x=>x.type==='Text'&&x.props.children==='%');assert.equal(pct.length,2);assert.ok(pct.every(x=>x.props.foregroundStyle.light==='#5E6068'))
+                const bars=tree.filter(x=>x.type==='RoundedRectangle');assert.ok(bars.length>0)
+                for(const bar of bars)assert.ok(['#5E6068','rgba(0, 0, 0, 0.13)'].includes(bar.props.fill.light))
+              }
+            }
+          }
+        }
+      }
+    }
+    api.saveSource(saved);scripting.Widget.family=family;scripting.Widget.parameter=param
+  }
+  console.log('PASS: exact finite zero in either window grays ENTIRE account SVG/title/two LCD/%/both lit bars, empty slots retained; enabled/available/429 do not determine gray; 0.1/null/negative/NaN not zero; three sources all families identical; circular/inline same account rule')
   // Dock-style Material background: documented widgetBackground {style: Material, shape} + RoundedRectangle gradient fill/stroke layers.
   {
     const oldReload=scripting.Widget.reloadAll,oldSource=api.getSource(),oldFamily=scripting.Widget.family,oldParameter=scripting.Widget.parameter,oldStyle=storage.get('ai_usage_widget_background_v1')
@@ -2232,13 +2265,13 @@ async function main() {
     }
     api.saveWidgetBackgroundStyle('gradient');states.length=0;let settings=render();let reloads=0;scripting.Widget.reloadAll=async()=>{reloads++}
     const picker=settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式');assert.equal(picker.props.value,'gradient')
-    const labels=expand(picker);assert.ok(labels.includes('渐变背景'));assert.ok(labels.includes('玻璃背景（Dock样式）'));assert.ok(!labels.some(x=>typeof x==='string'&&x.includes('实验')))
+    const labels=expand(picker);assert.ok(labels.includes('渐变背景'));assert.ok(labels.includes('玻璃背景'));assert.ok(!labels.some(x=>typeof x==='string'&&x.includes('实验')))
     assert.ok(!settings.some(x=>typeof x==='string'&&(x.includes('UIGlass')||x.includes('实验'))))
     before=calls.length;const creds=JSON.stringify([...kc.entries()]),sources=[api.getSource(),api.getStatisticsSource()]
     await picker.props.onChanged('glass');assert.equal(api.getWidgetBackgroundStyle(),'glass');assert.equal(reloads,1);assert.equal(calls.length,before)
     assert.equal(JSON.stringify([...kc.entries()]),creds);assert.deepEqual([api.getSource(),api.getStatisticsSource()],sources)
     states.length=0;settings=render();assert.equal(settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.value,'glass')
-    const bgFooter=expand(settings.find(x=>x.type==='Section'&&expand(x.props.header).includes('小组件背景')).props.footer).join('');assert.ok(bgFooter.includes('不保证完全透明')&&bgFooter.includes('不更改系统全局外观')&&!bgFooter.includes('UIGlass')&&!bgFooter.includes('实验'))
+    const bgFooter=expand(settings.find(x=>x.type==='Section'&&expand(x.props.header).includes('小组件背景')).props.footer).join('');assert.ok(bgFooter.includes('尚未证实能透出壁纸')&&bgFooter.includes('不更改系统全局外观')&&!bgFooter.includes('UIGlass')&&!bgFooter.includes('实验'))
     await settings.find(x=>x.type==='Picker'&&x.props.title==='背景样式').props.onChanged('gradient');assert.equal(reloads,2);api.saveWidgetBackgroundStyle('bad');assert.equal(api.getWidgetBackgroundStyle(),'gradient')
     if(oldStyle==null)storage.delete('ai_usage_widget_background_v1');else storage.set('ai_usage_widget_background_v1',oldStyle)
     scripting.Widget.reloadAll=oldReload;api.saveSource(oldSource);scripting.Widget.family=oldFamily;scripting.Widget.parameter=oldParameter;states.length=0
@@ -2249,6 +2282,6 @@ async function main() {
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
   console.log('PASS: Safari dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
   console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude disabled gray title+SVG fill in 3 widget families, App foreground always normal, enabled 0%/unavailable/stale unchanged, no disabled words; quota colors unchanged')
+  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/old updater; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude exact-zero account gray title+SVG/LCD/percent/lit bars; enabled/available/stale not gray triggers; App foreground unchanged')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

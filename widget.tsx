@@ -78,28 +78,28 @@ function lcdSvg(value: number | null, on: string, off: string): string {
 }
 
 // 数码管百分比：height 为数字高度
-function Lcd({ value, height }: { value: number | null; height: number }) {
+function Lcd({ value, height, muted = false }: { value: number | null; height: number; muted?: boolean }) {
   const width = height * (36.4 / 18)
   return <HStack alignment="bottom" spacing={2}>
     <SVG
       code={{
-        light: lcdSvg(value, LCD_ON.light, LCD_OFF.light),
-        dark: lcdSvg(value, LCD_ON.dark, LCD_OFF.dark),
+        light: lcdSvg(value, muted ? SUB.light : LCD_ON.light, LCD_OFF.light),
+        dark: lcdSvg(value, muted ? SUB.dark : LCD_ON.dark, LCD_OFF.dark),
       }}
       resizable
       frame={{ width, height }}
     />
-    <Text font={Math.max(9, height * 0.42)} fontWeight="bold" foregroundStyle={levelColor(value)}>%</Text>
+    <Text font={Math.max(9, height * 0.42)} fontWeight="bold" foregroundStyle={muted ? SUB : levelColor(value)}>%</Text>
   </HStack>
 }
 
 // ---------- 分段进度条（剩余额度） ----------
-function SegBar({ remaining, count, height, fixedHeight = false }: { remaining: number | null; count: number; height: number; fixedHeight?: boolean }) {
+function SegBar({ remaining, count, height, fixedHeight = false, muted = false }: { remaining: number | null; count: number; height: number; fixedHeight?: boolean; muted?: boolean }) {
   const lit = remaining == null ? 0 : Math.round((Math.max(0, Math.min(100, remaining)) / 100) * count)
   const head = levelColor(remaining)
   const segs: VirtualNode[] = []
   for (let i = 0; i < count; i++) {
-    const color = i < lit - 1 ? FG : i === lit - 1 ? head : SEG_OFF
+    const color = i < lit ? (muted ? SUB : i < lit - 1 ? FG : head) : SEG_OFF
     segs.push(fixedHeight
       ? <RoundedRectangle fill={color} cornerRadius={height * 0.3}
           modifiers={modifiers().frame({ height }).frame({ maxWidth: "infinity" })} />
@@ -117,11 +117,11 @@ function largeSegmentLayout(width: number, widgetWidth: number) {
   const count = Math.max(1, Math.round((width + gap) / (target + gap)))
   return { count, target, segmentWidth: (width - (count - 1) * gap) / count }
 }
-function LargeSegBar({ remaining }: { remaining: number | null }) {
+function LargeSegBar({ remaining, muted = false }: { remaining: number | null; muted?: boolean }) {
   // Root owns the only horizontal inset (14pt each side); Large's bar occupies that full content width.
   const width = Widget.displaySize.width - 28
   return <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}>
-    <SegBar remaining={remaining} count={largeSegmentLayout(width, Widget.displaySize.width).count} height={5} fixedHeight />
+    <SegBar remaining={remaining} count={largeSegmentLayout(width, Widget.displaySize.width).count} height={5} fixedHeight muted={muted} />
   </VStack>
 }
 
@@ -150,6 +150,10 @@ function providerName(p: string) {
   return p === "claude" ? "Claude" : p === "openai" ? "Codex" : p
 }
 
+export function isQuotaExhausted(acc: Account): boolean {
+  return [acc.fiveHour.remainingPercent, acc.sevenDay.remainingPercent].some(v => typeof v === "number" && Number.isFinite(v) && v === 0)
+}
+
 function AccountTitle({ acc, font }: { acc: Account; font: number }) {
   const showReset = typeof acc.resetCredits === "number" && Number.isFinite(acc.resetCredits) && acc.resetCredits > 0
   // Same full-width container as the quota rows: trailing reset text aligns to the entire LCD/% right edge.
@@ -157,8 +161,8 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
   // RE uses the same font and center axis as the username, while retaining the full-width trailing edge.
   return <HStack spacing={5}
     frame={showReset ? { maxWidth: "infinity" } : undefined}>
-    <ProviderIcon provider={acc.provider} size={font + 1} muted={!acc.enabled} />
-    <Text font={font} fontWeight="semibold" foregroundStyle={acc.enabled ? FG : SUB} lineLimit={1}>{providerName(acc.provider)}</Text>
+    <ProviderIcon provider={acc.provider} size={font + 1} muted={isQuotaExhausted(acc)} />
+    <Text font={font} fontWeight="semibold" foregroundStyle={isQuotaExhausted(acc) ? SUB : FG} lineLimit={1}>{providerName(acc.provider)}</Text>
     <Text font={font - 3} foregroundStyle={SUB} lineLimit={1}>{shortName(acc)}</Text>
     {acc.enabled && !acc.available ? <Text font={font - 3} foregroundStyle={RED}>不可用</Text> : null}
     {showReset ? <Spacer /> : null}
@@ -176,10 +180,10 @@ function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   </HStack>
 }
 
-type Win = { label: string; w: QuotaWindow; fmt: (iso: string | null) => string }
+type Win = { muted?: boolean; label: string; w: QuotaWindow; fmt: (iso: string | null) => string }
 const windowsOf = (a: Account): Win[] => [
-  { label: "5 h", w: a.fiveHour, fmt: fmtReset },
-  { label: "每周", w: a.sevenDay, fmt: fmtResetDays },
+  { label: "5 h", w: a.fiveHour, muted: isQuotaExhausted(a), fmt: fmtReset },
+  { label: "每周", w: a.sevenDay, muted: isQuotaExhausted(a), fmt: fmtResetDays },
 ]
 
 // Each intrinsic column owns BOTH periods: no Grid flexible-column compression or spanning headings.
@@ -282,7 +286,7 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   const accounts = data.accounts.slice(0, 2), single = accounts.length === 1
   const account = (acc: Account) => <VStack alignment="leading" spacing={3}>
     <AccountTitle acc={acc} font={s.title} />
-    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
+    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
   return <GeometryReader>
     {proxy => {
@@ -309,8 +313,8 @@ const MEDIUM_SCALE: Scale = { title: 12, label: 9, lcd: 11, bar: 4, segs: 10, ga
 // "5 h/每周" label and countdown use the Small two-account baseline in Small and Medium:
 // 8pt, fixed label width 8*2.1, monospaced digits, NO per-text scaling (the time never shrinks alone).
 const QUOTA_TEXT_FONT = 8
-function QuadWindow({ label, w, fmt, s, fixedLcd = false, rowToBarGap = s.gap }: Win & { s: Scale; fixedLcd?: boolean; rowToBarGap?: number }) {
-  const lcd = <Lcd value={w.remainingPercent} height={s.lcd} />
+function QuadWindow({ label, w, fmt, s, muted = false, fixedLcd = false, rowToBarGap = s.gap }: Win & { s: Scale; fixedLcd?: boolean; rowToBarGap?: number }) {
+  const lcd = <Lcd value={w.remainingPercent} height={s.lcd} muted={muted} />
   return <VStack alignment="leading" spacing={rowToBarGap}>
     <HStack alignment="bottom" spacing={2}>
       {/* 标签固定宽度（约两个汉字），“5 h”与“每周”对齐，后面的倒计时也对齐 */}
@@ -321,7 +325,7 @@ function QuadWindow({ label, w, fmt, s, fixedLcd = false, rowToBarGap = s.gap }:
       <Spacer />
       {fixedLcd ? <HStack spacing={0} fixedSize={{ horizontal: true, vertical: false }}>{lcd}</HStack> : lcd}
     </HStack>
-    <SegBar remaining={w.remainingPercent} count={s.segs} height={s.bar} />
+    <SegBar remaining={w.remainingPercent} count={s.segs} height={s.bar} muted={muted} />
   </VStack>
 }
 
@@ -331,7 +335,7 @@ function Quad({ acc, s, fixedLcd = false, intrinsic = false }: { acc?: Account; 
     fixedSize={intrinsic ? { horizontal: false, vertical: true } : undefined}
     frame={intrinsic ? { maxWidth: "infinity", alignment: "leading" as any } : { maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} fixedLcd={fixedLcd} />)}
+    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd={fixedLcd} />)}
   </VStack>
 }
 
@@ -411,7 +415,7 @@ function Medium({ data }: { data: UsageData }) {
 }
 
 // ---------- 大号：顶部今日统计 + 从上到下四个账号 ----------
-function LargeQuota({ label, w, fmt }: Win) {
+function LargeQuota({ label, w, fmt, muted = false }: Win) {
   return <VStack alignment="leading" spacing={MEDIUM_SCALE.gap}
     modifiers={modifiers().fixedSize({ horizontal: false, vertical: true }).frame({ minHeight: 19, maxWidth: "infinity" })}>
     <HStack alignment="bottom" spacing={5} frame={{ maxWidth: "infinity" }}>
@@ -421,9 +425,9 @@ function LargeQuota({ label, w, fmt }: Win) {
           frame={{ width: 65, alignment: "leading" as any }}>· {fmt(w.resetsAt)}</Text>
       </HStack>
       <Spacer />
-      <Lcd value={w.remainingPercent} height={12} />
+      <Lcd value={w.remainingPercent} height={12} muted={muted} />
     </HStack>
-    <LargeSegBar remaining={w.remainingPercent} />
+    <LargeSegBar remaining={w.remainingPercent} muted={muted} />
   </VStack>
 }
 
@@ -447,7 +451,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
           modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" }).padding({ top: 1 })} /> : null}
         <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}><AccountTitle acc={acc} font={12} /></VStack>
         <VStack alignment="leading" spacing={3} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
-          {windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} />)}
+          {windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} />)}
         </VStack>
       </VStack>)}
     </VStack>
@@ -470,19 +474,19 @@ function AccessoryRectangular({ acc }: { acc: Account }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
   return <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
+    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
 }
 function AccessoryCircular({ acc }: { acc: Account }) {
   // One primary value: the 5 h window remaining percentage.
   const v = acc.fiveHour.remainingPercent
   return <Gauge value={v == null ? 0 : Math.max(0, Math.min(100, v)) / 100} min={0} max={1}
-    gaugeStyle="accessoryCircularCapacity"
+    gaugeStyle="accessoryCircularCapacity" foregroundStyle={isQuotaExhausted(acc) ? SUB : undefined}
     label={<Text font={9}>5 h</Text>}
     currentValueLabel={<Text font={12} fontWeight="semibold" monospacedDigit>{fmtPct(v)}</Text>} />
 }
 function AccessoryInline({ acc }: { acc: Account }) {
-  return <Text lineLimit={1}>{`${providerName(acc.provider)} 5h ${fmtPct(acc.fiveHour.remainingPercent)} · 周 ${fmtPct(acc.sevenDay.remainingPercent)}`}</Text>
+  return <Text lineLimit={1} foregroundStyle={isQuotaExhausted(acc) ? SUB : undefined}>{`${providerName(acc.provider)} 5h ${fmtPct(acc.fiveHour.remainingPercent)} · 周 ${fmtPct(acc.sevenDay.remainingPercent)}`}</Text>
 }
 function AccessoryRoot({ data, error, family }: { data: UsageData | null; error: string | null; family: string }) {
   const acc = data ? widgetAccounts(data.accounts, Widget.parameter ?? "")[0] : undefined

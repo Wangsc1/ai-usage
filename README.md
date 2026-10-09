@@ -8,9 +8,9 @@
 
 默认浅色/深色自适应渐变背景（日间左上近白，右下冰蓝渐变）、数码管剩余百分比、分段进度条与重置倒计时。
 
-App“小组件背景”可选 **渐变背景（默认） / 玻璃背景（Dock样式）**。选择仅保存在此脚本并请求重载主屏小组件，不更改系统全局外观，锁屏不受影响。Dock样式使用Scripting文档支持的系统`ultraThinMaterial`作为`widgetBackground`（形状`containerRelative`），再叠加极轻白色渐变提亮与顶部更亮的细白色渐变描边；不使用UIGlass，不改文字、图标、颜色、字号或布局。
+App“小组件背景”可选 **渐变背景（默认） / 玻璃背景**。选择仅保存在此脚本并请求重载主屏小组件，不更改系统全局外观，锁屏不受影响。Dock样式使用Scripting文档支持的系统`ultraThinMaterial`作为`widgetBackground`（形状`containerRelative`），再叠加极轻白色渐变提亮与顶部更亮的细白色渐变描边；不使用UIGlass，不改文字、图标、颜色、字号或布局。
 
-Material是否透出壁纸、透明程度以及系统着色模式下的背景显示由iOS决定，不保证完全透明；深色壁纸或深色模式下的可读性需真机确认。切回渐变即可恢复默认外观。依据Scripting公开[ShapeStyle Material](https://scriptingapp.github.io/guide/Types/ShapeStyle.md)、[widgetBackground](https://scriptingapp.github.io/guide/View%20Modifiers/widgetBackground.md)与[Shapes](https://scriptingapp.github.io/guide/Views/Shapes/index.md)契约。
+当前真机反馈Material背景显示近白，未证实能取样到壁纸；这不是Dock透明效果已实现。背景上叠加的白色提亮也会增加亮度，但没有证据证明调低它能解决宿主取样问题，因此不盲调透明度。Material透明程度及系统着色模式下的背景显示由iOS决定；深色壁纸或深色模式下的可读性需真机确认。切回渐变即可恢复默认外观。依据Scripting公开[ShapeStyle Material](https://scriptingapp.github.io/guide/Types/ShapeStyle.md)、[widgetBackground](https://scriptingapp.github.io/guide/View%20Modifiers/widgetBackground.md)与[Shapes](https://scriptingapp.github.io/guide/Views/Shapes/index.md)契约。
 
 | 尺寸 | 内容 |
 | --- | --- |
@@ -26,7 +26,7 @@ Material是否透出壁纸、透明程度以及系统着色模式下的背景显
 - 额度与统计完全独立：例如官方OAuth额度＋Sub2API统计、Sub2API额度＋Parrot统计。统计失败不阻止任何来源额度刷新；沿用该统计来源缓存并单独报告错误与时效。未配置、字段缺失或无缓存时显示未提供，不填零。Sub2API单账号查询失败保留该来源账号与可用缓存，不丢整份列表；App明确报告失败账号及请求路径。
 - 小号和中号的 `5 h`、`每周`及剩余时间使用相同字号；倒计时中的数字等宽。
 - 在 App“小组件账号”中点账号，填写“小组件用户名”并保存；所有组件尺寸共用，留空保存恢复原名。仅去除首尾空白，Emoji等内容保留；App及排序页仍显示原名。别名按稳定账号ID和来源分别本机保存，刷新、更新、排序不丢失；官方退出仅清除此账号别名，清除Parrot配置同时清除Parrot别名，不影响另一来源。
-- 小组件统一按账号的明确停用状态将Codex/Claude标题与图标置灰；App账号列表保持正常颜色。Parrot来自`enabled`，Sub2API来自`status=disabled`。官方OAuth当前公开额度接口及本机凭据没有已确认的账号停用字段，无法据此识别远端禁用；额度耗尽、429、请求失败或暂不可用不会冒充停用。三种来源共用同一标题/图标renderer，不显示“已停用”文字，也不修改远端状态。
+- 任一5 h/每周剩余百分比真实为0时，整个账号的服务图标、Codex/Claude标题、两窗数码数字、百分比符号及进度条点亮块统一置灰；未点亮槽保持原灰色。三来源共用规则，未知值、非零小数和暂不可用不当作0；enabled停用状态保留但不驱动灰显。用户名、标签、倒计时、RE:N及统计保持原样。
 - 剩余额度 >60% 绿色、21%–60% 橙色、≤20% 红色；未知显示 `--`。
 - 重置卡位于账号标题行右端，右边对齐百分比，与用户名同字号、垂直居中对齐；有无重置卡时标题均保持相同的垂直对齐。只有明确有效数量大于0时显示 `RE:N`；0、未知或未提供时隐藏。所有尺寸保持一致，不兑换或消耗重置卡。
 - 底部保留唯一额度刷新时间与可点击的双箭头刷新按钮（图标字号9、点击框12×12，与旁边时间同字号），不显示Wi-Fi图标。点击按钮通过AppIntent直接读取当前额度来源及所选统计来源的汇总统计并重载小组件，不打开设置、不改变小组件其他区域的点击行为；失败沿用缓存及原成功时间。App状态区继续显示独立统计错误与完整更新时间。
