@@ -258,7 +258,7 @@ async function main() {
     for(const stale of [false,true]) {
       const images=expand(Root({data:result.data,stale,error:null})).filter(x=>x.type==='Image')
       const icon=images.find(x=>x.props.systemName===('arrow.triangle.2.circlepath'))
-      assert.ok(icon);assert.equal(icon.props.font,6.3);assert.ok(!images.some(x=>x.props.systemName==='arrow.clockwise'||x.props.systemName==='wifi.slash'))
+      assert.ok(icon);assert.equal(icon.props.font,9);assert.ok(!images.some(x=>x.props.systemName==='arrow.clockwise'||x.props.systemName==='wifi.slash'))
     }
   }
   // Provider title AND explicit SVG fill respect enabled, never infer disabled from 0%/available/stale.
@@ -695,7 +695,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.8.15')
+  assert.equal(api.VERSION,'1.8.16')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version/updater integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1037,7 +1037,7 @@ async function main() {
     const footers=tree.filter(x=>x.type==='HStack'&&x.props.spacing===3&&Array.isArray(x.props.children)&&x.props.children[0]?.type==='Button'&&x.props.children[0]?.props.children?.type==='Image')
     assert.equal(footers.length,1)
     const children=Array.from(footers[0].props.children);assert.deepEqual(children.map(x=>x.type),['Button','Text']);assert.equal(children[0].props.intent.name,'RefreshUsageIntent');assert.equal(children[0].props.action,undefined);assert.equal(children[0].props.buttonStyle,'plain')
-    assert.equal(children[0].props.children.props.systemName,'arrow.triangle.2.circlepath');assert.equal(children[0].props.children.props.font,6.3)
+    assert.equal(children[0].props.children.props.systemName,'arrow.triangle.2.circlepath');assert.equal(children[0].props.children.props.font,9);assert.deepEqual({...children[0].props.frame},{width:12,height:12})
     assert.equal(children[0].props.children.props.foregroundStyle.light,'#5E6068');assert.equal(children[0].props.children.props.foregroundStyle.dark,'#8E8E93')
     assert.equal(children[1].props.children,api.fmtTime(data.fetchedAt));assert.equal(children[1].props.font,9);assert.equal(children[1].props.monospacedDigit,true)
     assert.equal(children[1].props.foregroundStyle.light,'#5E6068');assert.equal(children[1].props.foregroundStyle.dark,'#8E8E93')
@@ -1059,7 +1059,7 @@ async function main() {
       for(const stale of [false,true])assertOriginalRefreshFooter(footerData,stale)
     }
   }
-  console.log('PASS: interactive footer all families: ONLY refresh Button+data.fetchedAt time; spacing3/font6.3/font9/monospaced/SUB unchanged; stale shows refresh not wifi; no 统计P/extra Text')
+  console.log('PASS: interactive footer all families: ONLY refresh Button+data.fetchedAt time; spacing3/icon-font9/hit-frame12/time-font9/monospaced/SUB; intent unchanged; stale shows refresh not wifi; no 统计P/extra Text')
   const clickableTree=expand(Root({data:combined.data,stale:false,error:null}))
   const refreshButton=clickableTree.find(x=>x.type==='Button'&&x.props.intent?.name==='RefreshUsageIntent')
   assert.ok(refreshButton);assert.equal(refreshButton.props.intent.params,undefined)
@@ -1192,7 +1192,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.15')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.8.16')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1426,7 +1426,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.15'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.8.16'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1725,7 +1725,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.15')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.8.16')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1735,7 +1735,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.15 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.8.16 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1842,14 +1842,14 @@ async function main() {
   handler=async(u,o)=>{
     assert.ok(u.startsWith('https://raw.githubusercontent.com/Wangsc1/ai-usage/'));assert.equal(o.timeout,20)
     const name=u.slice(u.lastIndexOf('/')+1).split('?')[0];updateReads.push(name)
-    return name==='script.json'?resp(200,{version:'1.8.15'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
+    return name==='script.json'?resp(200,{version:'1.8.16'}):{status:200,text:async()=>fs.readFileSync(path.join(root,name),'utf8')}
   }
   await load('index.tsx').updateFromGitHub(true)
   assert.deepEqual(updateReads,['script.json','api.ts','app_intents.tsx','widget.tsx','index.tsx'])
   assert.deepEqual(updateWrites.map(x=>x.p),['/mock-script/api.ts','/mock-script/app_intents.tsx','/mock-script/widget.tsx','/mock-script/index.tsx'])
   assert.equal(updateWrites[1].b,fs.readFileSync(path.join(root,'app_intents.tsx'),'utf8'))
   updateWrites.length=0
-  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.8.15'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
+  handler=async(u)=>u.includes('script.json')?resp(200,{version:'1.8.16'}):u.includes('app_intents.tsx')?resp(404):{status:200,text:async()=>'mock-source'}
   await assert.rejects(()=>load('index.tsx').updateFromGitHub(true),/app_intents.tsx/);assert.equal(updateWrites.length,0)
   scripting.Script=savedScript;context.FileManager=savedFileManager
   console.log('PASS: updater downloads all four sources then installs intents before widget; failed intent download writes no partial files; metadata never overwritten')
@@ -1968,12 +1968,18 @@ async function main() {
       for(const [family,size] of [['systemSmall',{width:170,height:170}],['systemMedium',{width:358,height:170}],['systemLarge',{width:358,height:376}],['systemExtraLarge',{width:715,height:376}]])
         for(const parameter of ['','1','1,2','3,1,4','4,2,3,1'])for(const stale of [false,true]){
           scripting.Widget.family=family;scripting.Widget.parameter=parameter;scripting.Widget.displaySize=size
-          assert.equal(JSON.stringify(expand(Root({data:accData,stale,error:null}))),JSON.stringify(expand(prior({data:accData,stale,error:null}))),family+' '+parameter)
+          // Only the requested refresh icon/font/hit frame may differ from the baseline.
+          const normalize=t=>JSON.stringify(t,(k,v)=>{
+            if(v?.type==='Image'&&v.props?.systemName==='arrow.triangle.2.circlepath')return {...v,props:{...v.props,font:9}}
+            if(v?.type==='Button'&&v.props?.intent?.name==='RefreshUsageIntent'){const p={...v.props};delete p.frame;return {...v,props:p}}
+            return v
+          })
+          assert.equal(normalize(expand(Root({data:accData,stale,error:null}))),normalize(expand(prior({data:accData,stale,error:null}))),family+' '+parameter)
         }
     }else console.log('NOTE: PRE_ACCESSORY_WIDGET_PATH unset; home-screen identity comparison skipped')
     scripting.Widget.family='systemLarge';scripting.Widget.parameter='';scripting.Widget.displaySize={width:358,height:376}
   }
-  console.log('PASS: accessoryRectangular/Circular/Inline render exactly the first account after parameter/sort (one title, 5 h/每周 rows; one gauge; one inline line); no grid/divider/stats/background/footer button; empty/no-data/bad-parameter compact; systemSmall/Medium/Large/ExtraLarge trees byte-identical to pre-change widget for all selections')
+  console.log('PASS: accessoryRectangular/Circular/Inline render exactly the first account after parameter/sort (one title, 5 h/每周 rows; one gauge; one inline line); no grid/divider/stats/background/footer button; empty/no-data/bad-parameter compact; systemSmall/Medium/Large/ExtraLarge trees identical except requested refresh icon/font/hit frame to baseline for all selections')
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

@@ -169,8 +169,8 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
 
 function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
   return <HStack spacing={3}>
-    <Button intent={RefreshUsageIntent(undefined)} buttonStyle="plain">
-      <Image systemName="arrow.triangle.2.circlepath" font={6.3} foregroundStyle={SUB} />
+    <Button intent={RefreshUsageIntent(undefined)} buttonStyle="plain" frame={{ width: 12, height: 12 }}>
+      <Image systemName="arrow.triangle.2.circlepath" font={9} foregroundStyle={SUB} />
     </Button>
     <Text font={9} monospacedDigit foregroundStyle={SUB}>{fmtTime(data.fetchedAt)}</Text>
   </HStack>
