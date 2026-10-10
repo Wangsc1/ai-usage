@@ -625,6 +625,7 @@ async function main() {
   let SettingsView=load('index.tsx').SettingsView
   const withMissingSort=fn=>{const saved=SettingsView;SettingsView=loadSettingsWith(['EditButton','ForEach']);try{return fn()}finally{SettingsView=saved;load('index.tsx')}}
   const render=()=>{hook=0;return expand(SettingsView())}
+  const manualRefresh=ui=>{const p=ui.find(x=>x.type==='Picker'&&x.props.title==='统计来源');assert.ok(p,'statistics Picker present');return p.props.onChanged(p.props.value)}
   let ui=render()
   assert.ok(!ui.some(x=>x.type==='Toggle'))
   assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='目前账号'))
@@ -697,7 +698,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.22')
+  assert.equal(api.VERSION,'1.10.23')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -811,7 +812,7 @@ async function main() {
   obsStore=[];obsIndex=0;const emailOrder=expand(orderLink.props.destination.type(orderLink.props.destination.props))
   const orderBuilder=emailOrder.find(x=>x.type==='ReorderableForEach')
   assert.ok(expand(orderBuilder.props.builder(nestedAccount,0)).some(x=>typeof x==='string'&&x.includes('nested@example.test')))
-  await emailUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
+  await manualRefresh(emailUI)
   emailUI=render();assert.ok(!emailUI.some(x=>x.type==='Section'&&x.props.header?.props.children==='当前状态'));assert.ok(api.officialCached().accounts.some(a=>a.id===nested.id&&a.fiveHour.remainingPercent!=null),'manual refresh still updates cache')
   // Refresh response omitting email preserves the previously authorized stored email and aliases.
   const refreshRecord=JSON.parse(kc.get('ai_usage_official_oauth_v1'));const nr=refreshRecord.find(a=>a.id===nested.id)
@@ -1133,7 +1134,7 @@ async function main() {
 
   // App uses the same composed path and reports source/freshness independently.
   states.length=0;authUI=render();before=calls.length
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
+  await manualRefresh(authUI)
   authUI=render();assert.ok(!authUI.some(x=>typeof x==='string'&&(x.startsWith('统计：')||x.includes('23 次'))),'refresh summary had only the removed status section')
   assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
   statsTimestamp=storage.get('ai_usage_parrot_stats_v1').fetchedAt
@@ -1147,7 +1148,7 @@ async function main() {
     const ageData={...combined.data,statistics:{...combined.data.statistics,fetchedAt:now-minutes*60000}}
     assertOriginalRefreshFooter(ageData,false);assertOriginalRefreshFooter(ageData,true)
   }
-  states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
+  states.length=0;authUI=render();await manualRefresh(authUI)
   assert.ok(!render().includes('⚠️ 额度已刷新；Parrot统计独立读取失败'));assert.equal(storage.get('ai_usage_parrot_stats_v1').fetchedAt,statsTimestamp,'stats cache kept on failure')
   // No statistics cache, malformed response, and no config all yield unknown, never fabricated zero.
   storage.delete('ai_usage_parrot_stats_v1');combined=await api.loadUsage();assert.equal(combined.data.today,null);assert.equal(combined.data.month,null);assert.equal(combined.data.statistics.fetchedAt,null)
@@ -1175,7 +1176,7 @@ async function main() {
   // A delayed official App refresh must not replace the newly selected Parrot account list.
   states.length=0;authUI=render();let finishOldQuota;let held=false
   handler=async(u,o)=>{if(u.endsWith('/usage')&&!held){held=true;await new Promise(resolve=>finishOldQuota=resolve)}return combinedHandler(u,o)}
-  const delayedRefresh=authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
+  const delayedRefresh=manualRefresh(authUI)
   for(let i=0;i<8&&!finishOldQuota;i++)await Promise.resolve();assert.ok(finishOldQuota)
   await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
   const beforeOldReturns=JSON.stringify(render().filter(x=>typeof x==='string'))
@@ -1239,13 +1240,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.22')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.23')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.22');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.23');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1334,7 +1335,7 @@ async function main() {
     assert.ok(tree.includes('自定义Claude'));assert.ok(tree.includes('Claude'));assert.ok(!tree.includes('only-parrot'))
     const resets=tree.filter(x=>x.type==='Text'&&String(x.props.children).startsWith('RE:'));assert.equal(resets.length,1) // only Codex, never Claude
   }
-  states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
+  states.length=0;authUI=render();await manualRefresh(authUI)
   assert.ok(render().some(x=>typeof x==='string'&&/^\d+\. Claude claude-b@example.test$/.test(x)))
   claudeUsageFailure=true;combined=await api.loadUsage();assert.equal(combined.stale,true);assert.equal(combined.data.accounts.length,5);assert.equal(combined.data.statistics.stale,false);claudeUsageFailure=false
   // Local provider-scoped exits preserve Codex, other Claude accounts, Parrot cache and unrelated aliases.
@@ -1434,7 +1435,7 @@ async function main() {
   exitUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action();exitUI=render()
   let releaseBusyRefresh;let heldBusy=false
   handler=async(u,o)=>{if(u.endsWith('/usage')&&!heldBusy){heldBusy=true;await new Promise(resolve=>releaseBusyRefresh=resolve)}return u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)}
-  const busyRefresh=exitUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
+  const busyRefresh=manualRefresh(exitUI)
   assert.ok(render().filter(x=>x.type==='HStack'&&x.props.trailingSwipeActions).every(x=>x.props.trailingSwipeActions.actions[0].props.disabled))
   for(let i=0;i<12&&!releaseBusyRefresh;i++)await Promise.resolve();assert.ok(releaseBusyRefresh);releaseBusyRefresh();await busyRefresh
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
@@ -1658,7 +1659,7 @@ async function main() {
   stageServer.handlers['/callback'](actualCallback) // duplicate must not regress progress or exchange twice
   closeClaudeModal();await delayedBrowser
   assert.ok(render().includes('正在交换Claude令牌（不重复提交）'))
-  assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.disabled)
+  assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='刷新额度'),'no manual refresh button exists to press while exchanging')
   assert.ok(!api.officialAccounts().some(a=>a.email==='stage-auto@example.test'));assert.equal(stageServer.stops,0)
   const releaseTokenStage=releaseClaudeRequest;releaseClaudeRequest=null;holdToken=false;releaseTokenStage()
   for(let i=0;i<30&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
@@ -1781,7 +1782,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.22')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.23')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1791,7 +1792,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.22 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.23 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1911,7 +1912,7 @@ async function main() {
       assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='预览组件'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='账号来源'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='刷新间隔'))
-      if(selected==='official')assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='刷新额度'))
+      assert.ok(!ui.some(x=>x.type==='Button'&&x.props.title==='刷新额度'),'manual refresh button removed for every source')
       assert.equal(JSON.stringify([...storage.entries()]),beforeStore)
     }
     assert.equal(calls.length,beforeCalls);assert.equal(JSON.stringify([...kc.entries()]),beforeCreds)
@@ -2316,7 +2317,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.22');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.23');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2350,7 +2351,7 @@ async function main() {
         assert.equal(until,expected);await load();assert.equal(posted.length,1)
         // A new module instance shares only persisted Keychain/Storage, not the in-process promise maps.
         delete modules['renewal-fresh-api.ts'];const freshAPI=globalLoadFreshAPI();assert.equal((await freshAPI.loadUsage()).stale,true);assert.equal(posted.length,1)
-        states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
+        states.length=0;await manualRefresh(render())
         await modules['widget.tsx'].exports.runWidget();await registeredIntents.get('RefreshUsageIntent').perform(undefined);assert.equal(posted.length,1)
         now=until+1;mode='ok';assert.equal((await load()).stale,false);assert.equal(posted.length,2);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-refresh-rotated')
       }
@@ -2375,7 +2376,7 @@ async function main() {
       // Multiple independent module executions and every family reuse unexpired tokens with zero renewal POSTs.
       prepare(provider);const future=fixture(provider);future.expiresAt=now+3600000;kc.set(keyOf(provider),JSON.stringify([future]))
       for(let instance=0;instance<3;instance++){delete modules['renewal-fresh-api.ts'];assert.equal((await globalLoadFreshAPI().loadUsage()).stale,false)}
-      states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
+      states.length=0;await manualRefresh(render())
       for(const family of ['systemSmall','systemMedium','systemLarge','accessoryRectangular']){const originalFamily=scripting.Widget.family;scripting.Widget.family=family;await modules['widget.tsx'].exports.runWidget();scripting.Widget.family=originalFamily}
       await registeredIntents.get('RefreshUsageIntent').perform(undefined);assert.equal(posted.length,0)
       // Distinct modules arriving after a successful renewal read the saved rotation, not the old refresh token.
@@ -2390,7 +2391,7 @@ async function main() {
       // App/widget/intent all call the same loader, and each automatically renews without authorization.
       for(const entry of ['App','Widget','Intent']){
         prepare(provider)
-        if(entry==='App'){states.length=0;const ui=render();await ui.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()}
+        if(entry==='App'){states.length=0;const ui=render();await manualRefresh(ui)}
         else if(entry==='Widget')await modules['widget.tsx'].exports.runWidget()
         else await registeredIntents.get('RefreshUsageIntent').perform(undefined)
         assert.equal(posted.length,1,provider+' '+entry);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-refresh-rotated')
@@ -2870,7 +2871,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
         assert.ok(!mounted.some(n=>n?.type==='Section'&&n.props.header?.props.children==='当前状态'));assert.ok(!text.includes('✅ 连接成功'))
         if(source!=='official'&&(cacheMode==='full'||cacheMode==='quota-only'))assert.ok(text.includes('CachedName-'+source))
         if(source==='official')assert.ok(mounted.some(n=>n?.type==='HStack'&&n.key==='cached-codex'),'official login rows from local credentials')
-        assert.ok(mounted.some(n=>n?.type==='Button'&&['刷新额度','保存并测试'].includes(n.props.title)&&!n.props.disabled),'manual actions available')
+        assert.ok(mounted.some(n=>n?.type==='Button'&&['保存并测试','添加账号','保存'].includes(n.props.title))||mounted.some(n=>n?.type==='Picker'&&n.props.title==='统计来源'&&!n.props.disabled),'manual actions available (no refresh button)')
         for(const cleanup of cleanups)cleanup()
       }
     }

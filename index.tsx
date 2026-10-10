@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.22"
+const VERSION = "1.10.23"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -422,7 +422,6 @@ function SettingsView() {
         {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}
-        <Button title={"刷新额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : null}
       {source === "official" && loginProvider === "deepseek" ? <Section header={<Text>添加DeepSeek</Text>}>
         <TextField title="DeepSeek账号名称" value={dsName} onChanged={setDSName} />
