@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.8"
+const VERSION = "1.10.9"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -347,8 +347,7 @@ function SettingsView() {
         cancellationAction: <Button title={"完成"} action={dismiss} />,
       }}
     >
-      <Section header={<Text>数据来源</Text>} footer={<Text>切换不删除另一来源配置。</Text>}>
-        <LabeledContent title="当前版本" value={VERSION} />
+      <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>} footer={<Text>切换不删除另一来源配置。</Text>}>
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot</Text>
           <Text tag={"official"}>Codex,Claude,DeepSeek</Text>
@@ -375,7 +374,7 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubUrl(""); setHasSubKey(false); setLines([]); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
+      {source === "official" ? <Section header={<Text>登录账号</Text>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
         <Picker title="登录服务" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
           <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text>
         </Picker>
@@ -441,12 +440,12 @@ function SettingsView() {
         {hasKey ? <Button title={"测试连接"} action={test} disabled={busy} /> : null}
       </Section> : null}
 
-      <Section header={<Text>状态</Text>}>
+      <Section header={<Text>当前状态</Text>}>
         <Text>{status}</Text>
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
-      <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。</Text>}>
+      <Section header={<Text>目前账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。</Text>}>
         {accounts.map((a, i) => <NavigationLink key={a.id}
           destination={<WidgetNamePage account={a} source={source} onSaved={() => setAccounts(cachedAccounts())} />}>
           <VStack alignment="leading" spacing={3}>
@@ -460,7 +459,7 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>
 
-      <Section header={<Text>小组件刷新</Text>} footer={<Text>刷新间隔，实际时间由ios调度</Text>}>
+      <Section header={<Text>组件刷新</Text>} footer={<Text>刷新间隔，实际时间由ios调度</Text>}>
         <Picker title={"刷新间隔"} value={refreshMinutes} onChanged={async (value: string) => {
           setRefreshMinutes(value)
           saveRefreshMinutes(Number(value))

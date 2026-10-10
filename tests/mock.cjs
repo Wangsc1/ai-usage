@@ -624,7 +624,7 @@ async function main() {
   const render=()=>{hook=0;return expand(SettingsView())}
   let ui=render()
   assert.ok(!ui.some(x=>x.type==='Toggle'))
-  assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='小组件账号'))
+  assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='目前账号'))
   assert.ok(!ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='小组件账号（最多4个）'))
   assert.ok(ui.some(x=>typeof x==='string'&&x==='1. Codex · 匿名0'))
   assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('已停用')))
@@ -694,7 +694,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.8')
+  assert.equal(api.VERSION,'1.10.9')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -974,7 +974,7 @@ async function main() {
   authUI=render();assert.equal(calls.length,before);assert.equal(browserTimers.size,0)
   const unsupported=authUI.find(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed')
   assert.ok(unsupported.props.children.startsWith('当前Scripting不支持WebViewController'))
-  const section=authUI.find(x=>x.type==='Section'&&x.props.header?.props.children==='官方账号（独立登录）')
+  const section=authUI.find(x=>x.type==='Section'&&x.props.header?.props.children==='登录账号')
   assert.ok(expand(section).includes(unsupported))
   assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.disabled,false)
   context.WebViewController=supportedBrowser
@@ -1228,13 +1228,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.8')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.9')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.8');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.9');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1462,8 +1462,8 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前版本'&&x.props.value==='1.10.8'))
-  for(const [header,footer]of [['小组件刷新','刷新间隔，实际时间由ios调度'],['小组件账号','保留列表全部账号，不改变远端状态。'],['数据来源','切换不删除另一来源配置。'],['统计来源','与额度来源独立，Parrot/Sub2API二选一不合计。'],['官方账号（独立登录）','登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。']]){const section=authUI.find(x=>x.type==='Section'&&x.props.header?.props.children===header);assert.ok(section,header);assert.equal(section.props.footer.props.children,footer)}
+  assert.ok(!authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前版本'))
+  for(const [header,footer]of [['组件刷新','刷新间隔，实际时间由ios调度'],['目前账号','保留列表全部账号，不改变远端状态。'],['数据来源','切换不删除另一来源配置。'],['统计来源','与额度来源独立，Parrot/Sub2API二选一不合计。'],['登录账号','登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。']]){const section=authUI.find(x=>x.type==='Section'&&(x.props.header?.props.children===header||x.props.header?.props.children?.[0]?.props?.children===header));assert.ok(section,header);assert.equal(section.props.footer.props.children,footer)}
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1770,7 +1770,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.8')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.9')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1780,7 +1780,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.8 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.9 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1890,7 +1890,12 @@ async function main() {
         assert.ok(!ui.some(x=>typeof x==='string'&&x===title));assert.ok(!ui.some(x=>x.props?.title===title))
       }
       assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('从 GitHub 拉取')))
-      assert.ok(ui.some(x=>x.type==='LabeledContent'&&x.props.title==='当前版本'&&x.props.value==='1.10.8'))
+      assert.ok(!ui.some(x=>x.type==='LabeledContent'&&x.props.title==='当前版本'))
+      const dataSection=ui.find(x=>x.type==='Section'&&x.props.header?.type==='HStack'&&x.props.header.props.children?.[0]?.props.children==='数据来源');assert.ok(dataSection)
+      const header=dataSection.props.header;assert.equal(header.props.frame.maxWidth,'infinity');assert.deepEqual(Array.from(header.props.children,n=>n.type),['Text','Spacer','Text']);assert.equal(header.props.children[2].props.children,api.VERSION);assert.equal(dataSection.props.footer.props.children,'切换不删除另一来源配置。')
+      assert.equal(ui.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.value,selected)
+      for(const title of ['组件刷新','目前账号','当前状态'])assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children===title))
+      if(selected==='official')assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children==='登录账号'))
       assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='预览组件'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='账号来源'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='刷新间隔'))
@@ -2299,7 +2304,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.8');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.9');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
