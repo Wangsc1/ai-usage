@@ -3,11 +3,11 @@ import {
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, UsageData, cachedAccounts, cachedUsage, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.9"
+const VERSION = "1.10.10"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -120,6 +120,24 @@ async function checkAfterSafari(d: DeviceLogin, active: () => boolean,
   if (!active() || d.cancelled) return null
   return checkDeviceLogin(d)
 }
+function maskedKey(value: string): string {
+  const chars = Array.from(value)
+  return chars.length > 4 ? chars.slice(0, 4).join("") + "*".repeat(chars.length - 4) : "*".repeat(chars.length)
+}
+function usageLines(d: UsageData, requestSource: DataSource, requestStats: StatisticsSource, cached = false): string[] {
+  const statsName = requestStats === "sub2api" ? "Sub2API" : "Parrot"
+  return [
+          `统计：${statsName}全部账号汇总；额度：${requestSource === "official" ? "官方（Codex/Claude OAuth、DeepSeek）" : requestSource === "sub2api" ? "Sub2API" : "Parrot"}`,
+          ...(d.statistics ? [d.statistics.fetchedAt == null ? `${statsName}统计未提供` : `${statsName}统计${cached || d.statistics.stale ? "缓存" : "更新时间"}：${new Date(d.statistics.fetchedAt).toLocaleString()}`,
+            ...(d.statistics.error ? [`${statsName}统计错误：${d.statistics.error}`] : [])] : []),
+          ...(d.today && d.month ? [
+            `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
+            `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
+          ] : [`${statsName}今日/本月Token及花费统计未提供`]),
+          ...(d.providerErrors ?? []),
+          ...d.accounts.map(a => a.provider === "deepseek" ? `${a.name}：${deepSeekSummary(a)}` : `${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.name}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
+        ]
+}
 function SettingsView() {
   const close = Navigation.useDismiss()
   const [source, setSource] = useState<DataSource>(getSource())
@@ -145,22 +163,20 @@ function SettingsView() {
   const subCur = getSub2APIConfig()
   const [subUrl, setSubUrl] = useState(subCur.baseUrl ?? "")
   const [subKey, setSubKey] = useState("")
+  const [subKeyEditing, setSubKeyEditing] = useState(false)
   const [subTimezone, setSubTimezone] = useState(subCur.timezone)
   const [hasSubKey, setHasSubKey] = useState(!!subCur.adminKey)
   const cur = getConfig()
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
   const [key, setKey] = useState("")
-  const [hasKey, setHasKey] = useState(!!cur.managementKey)
+  const [keyEditing, setKeyEditing] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState(hasKey ? "已配置，可点“测试连接”" : "未配置：填写后点“保存并测试”")
+  const cached = cachedUsage()
+  const [status, setStatus] = useState(cached ? "本机缓存（未刷新），可手动刷新" : "暂无缓存，请手动刷新或保存并测试")
   const [browserError, setBrowserError] = useState("")
-  const [lines, setLines] = useState<string[]>([])
+  const [lines, setLines] = useState<string[]>(cached ? usageLines(cached, source, statisticsSource, true) : [])
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
-
-  useEffect(() => {
-    if (getSource() === "official" || getSource() === "sub2api" && subCur.adminKey || cur.managementKey) test()
-  }, [])
 
   useEffect(() => () => { auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
@@ -306,17 +322,7 @@ function SettingsView() {
       if (r.data) {
         const d = r.data
         setStatus(r.stale ? "❌ 额度使用缓存：" + (r.error ?? "读取失败") : d.accounts.some(a => a.balance?.error || a.readError) || d.providerErrors?.length ? "⚠️ 部分账号读取失败或使用缓存，见下方详情" : d.statistics?.error ? `⚠️ 额度已刷新；${statsName}统计独立读取失败` : "✅ 连接成功")
-        setLines([
-          `统计：${statsName}全部账号汇总；额度：${requestSource === "official" ? "官方（Codex/Claude OAuth、DeepSeek）" : requestSource === "sub2api" ? "Sub2API" : "Parrot"}`,
-          ...(d.statistics ? [d.statistics.fetchedAt == null ? `${statsName}统计未提供` : `${statsName}统计${d.statistics.stale ? "缓存" : "更新时间"}：${new Date(d.statistics.fetchedAt).toLocaleString()}`,
-            ...(d.statistics.error ? [`${statsName}统计错误：${d.statistics.error}`] : [])] : []),
-          ...(d.today && d.month ? [
-            `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
-            `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
-          ] : [`${statsName}今日/本月Token及花费统计未提供`]),
-          ...(d.providerErrors ?? []),
-          ...d.accounts.map(a => a.provider === "deepseek" ? `${a.name}：${deepSeekSummary(a)}` : `${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.name}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
-        ])
+        setLines(usageLines(d, requestSource, requestStats))
         await Widget.reloadAll()
       } else {
         setStatus("❌ " + (r.error ?? "未知错误"))
@@ -335,7 +341,7 @@ function SettingsView() {
     }
     saveConfig(baseUrl, finalKey)
     setKey("")
-    setHasKey(true)
+    setKeyEditing(false)
     await test()
   }
 
@@ -347,15 +353,12 @@ function SettingsView() {
         cancellationAction: <Button title={"完成"} action={dismiss} />,
       }}
     >
-      <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>} footer={<Text>切换不删除另一来源配置。</Text>}>
+      <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>} footer={<Text>切换不删除另一来源配置。与额度来源独立，Parrot/Sub2API二选一不合计。</Text>}>
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot</Text>
           <Text tag={"official"}>Codex,Claude,DeepSeek</Text>
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
-      </Section>
-
-      <Section header={<Text>统计来源</Text>} footer={<Text>与额度来源独立，Parrot/Sub2API二选一不合计。</Text>}>
         <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async value => {
           saveStatisticsSource(value as StatisticsSource); setStatisticsSource(value as StatisticsSource); setLines([]); await test()
         }}>
@@ -364,21 +367,23 @@ function SettingsView() {
       </Section>
       {statisticsSource === "sub2api" || source === "sub2api" ? <Section header={<Text>Sub2API连接</Text>} footer={<Text>额度与统计共用部署根地址和Admin API Key（不是普通用户Key）。统计为全站汇总，花费为actual_cost实际扣费；时区决定今日/自然月边界。管理员凭据仅存本机钥匙串，权限较高，建议HTTPS。只GET查询，不兑换重置卡、不重置额度。自动发现Claude OAuth/SetupToken、Codex OAuth和DeepSeek余额账号；缺少字段显示未知。</Text>}>
         <TextField title="Sub2API地址" value={subUrl} onChanged={setSubUrl} prompt="https://你的部署地址" />
-        <SecureField title="Sub2API管理员密钥" value={subKey} onChanged={setSubKey} prompt={hasSubKey ? "已保存，留空沿用" : "Admin API Key"} />
+        <TextField title="Sub2API管理员密钥" value={subKeyEditing ? subKey : maskedKey(subKey || subCur.adminKey || "")} onFocus={() => { setSubKey(""); setSubKeyEditing(true) }} onBlur={() => setSubKeyEditing(false)} onChanged={value => { if (subKeyEditing && value !== maskedKey(subCur.adminKey || "")) setSubKey(value) }} prompt="Admin API Key" />
         <TextField title="统计时区" value={subTimezone} onChanged={setSubTimezone} prompt="Asia/Shanghai" />
         <Button title="保存Sub2API并测试" disabled={busy} action={async () => {
-          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subTimezone); setSubKey(""); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
+          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subTimezone); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
           catch (e: any) { setStatus(String(e?.message ?? "Sub2API配置无效")) }
         }} />
-        {hasSubKey ? <Button title="测试Sub2API连接" action={test} disabled={busy} /> : null}
-        {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubUrl(""); setHasSubKey(false); setLines([]); setAccounts(cachedAccounts()); await test() }} /> : null}
+        {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setLines([]); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
       {source === "official" ? <Section header={<Text>登录账号</Text>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
-        <Picker title="登录服务" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
-          <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text>
-        </Picker>
-        {loginProvider !== "deepseek" && !device && !claude ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
+        <HStack frame={{ maxWidth: "infinity" }}>
+          {loginProvider !== "deepseek" && !device && !claude ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
+          <Spacer />
+          <Picker title="" pickerStyle="menu" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
+            <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text>
+          </Picker>
+        </HStack>
         {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
         {loginProvider === "claude" && claudeProgress ? <Text>{claudeProgress}</Text> : null}
         {claude ? <>
@@ -410,10 +415,8 @@ function SettingsView() {
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />
         </> : null}
         {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-        {logins.map(a => <HStack key={a.id}>
-          <Text fixedSize={{ horizontal: false, vertical: true }}>{`${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
-          <Spacer />
-          <Button title="点击退出" buttonStyle="borderless" fixedSize={{ horizontal: true, vertical: true }} disabled={busy || !!device || !!claude} action={async () => {
+        {logins.map(a => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
+          <Button title="删除" role="destructive" disabled={busy || !!device || !!claude} action={async () => {
           try {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
@@ -422,6 +425,9 @@ function SettingsView() {
             await Widget.reloadAll()
           } catch (e: any) { setStatus(e.message) }
         }} />
+        ] }}>
+          <Text fixedSize={{ horizontal: false, vertical: true }}>{`${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
+          <Spacer />
         </HStack>)}
         <Button title={"刷新额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : null}
@@ -435,9 +441,8 @@ function SettingsView() {
       </Section> : null}
       {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
-        <SecureField title={"管理密钥"} value={key} onChanged={setKey} prompt={hasKey ? "已保存，留空沿用" : "managementKey"} />
+        <TextField title={"管理密钥"} value={keyEditing ? key : maskedKey(key || cur.managementKey || "")} onFocus={() => { setKey(""); setKeyEditing(true) }} onBlur={() => setKeyEditing(false)} onChanged={value => { if (keyEditing && value !== maskedKey(cur.managementKey || "")) setKey(value) }} prompt="managementKey" />
         <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
-        {hasKey ? <Button title={"测试连接"} action={test} disabled={busy} /> : null}
       </Section> : null}
 
       <Section header={<Text>当前状态</Text>}>

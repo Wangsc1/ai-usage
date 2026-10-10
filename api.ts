@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.10.9"
+export const VERSION = "1.10.10"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -123,6 +123,17 @@ function syncAccountOrder(accounts: Account[], source: DataSource): Account[] {
 }
 export function cachedAccounts(): Account[] {
   return sortAccounts((getSource() === "official" ? officialCached() : Storage.get<UsageData>(getSource() === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE))?.accounts ?? [])
+}
+// App entry is local-only; statistics come from their independently selected source.
+export function cachedUsage(): UsageData | null {
+  const source = getSource(), statsSource = getStatisticsSource()
+  const quota = source === "official" ? officialCached() : Storage.get<UsageData>(source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE)
+  const stats = statsSource === "sub2api" ? Storage.get<ParrotStats>(KEY_SUB_STATS) : Storage.get<ParrotStats>(KEY_STATS) ?? Storage.get<UsageData>(KEY_CACHE)
+  if (!quota && !stats) return null
+  return { ...quota, accounts: sortAccounts(quota?.accounts ?? [], source), fetchedAt: quota?.fetchedAt ?? stats!.fetchedAt,
+    today: stats?.today ?? null, month: stats?.month ?? null,
+    todayByFamily: stats?.todayByFamily ?? {}, monthByFamily: stats?.monthByFamily ?? {},
+    statistics: { fetchedAt: stats?.fetchedAt ?? null, stale: false, error: null } }
 }
 export function widgetAccounts(accounts: Account[], parameter = ""): Account[] {
   // 参数序号与 App 账号列表从上到下一致，1 起算；支持英文/中文逗号或空格。
