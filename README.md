@@ -72,17 +72,17 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 
 #### DeepSeek
 
-账号来源选“官方”，在“登录服务”选择“DeepSeek（官方API Key）”，即可看到唯一的“添加DeepSeek官方账号”入口，默认API Key方式。填写本机显示名称，输入官方API Key后点“添加DeepSeek账号”直接保存并验证余额；也可明确切换为网页User Token备用方式。每次添加独立账号，支持多个账号及局部退出；更新失效凭据可移除该账号后重新添加。
+账号来源选“官方”，在“登录服务”选择“DeepSeek”，即可看到唯一的“添加DeepSeek官方账号”入口，新增账号固定使用API Key。填写本机显示名称，输入官方API Key后点“添加DeepSeek账号”直接保存并验证余额。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
 
 - **API Key**：只请求 `https://api.deepseek.com/user/balance`，显示总余额、充值余额、赠送余额及可用状态。
-- **网页User Token**：不是API Key，也不是OAuth。查询 `platform.deepseek.com/api/v0/users/get_user_summary` 与 `api/v0/usage/by_api_key/cost`，显示账户余额及北京时间包含今天的7个自然日消费。属于私有网页接口，可能变化或拒绝请求；不冒充浏览器，不自动登录或续期，Token失效需手动更新。
+- **已有网页User Token账号**：保留凭据、原查询能力和局部退出，不再提供新添加入口。不是API Key，也不是OAuth。查询 `platform.deepseek.com/api/v0/users/get_user_summary` 与 `api/v0/usage/by_api_key/cost`，显示账户余额及北京时间包含今天的7个自然日消费。属于私有网页接口，可能变化或拒绝请求；不冒充浏览器，不自动登录或续期，Token失效需手动更新。
 - 多币种分别显示，绝不合计CNY／USD；没有币种归属的多币种消费保持未知。余额、消费失败保留原数据和采集时间并显示错误，不显示DeepSeek缓存标记，缺失不当作零。
 - **没有已核实可用的DeepSeek订阅查询接口**，不显示虚构套餐、到期或订阅百分比。近7日消费不是Token数，不替代今日／本月全站六列统计。
 - 参考 [SylvanRoe/Scripting · DashBoard-Kit](https://github.com/SylvanRoe/Scripting/tree/9eadd3070c9385df8828928ad7eae77316eb8507/DashBoard-Kit) 的endpoint、字段与主余额／次明细思路，独立实现；不自动读取其他脚本或共享目录的密钥，不复制其源代码／素材。
 
 DeepSeek品牌图标使用[官方文档站品牌资源](https://api-docs.deepseek.com/img/logo-mark-light.svg)，内嵌离线显示，不在组件刷新时联网载图。
 
-主屏小中大在原账号格位显示账户余额和明细／7日消费、采集时刻与错误；锁屏矩形显示余额明细，圆形／单行显示余额，不绘制额度百分比。多币种或长金额可能受系统格位限制缩小／截断，完整字段在App查看。
+主屏小中大在原账号格位显示账户余额和明细／7日消费及错误，不在余额下方显示采集时刻；全组件底栏刷新时间保留，完整采集时效可在App查看。锁屏矩形显示余额明细，圆形／单行显示余额，不绘制额度百分比。多币种或长金额可能受系统格位限制缩小／截断，完整字段在App查看。
 
 #### 官方账号管理
 

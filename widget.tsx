@@ -163,10 +163,11 @@ function BalanceRows({ acc, font = 9 }: { acc: Account; font?: number }) {
   const b = acc.balance
   const main = b?.money.map(m => `账户余额 ${m.currency} ${m.total ?? "未提供"}`).join(" · ") || "余额未提供"
   const detail = b?.money.map(m => b.auth === "网页Token" ? `${m.currency} 7日 ${m.weekCost ?? "未提供"}` : `${m.currency} 充值 ${m.toppedUp ?? "未提供"} 赠送 ${m.granted ?? "未提供"}`).join(" · ") || "明细未提供"
-  return <VStack alignment="leading" spacing={1}>
+  const status = `${b?.available === false ? "不可用" : b?.available == null ? "状态未提供" : ""}${b?.error ? " 读取失败/可重试" : ""}`.trim()
+  return <VStack alignment="leading" spacing={3}>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={2} minScaleFactor={0.65}>{main}</Text>
     <Text font={font} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{detail}</Text>
-    <Text font={font - 1} foregroundStyle={b?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.65}>{`${b?.fetchedAt == null ? "未采集" : fmtTime(b.fetchedAt)}${b?.available === false ? " 不可用" : b?.available === null ? " 状态未提供" : ""}${b?.error ? " 读取失败/可重试" : ""}`}</Text>
+    {status ? <Text font={font - 1} foregroundStyle={b?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.65}>{status}</Text> : null}
   </VStack>
 }
 
