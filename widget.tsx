@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -161,8 +161,8 @@ export function isQuotaExhausted(acc: Account): boolean {
 // DeepSeek balances are money, never rolling quota percentages or fabricated subscription limits.
 function BalanceRows({ acc, font = 9 }: { acc: Account; font?: number }) {
   const b = acc.balance
-  const main = b?.money.map(m => `账户余额 ${m.currency} ${m.total ?? "未提供"}`).join(" · ") || "余额未提供"
-  const detail = b?.money.map(m => b.auth === "网页Token" ? `${m.currency} 7日 ${m.weekCost ?? "未提供"}` : `${m.currency} 充值 ${m.toppedUp ?? "未提供"} 赠送 ${m.granted ?? "未提供"}`).join(" · ") || "明细未提供"
+  const main = b?.money.map(m => `账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`).join(" · ") || "余额未提供"
+  const detail = b?.money.map(m => b.auth === "网页Token" ? `7日 ${fmtDeepSeekMoney(m.currency, m.weekCost)}` : `充值 ${fmtDeepSeekMoney(m.currency, m.toppedUp)} 赠送 ${fmtDeepSeekMoney(m.currency, m.granted)}`).join(" · ") || "明细未提供"
   const status = `${b?.available === false ? "不可用" : b?.available == null ? "状态未提供" : ""}${b?.error ? " 读取失败/可重试" : ""}`.trim()
   return <VStack alignment="leading" spacing={3}>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={2} minScaleFactor={0.65}>{main}</Text>
@@ -501,7 +501,7 @@ function AccessoryRectangular({ acc }: { acc: Account }) {
   </VStack>
 }
 function AccessoryCircular({ acc }: { acc: Account }) {
-  if (acc.provider === "deepseek") return <VStack spacing={1}><Text font={9}>DeepSeek</Text><Text font={11} monospacedDigit lineLimit={3} minScaleFactor={0.6}>{acc.balance?.money.map(m => `账户余额 ${m.currency} ${m.total ?? "--"}`).join(" · ") || "未提供"}</Text><Text font={7}>{acc.balance?.error ? "读取失败" : acc.balance?.available === false ? "不可用" : "余额"}</Text></VStack>
+  if (acc.provider === "deepseek") return <VStack spacing={1}><Text font={9}>DeepSeek</Text><Text font={11} monospacedDigit lineLimit={3} minScaleFactor={0.6}>{acc.balance?.money.map(m => `账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`).join(" · ") || "未提供"}</Text><Text font={7}>{acc.balance?.error ? "读取失败" : acc.balance?.available === false ? "不可用" : "余额"}</Text></VStack>
   // One primary value: the 5 h window remaining percentage.
   const v = acc.fiveHour.remainingPercent
   return <Gauge value={v == null ? 0 : Math.max(0, Math.min(100, v)) / 100} min={0} max={1}
@@ -510,7 +510,7 @@ function AccessoryCircular({ acc }: { acc: Account }) {
     currentValueLabel={<Text font={12} fontWeight="semibold" monospacedDigit>{fmtPct(v)}</Text>} />
 }
 function AccessoryInline({ acc }: { acc: Account }) {
-  if (acc.provider === "deepseek") return <Text lineLimit={1}>{`DeepSeek ${acc.balance?.money.map(m => `账户余额 ${m.currency} ${m.total ?? "未提供"}`).join(" · ") || "余额未提供"}${acc.balance?.available === false ? " 不可用" : ""}${acc.balance?.error ? " 读取失败" : ""}`}</Text>
+  if (acc.provider === "deepseek") return <Text lineLimit={1}>{`DeepSeek ${acc.balance?.money.map(m => `账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`).join(" · ") || "余额未提供"}${acc.balance?.available === false ? " 不可用" : ""}${acc.balance?.error ? " 读取失败" : ""}`}</Text>
   return <Text lineLimit={1} foregroundStyle={isQuotaExhausted(acc) ? SUB : undefined}>{`${providerName(acc.provider)} 5h ${fmtPct(acc.fiveHour.remainingPercent)} · 周 ${fmtPct(acc.sevenDay.remainingPercent)}`}</Text>
 }
 function AccessoryRoot({ data, error, family }: { data: UsageData | null; error: string | null; family: string }) {

@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.10.2"
+export const VERSION = "1.10.3"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -1256,10 +1256,21 @@ function dsSum(values: string[]): string {
   const sign = total < 0n ? "-" : "", digits = (total < 0n ? -total : total).toString().padStart(scale + 1, "0")
   return sign + (scale ? digits.slice(0, -scale) + "." + digits.slice(-scale) : digits)
 }
+// Display only: exact decimal rounding to two places for CNY, without mutating stored money.
+export function fmtDeepSeekMoney(currency: string, value: string | null): string {
+  const label = currency === "CNY" ? "¥" : currency
+  if (value == null || !/^-?\d+(?:\.\d+)?$/.test(value)) return `${label} 未提供`
+  if (currency !== "CNY") return `${label} ${value}`
+  const negative = value.startsWith("-"), [whole, fraction = ""] = value.replace(/^-/, "").split(".")
+  let cents = BigInt(whole) * 100n + BigInt((fraction + "00").slice(0, 2))
+  if ((fraction[2] || "0") >= "5") cents += 1n
+  const digits = cents.toString().padStart(3, "0")
+  return `${label} ${negative && cents !== 0n ? "-" : ""}${digits.slice(0, -2)}.${digits.slice(-2)}`
+}
 export function deepSeekSummary(a: Account): string {
   const b = a.balance
   if (!b) return "余额未提供"
-  return `${b.auth} · ${b.money.map(m => `账户余额 ${m.currency} ${m.total ?? "未提供"} · 充值 ${m.toppedUp ?? "未提供"} · 赠送 ${m.granted ?? "未提供"}${b.auth === "网页Token" ? ` · 近7日消费 ${m.weekCost ?? "未提供"}` : ""}`).join("；") || "余额未提供"} · ${b.weekFetchedAt ? `7日采集 ${new Date(b.weekFetchedAt).toISOString()}` : ""} · ${b.available === null ? "可用状态未提供" : b.available ? "可用" : "不可用"} · ${b.fetchedAt == null ? "未采集" : `采集 ${new Date(b.fetchedAt).toISOString()}`}${b.error ? ` · ${b.error}` : ""}`
+  return `${b.auth} · ${b.money.map(m => `账户余额 ${fmtDeepSeekMoney(m.currency, m.total)} · 充值 ${fmtDeepSeekMoney(m.currency, m.toppedUp)} 赠送 ${fmtDeepSeekMoney(m.currency, m.granted)}${b.auth === "网页Token" ? ` · 近7日消费 ${fmtDeepSeekMoney(m.currency, m.weekCost)}` : ""}`).join("；") || "余额未提供"} · ${b.weekFetchedAt ? `7日采集 ${new Date(b.weekFetchedAt).toISOString()}` : ""} · ${b.available === null ? "可用状态未提供" : b.available ? "可用" : "不可用"} · ${b.fetchedAt == null ? "未采集" : `采集 ${new Date(b.fetchedAt).toISOString()}`}${b.error ? ` · ${b.error}` : ""}`
 }
 function dsAccount(id: string, name: string, balance: DeepSeekBalance, enabled = true): Account {
   return { id, name, provider: "deepseek", enabled, available: balance.available !== false, balance,

@@ -694,7 +694,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.2')
+  assert.equal(api.VERSION,'1.10.3')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1228,13 +1228,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.2')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.3')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.2');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.3');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1462,7 +1462,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.10.2'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.10.3'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1769,7 +1769,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.2')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.3')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1779,7 +1779,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.2 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.3 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2297,7 +2297,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.2');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.3');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2496,6 +2496,11 @@ async function main() {
     const a=first.data.accounts.find(a=>a.id===apiID),w=first.data.accounts.find(a=>a.id===webID)
     assert.equal(a.balance.money[0].total,'0.00');assert.equal(a.balance.available,false);assert.equal(a.balance.money[1].total,'9007199254740993.123456')
     assert.equal(w.balance.money[0].total,'0.30001');assert.equal(w.balance.money[0].weekCost,'0.3');assert.equal(w.balance.money[1].weekCost,'0.00');assert.equal(w.balance.available,null)
+    for(const [currency,value,expected]of [['CNY','7.88','¥ 7.88'],['CNY','0','¥ 0.00'],['CNY','7.8','¥ 7.80'],['CNY',null,'¥ 未提供'],['CNY','0.005','¥ 0.01'],['CNY','9007199254740993.125','¥ 9007199254740993.13'],['USD','7.8','USD 7.8'],['EUR','0','EUR 0'],['USD',null,'USD 未提供']])assert.equal(api.fmtDeepSeekMoney(currency,value),expected)
+    const displayAccount={...a,balance:{...a.balance,money:[{currency:'CNY',total:'7.88',toppedUp:'7.88',granted:'0',weekCost:'7.8'}]}}
+    const displayText=expand(load('widget.tsx').BalanceRows({acc:displayAccount})).filter(x=>typeof x==='string')
+    assert.ok(displayText.includes('账户余额 ¥ 7.88'));assert.ok(displayText.includes('充值 ¥ 7.88 赠送 ¥ 0.00'));assert.ok(api.deepSeekSummary(displayAccount).includes('充值 ¥ 7.88 赠送 ¥ 0.00'))
+    const webDisplay={...displayAccount,balance:{...displayAccount.balance,auth:'网页Token'}};assert.ok(expand(load('widget.tsx').BalanceRows({acc:webDisplay})).includes('7日 ¥ 7.80'));assert.ok(api.deepSeekSummary(webDisplay).includes('近7日消费 ¥ 7.80'));assert.equal(displayAccount.balance.money[0].granted,'0')
     const rowsComponent=load('widget.tsx').BalanceRows
     const healthyRows=rowsComponent({acc:{...a,balance:{...a.balance,available:true}}});assert.equal(healthyRows.props.spacing,3);assert.equal(expand(healthyRows).filter(n=>n?.type==='Text').length,2)
     const failedRows=expand(rowsComponent({acc:{...a,balance:{...a.balance,error:'failed'}}}));const rowsText=failedRows.filter(x=>typeof x==='string').join(' ');assert.ok(rowsText.includes('不可用')&&rowsText.includes('读取失败/可重试'));assert.ok(!rowsText.includes(api.fmtTime(a.balance.fetchedAt)));assert.ok(!rowsText.includes('未采集'))
@@ -2508,7 +2513,7 @@ async function main() {
     }
     scripting.Widget.family=savedFamily;scripting.Widget.parameter=savedParam
     const cachedSummary=api.deepSeekSummary({...w,balance:{...w.balance,stale:true,weekStale:true,error:'读取失败，可重试'}})
-    assert.ok(cachedSummary.includes('账户余额 CNY 0.30001'));assert.ok(cachedSummary.includes('充值')&&cachedSummary.includes('赠送'));assert.ok(!cachedSummary.includes('缓存'));assert.ok(cachedSummary.includes('采集')&&cachedSummary.includes('读取失败'))
+    assert.ok(cachedSummary.includes('账户余额 ¥ 0.30'));assert.ok(cachedSummary.includes('充值')&&cachedSummary.includes('赠送'));assert.ok(!cachedSummary.includes('缓存'));assert.ok(cachedSummary.includes('采集')&&cachedSummary.includes('读取失败'))
     assert.equal(w.fiveHour.remainingPercent,null);assert.equal(w.sevenDay.remainingPercent,null);assert.equal(w.resetCredits,null)
     assert.ok(!JSON.stringify([...storage]).includes('DS-SYNTHETIC'));assert.ok(!JSON.stringify(first).includes('DS-SYNTHETIC'))
     malformedAPI=true;ambiguousCost=true;const unknown=await api.loadUsage();assert.equal(unknown.data.accounts.find(a=>a.id===apiID).balance.stale,true);assert.equal(unknown.data.accounts.find(a=>a.id===apiID).balance.money[0].total,'0.00');assert.equal(unknown.data.accounts.find(a=>a.id===webID).balance.weekStale,true);assert.equal(unknown.data.accounts.find(a=>a.id===webID).balance.money[0].weekCost,'0.3');assert.ok(unknown.data.accounts.find(a=>a.id===webID).balance.error);malformedAPI=false;ambiguousCost=false
@@ -2529,8 +2534,8 @@ async function main() {
     assert.equal(api.widgetAccounts(mixed.accounts,'2,1,3')[0].id,apiID)
     for(const family of ['systemSmall','systemMedium','systemLarge','accessoryRectangular','accessoryCircular','accessoryInline']){
       scripting.Widget.family=family;scripting.Widget.parameter='';const nodes=expand(Root({data:{...first.data,accounts:[a]},stale:false,error:null})),text=nodes.filter(x=>typeof x==='string').join(' ')
-      assert.ok(text.includes('账户余额 CNY 0.00')&&text.includes('账户余额 USD 9007199254740993.123456'),family+' labelled separate currencies');
-      if(['systemSmall','systemMedium','systemLarge','accessoryRectangular'].includes(family)){assert.ok(text.includes('充值 0.00')&&text.includes('赠送 0.00'),family+' full detail labels');const brand=nodes.find(n=>n?.type==='SVG'&&typeof n.props.code==='string'&&n.props.code.includes('aria-label="DeepSeek"'));assert.ok(brand,family+' official embedded brand mark');assert.equal(brand.props.frame.width,brand.props.frame.height);assert.ok(brand.props.code.includes('M26.5174 3.39471'))}
+      assert.ok(text.includes('账户余额 ¥ 0.00')&&text.includes('账户余额 USD 9007199254740993.123456'),family+' labelled separate currencies');
+      if(['systemSmall','systemMedium','systemLarge','accessoryRectangular'].includes(family)){assert.ok(text.includes('充值 ¥ 0.00 赠送 ¥ 0.00'),family+' full detail labels');const brand=nodes.find(n=>n?.type==='SVG'&&typeof n.props.code==='string'&&n.props.code.includes('aria-label="DeepSeek"'));assert.ok(brand,family+' official embedded brand mark');assert.equal(brand.props.frame.width,brand.props.frame.height);assert.ok(brand.props.code.includes('M26.5174 3.39471'))}
       const cachedAccount={...a,balance:{...a.balance,stale:true,weekStale:true}}
       assert.equal(expand(Root({data:{...first.data,accounts:[cachedAccount]},stale:false,error:null})).filter(x=>typeof x==='string').join(' '),text,family+' no visible DeepSeek cache marker; flags retained')
       assert.equal(cachedAccount.balance.stale,true);assert.ok(!text.includes('5 h')&&!text.includes('5h')&&!text.includes('RE:'),family+' no fabricated quota')
