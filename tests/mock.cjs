@@ -23,9 +23,9 @@ function load(name) {
   if (modules[name]) return modules[name].exports
   const m = modules[name] = {exports:{}}
   let code = fs.readFileSync(name === 'renewal-fresh-api.ts' ? path.join(root,'api.ts') : name === 'background-baseline-api.ts' ? path.join(path.dirname(process.env.BACKGROUND_BASELINE_PATH),'api.ts') : name === 'background-baseline.tsx' ? process.env.BACKGROUND_BASELINE_PATH : name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'pre-accessory-widget.tsx' ? process.env.PRE_ACCESSORY_WIDGET_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
-  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout, BalanceRows, run as runWidget }')
+  if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { ProviderIcon, Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout, BalanceRows, run as runWidget }')
   if (name === 'background-baseline.tsx' || name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx' || name === 'pre-accessory-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
-  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterBrowser, presentIsolatedAuthorization, run as runApp }')
+  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterBrowser, presentIsolatedAuthorization, AccountLine, run as runApp }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
   const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : name === 'background-baseline.tsx' && n === './api' ? load('background-baseline-api.ts') : load(n.replace('./','') + (fs.existsSync(path.join(root,n.replace('./','')+'.tsx'))?'.tsx':'.ts'))
@@ -143,6 +143,12 @@ async function main() {
   const {Root,PeriodStats,statsWidthBudget,largeSegmentLayout,SegBar,Lcd,smallRegionLayout,AccountTitle,mediumTwoLayout,mediumThreeStatsLayout}=load('widget.tsx')
   scripting.Widget.displaySize={width:358,height:376}
   let normalizeLargeBar=false
+  // Settings account line: HStack[Text '1.', SVG icon, Text name]; returns index text, icon identity and name.
+  const iconKey=code=>JSON.stringify(code)
+  const ICONS={codex:iconKey(api.OPENAI_SVG),claude:iconKey(api.CLAUDE_SVG),deepseek:iconKey(api.DEEPSEEK_SVG)}
+  const lineOf=h=>({n:h.props.children[0].props.children,icon:Object.keys(ICONS).find(k=>ICONS[k]===iconKey(h.props.children[1].props.code))||'?',frame:h.props.children[1].props.frame,resizable:h.props.children[1].props.resizable,name:h.props.children[2].props.children})
+  const isLine=n=>n?.type==='HStack'&&Array.isArray(n.props.children)&&n.props.children.map(c=>c?.type).join()==='Text,SVG,Text'
+  const linesIn=tree=>tree.filter(isLine).map(lineOf)
   let skipAccountTitles=false
   let proposedStatsWidth=null
   function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function'&&skipAccountTitles&&n.type.name==='AccountTitle')return [];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame?.height===5?330:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame?.height??134}}))];return [n,...expand(n.props?.children)] }
@@ -630,12 +636,10 @@ async function main() {
   assert.ok(!ui.some(x=>x.type==='Toggle'))
   assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='目前账号'))
   assert.ok(!ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='小组件账号（最多4个）'))
-  assert.ok(ui.some(x=>typeof x==='string'&&x==='1. Codex · 匿名0'))
+  assert.deepEqual(linesIn(ui).slice(0,2).map(l=>[l.n,l.icon,l.name]),[['1.','codex','匿名0'],['2.','codex','匿名1']]);assert.ok(!ui.some(x=>typeof x==='string'&&/^\d+\. Codex/.test(x)),'text brand label replaced by icon')
   assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('已停用')))
-  const appDisabled=ui.find(x=>x.type==='Text'&&x.props.children==='1. Codex · 匿名0')
-  assert.equal(appDisabled.props.foregroundStyle,undefined)
-  const appEnabled=ui.find(x=>x.type==='Text'&&x.props.children==='2. Codex · 匿名1')
-  assert.equal(appEnabled.props.foregroundStyle,undefined)
+  assert.ok(linesIn(ui).every(l=>l.frame.width===17&&l.frame.height===17&&l.resizable===true),'icon 17pt resizable')
+  assert.ok(ui.filter(isLine).every(h=>h.props.children.every(c=>c.props.foregroundStyle===undefined)),'account line colors unchanged')
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
   // Read-only Form list + NavigationLink to a separate ScrollView page using ReorderableForEach (no List/Form drag).
   const indexSource=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -672,7 +676,7 @@ async function main() {
   move([0],2) // down
   assert.deepEqual(ids(),['p1','p2','p0','p3']);assert.deepEqual(Array.from(reorder.props.data,a=>a.id),ids())
   assert.equal(reorder.props.builder(reorder.props.data[2],2).props.children.props.children,'3. Codex · 匿名0')
-  assert.ok(render().some(x=>typeof x==='string'&&x==='3. Codex · 匿名0')) // Form summary updated via onSaved
+  assert.ok(linesIn(render()).some(l=>l.n==='3.'&&l.icon==='codex'&&l.name==='匿名0')) // Form summary updated via onSaved
   assert.deepEqual(Array.from(api.widgetAccounts(accounts),a=>a.id),['p1','p2','p0','p3'])
   assert.deepEqual(Array.from(api.widgetAccounts(accounts,'3,1'),a=>a.id),['p0','p1'])
   move([3],0) // up
@@ -692,13 +696,13 @@ async function main() {
   const statusUI=render()
   for(let i=0;i<statusAccounts.length;i++){
     const a=statusAccounts[i]
-    const appRow=statusUI.find(x=>x.type==='Text'&&x.props.children===`${i+1}. ${a.provider==='claude'?'Claude':'Codex'} · ${a.name}`)
+    const appRow=statusUI.filter(isLine).find(h=>{const l=lineOf(h);return l.n===`${i+1}.`&&l.icon===(a.provider==='claude'?'claude':'codex')&&l.name===a.name})
     assert.ok(appRow)
-    assert.equal(appRow.props.foregroundStyle,undefined) // App never inherits widget disabled foreground
+    assert.ok(appRow.props.children.every(c=>c.props.foregroundStyle===undefined)) // App never inherits widget disabled foreground
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.25')
+  assert.equal(api.VERSION,'1.10.26')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -803,7 +807,7 @@ async function main() {
     api.saveWidgetName(nested.id,'','official')
   }
   states.length=0;let emailUI=render()
-  assert.ok(emailUI.some(x=>x.type==='Text'&&typeof x.props.children==='string'&&/^\d+\. /.test(x.props.children)&&x.props.children.endsWith('Codex nested@example.test')))
+  assert.ok(emailUI.some(x=>isLine(x)&&lineOf(x).icon==='codex'&&lineOf(x).name==='nested@example.test'))
   assert.ok(!emailUI.some(x=>x.type==='Section'&&x.props.header?.props.children==='目前账号'))
   assert.ok(!emailUI.some(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage'),'native sort replaces official sub-page')
   const nativeOrder=emailUI.find(x=>x.type==='ForEach');assert.ok(nativeOrder);assert.equal(typeof nativeOrder.props.onMove,'function')
@@ -1240,13 +1244,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.25')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.26')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.25');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.26');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1336,7 +1340,7 @@ async function main() {
     const resets=tree.filter(x=>x.type==='Text'&&String(x.props.children).startsWith('RE:'));assert.equal(resets.length,1) // only Codex, never Claude
   }
   states.length=0;authUI=render();await manualRefresh(authUI)
-  assert.ok(render().some(x=>typeof x==='string'&&/^\d+\. Claude claude-b@example.test$/.test(x)))
+  assert.ok(render().some(x=>isLine(x)&&lineOf(x).icon==='claude'&&lineOf(x).name==='claude-b@example.test'))
   claudeUsageFailure=true;combined=await api.loadUsage();assert.equal(combined.stale,true);assert.equal(combined.data.accounts.length,5);assert.equal(combined.data.statistics.stale,false);claudeUsageFailure=false
   // Local provider-scoped exits preserve Codex, other Claude accounts, Parrot cache and unrelated aliases.
   const parrotCacheSnapshot=JSON.stringify(storage.get('ai_usage_cache_v1')),codexBeforeLogout=kc.get('ai_usage_official_oauth_v1')
@@ -1362,8 +1366,8 @@ async function main() {
   const autoBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
   assert.equal(instances.at(-1).options.ephemeral,true);assert.equal(instances.at(-1).urls[0],uiD.url)
   uiServer.handlers['/callback'](callback(uiD.state));await autoBrowser
-  for(let i=0;i<50&&!render().some(x=>x.type==='Text'&&typeof x.props.children==='string'&&/^\d+\. /.test(x.props.children)&&x.props.children.endsWith('Claude ui-auto@example.test'));i++)await Promise.resolve()
-  assert.ok(render().some(x=>x.type==='Text'&&typeof x.props.children==='string'&&/^\d+\. /.test(x.props.children)&&x.props.children.endsWith('Claude ui-auto@example.test')))
+  for(let i=0;i<50&&!render().some(x=>isLine(x)&&lineOf(x).icon==='claude'&&lineOf(x).name==='ui-auto@example.test');i++)await Promise.resolve()
+  assert.ok(render().some(x=>isLine(x)&&lineOf(x).icon==='claude'&&lineOf(x).name==='ui-auto@example.test'))
   for(let i=0;i<50&&!api.officialCached()?.accounts.some(a=>a.id==='claude:ui-claude-auto:org-a');i++)await Promise.resolve()
   assert.ok(api.officialCached().accounts.some(a=>a.id==='claude:ui-claude-auto:org-a'));assert.equal(instances.at(-1).disposed,1);assert.equal(uiServer.stops,1)
   assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'));assert.equal(claudeTimers.size,0)
@@ -1378,7 +1382,7 @@ async function main() {
   assert.equal(uiD.consumed,false);authUI=render()
   authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-ui-code#'+uiD.state)
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
-  assert.ok(render().some(x=>x.type==='Text'&&typeof x.props.children==='string'&&/^\d+\. /.test(x.props.children)&&x.props.children.endsWith('Claude ui-manual@example.test')));assert.equal(claudeTimers.size,0)
+  assert.ok(render().some(x=>isLine(x)&&lineOf(x).icon==='claude'&&lineOf(x).name==='ui-manual@example.test'));assert.equal(claudeTimers.size,0)
   assert.ok(!JSON.stringify(Array.from(storage.entries())).includes('mock-ui-code'))
   // UI cancel/source/settings dismissal during exchange: late response cannot persist account/code.
   for(const mode of ['cancel','source','dismiss','provider']){
@@ -1413,8 +1417,8 @@ async function main() {
   for(const a of listRecords){
     const row=exitRow(exitUI,a.id);assert.ok(row)
     const children=Array.from(row.props.children)
-    assert.deepEqual(children.map(x=>x.type),['NavigationLink','Spacer']);const text=children[0].props.children.props.children[0]
-    assert.equal(text.props.children,(api.sortAccounts(listRecords,'official').findIndex(r=>r.id===a.id)+1)+'. '+(a.provider==='claude'?'Claude':'Codex')+' '+(a.provider==='claude'?(a.email||'邮箱未提供'):a.name))
+    assert.deepEqual(children.map(x=>x.type),['NavigationLink','Spacer']);const lineHStack=expand(children[0]).find(isLine),l=lineOf(lineHStack),text=lineHStack.props.children[2]
+    assert.deepEqual([l.n,l.icon,l.name],[(api.sortAccounts(listRecords,'official').findIndex(r=>r.id===a.id)+1)+'.',a.provider==='claude'?'claude':'codex',a.provider==='claude'?(a.email||'邮箱未提供'):a.name])
     assert.equal(text.props.action,undefined);assert.equal(text.props.onTapGesture,undefined);assert.equal(row.props.action,undefined)
     assert.equal(text.props.lineLimit,undefined);assert.equal(text.props.fixedSize.horizontal,false);assert.equal(text.props.fixedSize.vertical,true)
     assert.equal(row.props.trailingSwipeActions.allowsFullSwipe,false);assert.equal(row.props.trailingSwipeActions.actions.length,1);const del=row.props.trailingSwipeActions.actions[0];assert.equal(del.props.title,'删除');assert.equal(del.props.role,'destructive');assert.equal(del.props.disabled,false);assert.equal(row.props.onTapGesture,undefined)
@@ -1423,7 +1427,7 @@ async function main() {
   // Long complete email stays in the label; wrapping is allowed and never squeezes away button text.
   const longEmail='very-long-account-'.repeat(12)+'@example.test',longRows=JSON.parse(kc.get('ai_usage_official_oauth_v1'))
   longRows[0].email=longEmail;kc.set('ai_usage_official_oauth_v1',JSON.stringify(longRows));states.length=0
-  exitUI=render();assert.equal(exitRow(exitUI,legacyCodex.id).props.children[0].props.children.props.children[0].props.children,(api.sortAccounts(api.officialAccounts(),'official').findIndex(r=>r.id===legacyCodex.id)+1)+'. Codex '+longEmail)
+  exitUI=render();assert.deepEqual((()=>{const l=lineOf(expand(exitRow(exitUI,legacyCodex.id)).find(isLine));return [l.n,l.icon,l.name]})(),[(api.sortAccounts(api.officialAccounts(),'official').findIndex(r=>r.id===legacyCodex.id)+1)+'.','codex',longEmail])
   // Identical disabling rules during either login flow, plus a held busy refresh.
   handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'row-disable-device',usercode:'MOCK-ROW',interval:'5'}):u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();exitUI=render()
@@ -1666,7 +1670,7 @@ async function main() {
   assert.ok(render().includes('正在读取Claude账号资料'));assert.equal(stageServer.stops,0)
   const releaseProfileStage=releaseClaudeRequest;releaseClaudeRequest=null;holdProfile=false;releaseProfileStage()
   for(let i=0;i<100;i++)await Promise.resolve()
-  assert.ok(render().some(x=>typeof x==='string'&&/^\d+\. Claude stage-auto@example.test$/.test(x)));assert.ok(api.officialAccounts().some(a=>a.email==='stage-auto@example.test'))
+  assert.ok(render().some(x=>isLine(x)&&lineOf(x).icon==='claude'&&lineOf(x).name==='stage-auto@example.test'));assert.ok(api.officialAccounts().some(a=>a.email==='stage-auto@example.test'))
   assert.equal(stageServer.stops,1);assert.equal(claudeTimers.size,0)
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
   assert.equal(lastExchange.redirect_uri,stageAttempt.redirect)
@@ -1782,7 +1786,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.25')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.26')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1792,7 +1796,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.25 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.26 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1814,13 +1818,13 @@ async function main() {
       await completingBrowser
     }
     for(let i=0;i<100;i++)await Promise.resolve()
-    authUI=render();const expectedLabel=(api.sortAccounts(api.officialAccounts(),'official').findIndex(r=>r.id===targetID)+1)+'. Claude '+claudeEmail
-    assert.equal(authUI.filter(x=>x.type==='Text'&&x.props.children===expectedLabel).length,1)
+    authUI=render();const expectedLabel=[(api.sortAccounts(api.officialAccounts(),'official').findIndex(r=>r.id===targetID)+1)+'.','claude',claudeEmail]
+    assert.equal(authUI.filter(isLine).map(lineOf).filter(l=>l.icon===expectedLabel[1]&&l.n===expectedLabel[0]&&l.name===expectedLabel[2]).length,1)
     assert.equal(authUI.filter(x=>x.type==='HStack'&&x.key===targetID).length,1)
     assert.ok(!authUI.some(x=>x.type==='Text'&&typeof x.props.children==='string'&&x.props.children.includes('已保存')))
     const completedRow=authUI.find(x=>x.type==='HStack'&&x.key===targetID),rowChildren=completedRow.props.children
     assert.deepEqual(Array.from(rowChildren).map(x=>x.type),['NavigationLink','Spacer'])
-    assert.equal(rowChildren[0].props.children.props.children[0].props.children,expectedLabel);assert.equal(completedRow.props.trailingSwipeActions.actions[0].props.title,'删除');assert.equal(completedRow.props.trailingSwipeActions.actions[0].props.disabled,false)
+    assert.deepEqual((l=>[l.n,l.icon,l.name])(lineOf(expand(completedRow).find(isLine))),expectedLabel);assert.equal(completedRow.props.trailingSwipeActions.actions[0].props.title,'删除');assert.equal(completedRow.props.trailingSwipeActions.actions[0].props.disabled,false)
     assert.equal(api.officialAccounts().at(-1).id,lastCompletion.id);assert.equal(kc.get('ai_usage_official_oauth_v1'),otherCredKey)
     const remainingIDs=api.officialAccounts().filter(a=>a.id!==targetID).map(a=>a.id)
     await completedRow.props.trailingSwipeActions.actions[0].props.action()
@@ -1837,8 +1841,8 @@ async function main() {
     }else claudeServers.at(-1).handlers['/callback'](callback(uiAttempt().state))
     for(let i=0;i<100;i++)await Promise.resolve()
     authUI=render();const missingRow=authUI.find(x=>x.type==='HStack'&&x.key===targetID)
-    assert.ok(missingRow);assert.equal(missingRow.props.children[0].props.children.props.children[0].props.children,(api.sortAccounts(api.officialAccounts(),'official').findIndex(r=>r.id===targetID)+1)+'. Claude 邮箱未提供')
-    assert.equal(authUI.filter(x=>x.type==='Text'&&typeof x.props.children==='string'&&/^\d+\. /.test(x.props.children)&&x.props.children.endsWith('Claude 邮箱未提供')).length,1)
+    assert.ok(missingRow);assert.deepEqual((l=>[l.n,l.icon,l.name])(lineOf(expand(missingRow).find(isLine))),[(api.sortAccounts(api.officialAccounts(),'official').findIndex(r=>r.id===targetID)+1)+'.','claude','邮箱未提供'])
+    assert.equal(authUI.filter(isLine).map(lineOf).filter(l=>l.icon==='claude'&&l.name==='邮箱未提供').length,1)
     assert.equal(api.officialAccounts().find(a=>a.id===targetID).email,'')
     await missingRow.props.trailingSwipeActions.actions[0].props.action();assert.ok(!api.officialAccounts().some(a=>a.id===targetID))
   }
@@ -2318,7 +2322,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.25');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.26');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2720,8 +2724,8 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     const before=calls.length;let managementUI=render();assert.equal(calls.length,before);assert.equal(api.cachedAccounts().length,0)
     assert.ok(!managementUI.some(n=>n?.type==='Section'&&n.props.header?.props.children==='目前账号'))
     const rows=()=>render().filter(n=>n?.type==='HStack'&&n.props.trailingSwipeActions)
-    const ids=()=>Array.from(rows(),n=>n.key),labels=()=>rows().map(n=>n.props.children[0].props.children.props.children[0].props.children)
-    assert.deepEqual(ids(),[ds,'manage-codex','claude:manage:org']);assert.deepEqual(labels(),['1. DeepSeek Manage DeepSeek','2. Codex manage@codex.test','3. Claude manage@claude.test'])
+    const ids=()=>Array.from(rows(),n=>n.key),labels=()=>rows().map(n=>{const l=lineOf(expand(n).find(isLine));return l.n+' '+l.icon+' '+l.name})
+    assert.deepEqual(ids(),[ds,'manage-codex','claude:manage:org']);assert.deepEqual(labels(),['1. deepseek Manage DeepSeek','2. codex manage@codex.test','3. claude manage@claude.test'])
     // Native (exports present): header EditButton, single ForEach with onMove, no official sub-page entry; rows keep swipe/name link.
     const loginSec=()=>render().find(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号')
     assert.deepEqual(Array.from(loginSec().props.header.props.children.filter(Boolean),n=>n.type),['Text','Spacer','EditButton'])
@@ -2749,7 +2753,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
      const destination=orderLink.props.destination;obsStore=[];obsIndex=0;const orderTree=expand(destination.type(destination.props));assert.ok(orderTree.some(n=>n?.type==='ScrollView'))
      assert.deepEqual(Array.from(orderTree.find(n=>n?.type==='ReorderableForEach').props.data,n=>n.id),['claude:manage:org',ds,'manage-codex'])}
     states.length=0
-    assert.deepEqual(ids(),['claude:manage:org',ds,'manage-codex']);assert.deepEqual(storage.get('ai_usage_official_order_v1'),ids());assert.deepEqual(labels(),['1. Claude manage@claude.test','2. DeepSeek Manage DeepSeek','3. Codex manage@codex.test']);assert.equal(calls.length,before,'sorting metadata-only list is local')
+    assert.deepEqual(ids(),['claude:manage:org',ds,'manage-codex']);assert.deepEqual(storage.get('ai_usage_official_order_v1'),ids());assert.deepEqual(labels(),['1. claude manage@claude.test','2. deepseek Manage DeepSeek','3. codex manage@codex.test']);assert.equal(calls.length,before,'sorting metadata-only list is local')
     const nameDestination=rows()[0].props.children[0].props.destination;assert.equal(nameDestination.type.name,'WidgetNamePage');assert.equal(nameDestination.props.account.id,'claude:manage:org');assert.equal(nameDestination.props.account.fiveHour.usedPercent,null)
     const viewStates=states.slice();states.length=0;hook=0;let nameTree=expand(nameDestination.type(nameDestination.props));nameTree.find(n=>n?.type==='TextField'&&n.props.title==='小组件用户名').props.onChanged('Management Alias');hook=0;nameTree=expand(nameDestination.type(nameDestination.props));await nameTree.find(n=>n?.type==='Button'&&n.props.title==='保存').props.action();states.length=0;states.push(...viewStates)
     assert.equal(api.getWidgetName('claude:manage:org','official'),'Management Alias');assert.ok(render().includes('Management Alias'));assert.equal(calls.length,before)
@@ -2757,8 +2761,8 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     assert.deepEqual(Array.from(api.widgetAccounts(api.cachedAccounts(),'3,1'),n=>n.id),['manage-codex','claude:manage:org'])
     handler=async()=>resp(503,{})
     const deleting=rows()[1];assert.equal(deleting.key,ds);assert.equal(deleting.props.action,undefined);assert.equal(deleting.props.onTapGesture,undefined);await deleting.props.trailingSwipeActions.actions[0].props.action()
-    assert.deepEqual(ids(),['claude:manage:org','manage-codex']);assert.deepEqual(labels(),['1. Claude manage@claude.test','2. Codex manage@codex.test']);assert.equal(api.getWidgetName('claude:manage:org','official'),'Management Alias');assert.ok(!api.cachedAccounts().some(n=>n.id===ds))
-    const added=api.addDeepSeekAccount('New Manage','api','SYNTHETIC-MANAGE-NEW');states.length=0;assert.deepEqual(ids(),['claude:manage:org','manage-codex',added]);assert.ok(labels()[2].startsWith('3. DeepSeek'))
+    assert.deepEqual(ids(),['claude:manage:org','manage-codex']);assert.deepEqual(labels(),['1. claude manage@claude.test','2. codex manage@codex.test']);assert.equal(api.getWidgetName('claude:manage:org','official'),'Management Alias');assert.ok(!api.cachedAccounts().some(n=>n.id===ds))
+    const added=api.addDeepSeekAccount('New Manage','api','SYNTHETIC-MANAGE-NEW');states.length=0;assert.deepEqual(ids(),['claude:manage:org','manage-codex',added]);assert.ok(labels()[2].startsWith('3. deepseek'))
     for(const source of ['parrot','sub2api']){api.saveSource(source);states.length=0;assert.ok(render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='目前账号'));assert.ok(!render().some(n=>n?.type==='Section'&&(n.props.header?.props.children==='登录账号'||n.props.header?.props.children?.[0]?.props?.children==='登录账号')))}
     kc.clear();for(const[k,v]of previousKC)kc.set(k,v);storage.clear();for(const[k,v]of previousStore)storage.set(k,v);handler=previousHandler;states.length=0
     console.log('PASS: official only duplicate Section removed; sorted continuous three-provider labels; no-usage metadata supports existing name editor and header EditButton + same-page ForEach.onMove (exports present) and original long-press sub-page (exports missing); actual move persists+updates login list; aliases retained; widget sequence matches; reordered swipe deletes exact ID and renumbers; new IDs append; nonofficial module retained; local operations no network')
@@ -2779,6 +2783,29 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     states.length=0
     kc.clear();for(const[k,v]of oldKC)kc.set(k,v);storage.clear();for(const[k,v]of oldStore)storage.set(k,v);handler=oldHandler;states.length=0
     console.log('PASS: login provider row structure stable codex/claude/deepseek x idle/in-progress: left Button or placeholder Text + Spacer + right Picker, never Spacer+Picker only')
+  }
+  // Settings account icons: shared constants, codex->OpenAI, both lists, fallback, widget output identical to pre-change.
+  {
+    const {AccountLine}=load('index.tsx');assert.equal(typeof AccountLine,'function')
+    for(const [provider,icon] of [['codex','codex'],['openai','codex'],['claude','claude'],['deepseek','deepseek']]){
+      const h=expand(AccountLine({index:2,provider,name:'N-'+provider})).find(isLine);assert.ok(h,provider);const l=lineOf(h)
+      assert.deepEqual([l.n,l.icon,l.name],['3.',icon,'N-'+provider]);assert.deepEqual({...l.frame},{width:17,height:17});assert.equal(l.resizable,true)
+    }
+    assert.deepEqual(ICONS.codex,iconKey({light:api.iconSvg(api.OPENAI_PATH,'#1C1C1E'),dark:api.iconSvg(api.OPENAI_PATH,'#FFFFFF')}),'OpenAI light/dark pair')
+    assert.ok(typeof api.OPENAI_SVG.light==='string'&&typeof api.OPENAI_SVG.dark==='string'&&api.OPENAI_SVG.light!==api.OPENAI_SVG.dark)
+    const fb=expand(AccountLine({index:0,provider:'mystery',name:'X'}));assert.ok(fb.includes('1. Codex X')||fb.some(n=>typeof n==='string'&&n.startsWith('1. ')&&n.endsWith(' X')),'unknown provider falls back to text');assert.ok(!fb.some(n=>n?.type==='SVG'))
+    // Non-official list (Parrot/Sub2API) uses the same line.
+    const savedSource=api.getSource();for(const src of ['parrot','sub2api']){api.saveSource(src);states.length=0;storage.set(src==='parrot'?'ai_usage_cache_v1':'ai_usage_sub2api_quota_v1',{...data,accounts:[{...accounts[0],id:'ico-a',provider:'claude',name:'IcoA'},{...accounts[0],id:'ico-b',provider:'deepseek',name:'IcoB'},{...accounts[0],id:'ico-c',provider:'openai',name:'IcoC'}]});api.saveAccountOrder(['ico-a','ico-b','ico-c'],src)
+      const ui=render();assert.deepEqual(linesIn(ui).map(l=>[l.n,l.icon,l.name]),[['1.','claude','IcoA'],['2.','deepseek','IcoB'],['3.','codex','IcoC']].map(r=>r),src+' list')
+      assert.ok(!ui.some(x=>typeof x==='string'&&/^\d+\. (Claude|Codex|DeepSeek)/.test(x)))}
+    api.saveSource(savedSource)
+    // Widget ProviderIcon: identical SVG nodes to the pre-change source (muted and normal), via baseline module.
+    const baseWidget=(()=>{const code=fs.readFileSync('/tmp/ai-usage-11026-baseline/widget.tsx','utf8').replace(/\nrun\(\)\s*$/,'\nexport { ProviderIcon }');const out=ts.transpileModule(code,{fileName:'old-widget.tsx',compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}});const m={exports:{}};const req=n=>n==='scripting'?scripting:n==='scripting/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'Fragment'}:load(n.replace('./','')+(fs.existsSync(path.join(root,n.replace('./','')+'.tsx'))?'.tsx':'.ts'));vm.runInContext(`(function(require,module,exports){${out.outputText}\n})`,context)(req,m,m.exports);return m.exports})()
+    const {ProviderIcon:OldIcon}=baseWidget;load('widget.tsx')
+    // The new widget module's ProviderIcon is exercised through Root elsewhere; here compare directly through exported test hook.
+    const NewIcon=load('widget.tsx').ProviderIcon;assert.equal(typeof NewIcon,'function')
+    for(const provider of ['claude','openai','deepseek','mystery'])for(const muted of [false,true])assert.equal(JSON.stringify(NewIcon({provider,size:13,muted})),JSON.stringify(OldIcon({provider,size:13,muted})),'widget icon '+provider+' muted='+muted)
+    console.log('PASS: settings account line = number + shared brand SVG(17pt resizable) + name for codex(OpenAI light/dark)/claude/deepseek in official and Parrot/Sub2API lists; unknown provider falls back to text; widget ProviderIcon JSON output identical to pre-change for all providers x muted')
   }
   // Saved key display and actual editing are separate: never bind a saved full key or submit a mask.
   {

@@ -1,16 +1,33 @@
 import {
   Button, EditButton, ForEach, Form, Group, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
-  SecureField, Text, TextField, Widget, VStack, useState, useEffect,
+  SecureField, SVG, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.25"
+const VERSION = "1.10.26"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
+// Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
+const ICON_SIZE = 17
+function providerIconCode(provider: string) {
+  return provider === "claude" ? CLAUDE_SVG : provider === "deepseek" ? DEEPSEEK_SVG : provider === "codex" || provider === "openai" ? OPENAI_SVG : null
+}
+function providerWord(provider: string) { return provider === "deepseek" ? "DeepSeek" : provider === "claude" ? "Claude" : "Codex" }
+// "1. [icon] name"; unknown icon falls back to the original text label.
+function AccountLine({ index, provider, name, fixed = false }: { index: number; provider: string; name: string; fixed?: boolean }) {
+  const code = providerIconCode(provider)
+  const nameText = <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{name}</Text>
+  if (!code) return <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{`${index + 1}. ${providerWord(provider)} ${name}`}</Text>
+  return <HStack spacing={4}>
+    <Text>{`${index + 1}.`}</Text>
+    <SVG code={code} resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} />
+    {nameText}
+  </HStack>
+}
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -333,7 +350,7 @@ function SettingsView() {
         ] }}>
           <NavigationLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
             <VStack alignment="leading" spacing={3}>
-              <Text fixedSize={{ horizontal: false, vertical: true }}>{`${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
+              <AccountLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed />
               <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
             </VStack>
           </NavigationLink>
@@ -435,7 +452,7 @@ function SettingsView() {
         {accounts.map((a, i) => <NavigationLink key={a.id}
           destination={<WidgetNamePage account={a} source={source} onSaved={() => setAccounts(cachedAccounts())} />}>
           <VStack alignment="leading" spacing={3}>
-            <Text>{accountLabel(a, i)}</Text>
+            <AccountLine index={i} provider={a.provider} name={a.name} />
             <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, source) || "使用原名（点此设置）"}</Text>
           </VStack>
         </NavigationLink>)}
