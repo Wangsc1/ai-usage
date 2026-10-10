@@ -694,7 +694,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.16')
+  assert.equal(api.VERSION,'1.9.17')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1228,7 +1228,7 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.16')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.17')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
@@ -1462,7 +1462,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.16'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.17'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1769,7 +1769,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.16')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.17')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1779,7 +1779,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.16 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.17 UA+JSON Accept on initial exchange only; six JSON body fields unchanged; refresh headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2283,13 +2283,13 @@ async function main() {
   {
     const oldKC=[...kc.entries()],oldStore=[...storage.entries()],oldHandler=handler,oldNow=now,oldPresent=scripting.Widget.present,oldReload=scripting.Widget.reloadAll
     const cdKey='ai_usage_oauth_renewal_cooldown_v1'
-    let posted=[],usageCalls=0,mode='ok',retry=null,denyUsage=false,omit=false,releaseRenewal=null,hold=false,raced=null,presented=null
+    let posted=[],usageCalls=0,mode='ok',retry=null,denyUsage=false,omit=false,releaseRenewal=null,hold=false,raced=null,raceInJSON=null,presented=null
     scripting.Widget.present=(tree,options)=>{presented={tree,options}};scripting.Widget.reloadAll=async()=>{}
     const keyOf=p=>p==='Codex'?'ai_usage_official_oauth_v1':'ai_usage_claude_oauth_v1'
     const fixture=p=>p==='Codex'?{id:'renew-codex',accountId:'renew-a',subject:'renew-u',name:'renew',email:'renew@example.test',access:token('renew-a','renew-u'),refresh:'mock-refresh-old',expiresAt:now-1,unknownMetadata:{keep:true}}:{id:'claude:renew-a:renew-org',accountId:'renew-a',organizationId:'renew-org',email:'renew@example.test',access:'mock-claude-old',refresh:'mock-refresh-old',expiresAt:now-1,scope:'user:profile',unknownMetadata:{keep:true}}
     const prepare=p=>{
       kc.clear();storage.clear();api.saveSource('official');api.saveStatisticsSource('parrot')
-      kc.set(keyOf(p),JSON.stringify([fixture(p)]));posted=[];usageCalls=0;mode='ok';retry=null;denyUsage=false;omit=false;hold=false;raced=null
+      kc.set(keyOf(p),JSON.stringify([fixture(p)]));posted=[];usageCalls=0;mode='ok';retry=null;denyUsage=false;omit=false;hold=false;raced=null;raceInJSON=null
       const data={...singleData,accounts:[{...singleData.accounts[0],id:fixture(p).id,provider:p==='Codex'?'openai':'claude',name:'renew@example.test'}],fetchedAt:now-30000}
       storage.set('ai_usage_official_cache_v1',data)
     }
@@ -2301,7 +2301,7 @@ async function main() {
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
         if(raced){const rows=JSON.parse(kc.get(keyOf(p)));rows[0]={...rows[0],...raced};kc.set(keyOf(p),JSON.stringify(rows))}
         if(mode==='network')throw Error('SECRET-network-token')
-        if(mode!=='ok')return {status:Number(mode),headers:{get:n=>n==='Retry-After'?retry:null},json:async()=>({error:mode==='400'&&retry==='invalid-grant'?'invalid_grant':mode==='403'?'access_denied':'temporarily_unavailable',message:'SECRET-body'})}
+        if(mode!=='ok')return {status:Number(mode),headers:{get:n=>n==='Retry-After'?retry:null},json:async()=>{if(raceInJSON){const rows=JSON.parse(kc.get(keyOf(p)));rows[0]={...rows[0],...raceInJSON};kc.set(keyOf(p),JSON.stringify(rows))}return {error:mode==='400'&&retry==='invalid-grant'?'invalid_grant':mode==='403'?'access_denied':'temporarily_unavailable',message:'SECRET-body'}}}
         return resp(200,{access_token:p==='Codex'?token('renew-a','renew-u',now+7200000):'mock-claude-new',...(omit?{}:{refresh_token:'mock-refresh-rotated'}),expires_in:7200})
       }
       if(u.includes('/usage')||u.includes('/rate-limit-reset-credits')){
@@ -2344,6 +2344,28 @@ async function main() {
       // Changed credential during a response wins: never overwrite a newer login/rotation snapshot.
       prepare(provider);raced={access:provider==='Codex'?token('renew-a','renew-u',now+9000000):'mock-newer-access',refresh:'mock-newer-refresh',expiresAt:now+9000000}
       assert.equal((await load()).stale,false);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-newer-refresh')
+      // Race after HTTP response but during error-body parsing: recover instead of false invalid_grant.
+      prepare(provider);mode='400';retry='invalid-grant';raceInJSON={access:provider==='Codex'?token('renew-a','renew-u',now+9000000):'mock-other-process-access',refresh:'mock-other-process-refresh',expiresAt:now+9000000}
+      const recovered=await load();assert.equal(recovered.stale,false);assert.equal(posted.length,1);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-other-process-refresh')
+      // Expiry-only update between the initial account snapshot and renewal's reread must prevent an extra POST.
+      prepare(provider);const nativeGet=context.Keychain.get;let credentialReads=0
+      context.Keychain.get=k=>{if(k===keyOf(provider)&&++credentialReads===2){const rows=JSON.parse(kc.get(k));rows[0].expiresAt=now+3600000;kc.set(k,JSON.stringify(rows))}return nativeGet(k)}
+      assert.equal((await api.loadOfficialUsage()).stale,false);assert.equal(posted.length,0);context.Keychain.get=nativeGet
+      // Multiple independent module executions and every family reuse unexpired tokens with zero renewal POSTs.
+      prepare(provider);const future=fixture(provider);future.expiresAt=now+3600000;kc.set(keyOf(provider),JSON.stringify([future]))
+      for(let instance=0;instance<3;instance++){delete modules['renewal-fresh-api.ts'];assert.equal((await globalLoadFreshAPI().loadUsage()).stale,false)}
+      states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+      for(const family of ['systemSmall','systemMedium','systemLarge','accessoryRectangular']){const originalFamily=scripting.Widget.family;scripting.Widget.family=family;await modules['widget.tsx'].exports.runWidget();scripting.Widget.family=originalFamily}
+      await registeredIntents.get('RefreshUsageIntent').perform(undefined);assert.equal(posted.length,0)
+      // Distinct modules arriving after a successful renewal read the saved rotation, not the old refresh token.
+      prepare(provider);assert.equal((await load()).stale,false)
+      for(let instance=0;instance<3;instance++){delete modules['renewal-fresh-api.ts'];assert.equal((await globalLoadFreshAPI().loadUsage()).stale,false)}
+      assert.equal(posted.length,1)
+      // There is no atomic cross-process lock: two modules can post before either rotation is saved.
+      prepare(provider);const originalHandler=handler;let releaseBoth;const barrier=new Promise(resolve=>{releaseBoth=resolve})
+      handler=async(u,o)=>{if(u.endsWith('/oauth/token')||u.endsWith('/v1/oauth/token'))await barrier;return originalHandler(u,o)}
+      delete modules['renewal-fresh-api.ts'];const independent=globalLoadFreshAPI(),parallelA=api.loadOfficialUsage(),parallelB=independent.loadOfficialUsage()
+      await Promise.resolve();releaseBoth();await Promise.all([parallelA,parallelB]);assert.equal(posted.length,2);handler=originalHandler
       // App/widget/intent all call the same loader, and each automatically renews without authorization.
       for(const entry of ['App','Widget','Intent']){
         prepare(provider)
@@ -2355,7 +2377,7 @@ async function main() {
     }
     kc.clear();for(const [k,v] of oldKC)kc.set(k,v);storage.clear();for(const [k,v] of oldStore)storage.set(k,v)
     handler=oldHandler;now=oldNow;scripting.Widget.present=oldPresent;scripting.Widget.reloadAll=oldReload;states.length=0
-    console.log('PASS: Codex+Claude expiry/near/future/missing/null and 401 renew; rotation+omission+unknown metadata retained; 429 seconds/date/no-header &503 RetryAfter preserve cache/credentials, no requests during cooldown, next load retries; network/5xx/unclassified400/401/403 retain, only invalid_grant asks login; in-process dedup/newer-credential guard; App+Widget+Intent automatic renewal')
+    console.log('PASS: Codex+Claude expiry/near/future/missing/null and 401 renew; rotation+omission+unknown metadata retained; 429 seconds/date/no-header &503 RetryAfter preserve cache/credentials, no requests during cooldown, next load retries; network/5xx/unclassified400/401/403 retain, only invalid_grant asks login; in-process dedup/newer-credential guard; error-body race recovery/expiry-only reread; unexpired multi-module/family zero POST; simultaneous independent modules can POST twice (no atomic lock claim); App+Widget+Intent automatic renewal')
   }
   // One Chinese entry delegates to the native host, without unsupported filtering/theme options.
   {

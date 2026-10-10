@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.9.16"
+export const VERSION = "1.9.17"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -737,13 +737,13 @@ async function renewalFailure(provider: string, id: string, response: any): Prom
   return new Error(invalid ? `${provider}续期失败：登录已失效（invalid_grant），请重新添加该账号` : `${provider}续期失败（HTTP ${response.status}），尚不能确认登录失效；保留登录，下次刷新再尝试`)
 }
 const refreshing = new Map<string, Promise<Credential>>()
-async function refreshToken(item: Credential): Promise<Credential> {
+async function refreshToken(item: Credential, force = false): Promise<Credential> {
   const running = refreshing.get(item.id)
   if (running) return running
   const job = (async () => {
     const current = credentials().find(x => x.id === item.id)
     if (!current) throw new Error("该官方账号已退出")
-    if (current.access !== item.access || current.refresh !== item.refresh) return current
+    if (current.access !== item.access || current.refresh !== item.refresh || (!force && current.expiresAt !== item.expiresAt && !renewalDue(current.expiresAt))) return current
     const until = renewalDeadline("Codex", item.id)
     if (until) throw new Error(renewalWait("Codex", until))
     let r: any
@@ -752,7 +752,12 @@ async function refreshToken(item: Credential): Promise<Credential> {
     if (r.status !== 200) {
       const latest = credentials().find(x => x.id === item.id)
       if (latest && (latest.access !== current.access || latest.refresh !== current.refresh)) return latest
-      throw await renewalFailure("Codex", item.id, r)
+      const failure = await renewalFailure("Codex", item.id, r)
+      // Parsing the error body awaits I/O; another execution can rotate credentials meanwhile.
+      const recovered = credentials().find(x => x.id === item.id)
+      if (!recovered) throw new Error("该官方账号已退出")
+      if (!renewalDue(recovered.expiresAt) && (recovered.access !== current.access || recovered.refresh !== current.refresh || recovered.expiresAt !== current.expiresAt)) return recovered
+      throw failure
     }
     const next = credential(await json(r), current)
     const items = credentials(), latest = items.find(x => x.id === item.id)
@@ -791,7 +796,7 @@ async function fetchAccount(item: Credential, index: number): Promise<Account> {
   async function get(path: string) {
     const send = () => request(WHAM + path, { headers: { Authorization: `Bearer ${token.access}`, "ChatGPT-Account-ID": token.accountId, Accept: "application/json" } })
     let r = await send()
-    if (r.status === 401) { token = await refreshToken(token); r = await send() }
+    if (r.status === 401) { token = await refreshToken(token, true); r = await send() }
     return r
   }
   const r = await get("/usage")
@@ -1071,13 +1076,13 @@ export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive
   } finally { cancelClaudeLogin(d) }
 }
 const refreshing = new Map<string, Promise<Credential>>()
-async function refresh(item: Credential): Promise<Credential> {
+async function refresh(item: Credential, force = false): Promise<Credential> {
   const existing = refreshing.get(item.id)
   if (existing) return existing
   const job = (async () => {
     const current = credentials().find(a => a.id === item.id)
     if (!current) throw new Error("该Claude账号已退出")
-    if (current.access !== item.access || current.refresh !== item.refresh) return current
+    if (current.access !== item.access || current.refresh !== item.refresh || (!force && current.expiresAt !== item.expiresAt && !renewalDue(current.expiresAt))) return current
     const until = renewalDeadline("Claude", item.id)
     if (until) throw new Error(renewalWait("Claude", until))
     let r: any
@@ -1086,7 +1091,11 @@ async function refresh(item: Credential): Promise<Credential> {
     if (r.status !== 200) {
       const latest = credentials().find(a => a.id === item.id)
       if (latest && (latest.access !== current.access || latest.refresh !== current.refresh)) return latest
-      throw await renewalFailure("Claude", item.id, r)
+      const failure = await renewalFailure("Claude", item.id, r)
+      const recovered = credentials().find(a => a.id === item.id)
+      if (!recovered) throw new Error("该Claude账号已退出")
+      if (!renewalDue(recovered.expiresAt) && (recovered.access !== current.access || recovered.refresh !== current.refresh || recovered.expiresAt !== current.expiresAt)) return recovered
+      throw failure
     }
     const next = { ...current, ...tokenBody(await json(r), current) }, items = credentials(), latest = items.find(a => a.id === item.id)
     if (!latest) throw new Error("该Claude账号已退出")
@@ -1168,7 +1177,7 @@ async function loadClaudeAccount(item: Credential): Promise<Account> {
     const getUsage = () => request(API + "/usage", { headers: { Authorization: `Bearer ${current.access}`,
       "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
     let r = await getUsage()
-    if (r.status === 401) { current = await refresh(current); r = await getUsage() }
+    if (r.status === 401) { current = await refresh(current, true); r = await getUsage() }
     if (r.status === 429 || r.status === 403) {
       const until = remember429(USAGE_LIMIT, item.id, r)
       throw new Error(`Claude额度读取受限（HTTP ${r.status}，GET /api/oauth/usage），${waitText(until)}；不自动重试`)
