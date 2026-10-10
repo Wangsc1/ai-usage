@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.10.23"
+export const VERSION = "1.10.24"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -535,31 +535,10 @@ export function fmtReset(iso: string | null): string {
   return d > 0 ? `${d}d ${p(h)}:${p(m)}` : `${p(h)}:${p(m)}`
 }
 
-// 账号最紧张的剩余百分比（无数据视为 101，排在最后）
-export function tightest(acc: Account): number {
-  const v = [acc.fiveHour.remainingPercent, acc.sevenDay.remainingPercent].filter(x => x != null) as number[]
-  return v.length ? Math.min(...v) : 101
-}
-
 export function fmtTime(ts: number): string {
   const d = new Date(ts)
   const p = (x: number) => String(x).padStart(2, "0")
   return `${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
-export function providerLabel(p: string): string {
-  return p === "claude" ? "Claude" : p === "openai" ? "GPT" : p
-}
-
-export function familyLabel(f: string): string {
-  return f === "anthropic" ? "Claude" : f === "openai" ? "GPT" : f
-}
-
-export function quotaColor(remaining: number | null): string {
-  if (remaining == null) return "systemGray"
-  if (remaining <= 15) return "systemRed"
-  if (remaining <= 40) return "systemOrange"
-  return "systemGreen"
 }
 
 // OpenAI Codex public device-auth protocol. No Parrot credentials are accessed here.

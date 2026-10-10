@@ -1,5 +1,5 @@
 import {
-  Button, EditButton, ForEach, Form, Group, HStack, Spacer, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, EditButton, ForEach, Form, Group, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.23"
+const VERSION = "1.10.24"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -150,7 +150,6 @@ function SettingsView() {
   const [subUrl, setSubUrl] = useState(subCur.baseUrl ?? "")
   const [subKey, setSubKey] = useState("")
   const [subKeyEditing, setSubKeyEditing] = useState(false)
-  const [subTimezone, setSubTimezone] = useState(subCur.timezone)
   const [hasSubKey, setHasSubKey] = useState(!!subCur.adminKey)
   const cur = getConfig()
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
@@ -370,7 +369,7 @@ function SettingsView() {
         <TextField title="Sub2API地址" value={subUrl} onChanged={setSubUrl} prompt="https://你的部署地址" />
         <TextField title="Sub2API管理员密钥" value={subKeyEditing ? subKey : maskedKey(subKey || subCur.adminKey || "")} onFocus={() => { setSubKey(""); setSubKeyEditing(true) }} onBlur={() => setSubKeyEditing(false)} onChanged={value => { if (subKeyEditing && value !== maskedKey(subCur.adminKey || "")) setSubKey(value) }} prompt="Admin API Key" />
         <Button title="保存并测试" disabled={busy} action={async () => {
-          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subTimezone); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
+          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subCur.timezone); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
           catch { /* invalid configuration is not saved */ }
         }} />
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
