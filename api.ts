@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.10.10"
+export const VERSION = "1.10.11"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -611,6 +611,16 @@ function officialDisplay(item: Credential, index: number): string {
 export function officialAccounts(): { id: string; name: string; email: string; provider: "codex" | "claude" | "deepseek" }[] {
   // Legacy Codex records have no provider field; their dedicated credential collection identifies them.
   return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const })), ...claudeAccounts(), ...dsCredentials().map(a => ({ id: a.id, name: a.name, email: "", provider: "deepseek" as const }))]
+}
+// Local management includes authorized accounts even before their first usage collection.
+export function managementAccounts(): Account[] {
+  if (getSource() !== "official") return cachedAccounts()
+  const cached = new Map((officialCached()?.accounts ?? []).map(a => [a.id, a]))
+  return sortAccounts(officialAccounts().map(a => cached.get(a.id) ?? {
+    id: a.id, name: a.name, provider: a.provider, enabled: true, available: true,
+    fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null },
+    sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null,
+  }), "official")
 }
 export function officialCached(): UsageData | null {
   const cache = Storage.get<UsageData>(CACHE)

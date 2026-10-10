@@ -3,16 +3,16 @@ import {
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, UsageData, cachedAccounts, cachedUsage, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, UsageData, cachedAccounts, cachedUsage, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.10"
+const VERSION = "1.10.11"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
 function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (next: Account[]) => void }) {
-  const data = useObservable<Account[]>(() => cachedAccounts())
+  const data = useObservable<Account[]>(() => managementAccounts())
   const active = useObservable<Account | null>(null)
   const onMove = (indices: number[], newOffset: number) => {
     // A page opened for one source must never write after the app switched source.
@@ -415,7 +415,7 @@ function SettingsView() {
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />
         </> : null}
         {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-        {logins.map(a => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
+        {sortAccounts(logins, "official").map((a, i) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
           <Button title="删除" role="destructive" disabled={busy || !!device || !!claude} action={async () => {
           try {
             logoutOfficial(a.id)
@@ -426,9 +426,17 @@ function SettingsView() {
           } catch (e: any) { setStatus(e.message) }
         }} />
         ] }}>
-          <Text fixedSize={{ horizontal: false, vertical: true }}>{`${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
+          <NavigationLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
+            <VStack alignment="leading" spacing={3}>
+              <Text fixedSize={{ horizontal: false, vertical: true }}>{`${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
+              <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
+            </VStack>
+          </NavigationLink>
           <Spacer />
         </HStack>)}
+        {logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
+          <Text>账号排序</Text>
+        </NavigationLink> : null}
         <Button title={"刷新额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : null}
       {source === "official" && loginProvider === "deepseek" ? <Section header={<Text>添加DeepSeek官方账号</Text>} footer={<Text>不是OAuth：新增账号使用官方API Key查询余额。已有网页Token账号保留原查询能力，失效需更新；此处不再提供新增网页Token入口。无订阅接口。凭据仅保存本机钥匙串，不自动读取其他脚本。每次添加独立账号，退出仅移除该账号。</Text>}>
@@ -450,7 +458,7 @@ function SettingsView() {
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
-      <Section header={<Text>目前账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。</Text>}>
+      {source !== "official" ? <Section header={<Text>目前账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。</Text>}>
         {accounts.map((a, i) => <NavigationLink key={a.id}
           destination={<WidgetNamePage account={a} source={source} onSaved={() => setAccounts(cachedAccounts())} />}>
           <VStack alignment="leading" spacing={3}>
@@ -462,7 +470,7 @@ function SettingsView() {
           <Text>账号排序</Text>
         </NavigationLink> : null}
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
-      </Section>
+      </Section> : null}
 
       <Section header={<Text>组件刷新</Text>} footer={<Text>刷新间隔，实际时间由ios调度</Text>}>
         <Picker title={"刷新间隔"} value={refreshMinutes} onChanged={async (value: string) => {
