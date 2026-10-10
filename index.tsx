@@ -1,5 +1,5 @@
 import {
-  Button, Form, ForEach, EditMode, Group, HStack, Spacer, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, Form, Group, HStack, Spacer, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.12"
+const VERSION = "1.10.13"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -171,7 +171,6 @@ function SettingsView() {
   const [key, setKey] = useState("")
   const [keyEditing, setKeyEditing] = useState(false)
   const [busy, setBusy] = useState(false)
-  const loginEditMode = useObservable(() => EditMode.inactive())
   const cached = cachedUsage()
   const [status, setStatus] = useState(cached ? "本机缓存（未刷新），可手动刷新" : "暂无缓存，请手动刷新或保存并测试")
   const [browserError, setBrowserError] = useState("")
@@ -182,7 +181,6 @@ function SettingsView() {
   useEffect(() => () => { auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
-    loginEditMode.setValue(EditMode.inactive())
     stopAuth()
     saveSource(value as DataSource)
     setSource(value as DataSource)
@@ -192,22 +190,7 @@ function SettingsView() {
     await Widget.reloadAll()
   }
 
-  function moveLogins(indices: number[], newOffset: number) {
-    if (!loginEditMode.value.isEditing || busy || device || claude || getSource() !== "official") return
-    const current = sortAccounts(logins, "official")
-    if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
-    const moving = indices.map(i => current[i])
-    const next = current.filter((_, i) => !indices.includes(i))
-    next.splice(Math.max(0, Math.min(newOffset, next.length)), 0, ...moving)
-    if (next.every((a, i) => a.id === current[i].id)) return
-    saveAccountOrder(next.map(a => a.id), "official")
-    setLogins(next)
-    setAccounts(cachedAccounts())
-    void Widget.reloadAll()
-  }
-
   async function addOfficial() {
-    loginEditMode.setValue(EditMode.inactive())
     if (loginProvider === "claude") { startClaude(); return }
     if (auth.running) return
     setBrowserError("")
@@ -324,7 +307,6 @@ function SettingsView() {
   }
 
   async function test() {
-    loginEditMode.setValue(EditMode.inactive())
     const requestSource = getSource(), requestStats = getStatisticsSource()
     const statsName = requestStats === "sub2api" ? "Sub2API" : "Parrot"
     setBusy(true)
@@ -394,11 +376,11 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setLines([]); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section environments={{ editMode: loginEditMode }} header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer /><Button title={loginEditMode.value.isEditing ? "完成" : "排序"} disabled={busy || !!device || !!claude || logins.length < 2} action={() => { if (busy || device || claude || logins.length < 2) return; loginEditMode.setValue(loginEditMode.value.isEditing ? EditMode.inactive() : EditMode.active()) }} /></HStack>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
+      {source === "official" ? <Section header={<Text>登录账号</Text>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
         <HStack frame={{ maxWidth: "infinity" }}>
           {loginProvider !== "deepseek" && !device && !claude ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
           <Spacer />
-          <Picker title="" pickerStyle="menu" value={loginProvider} onChanged={value => { loginEditMode.setValue(EditMode.inactive()); stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
+          <Picker title="" pickerStyle="menu" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
             <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text>
           </Picker>
         </HStack>
@@ -433,7 +415,7 @@ function SettingsView() {
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />
         </> : null}
         {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-        <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => { const a = sortAccounts(logins, "official")[i]; return <HStack key={a.id} trailingSwipeActions={loginEditMode.value.isEditing ? undefined : { allowsFullSwipe: false, actions: [
+        {sortAccounts(logins, "official").map((a, i) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
           <Button title="删除" role="destructive" disabled={busy || !!device || !!claude} action={async () => {
           try {
             logoutOfficial(a.id)
@@ -444,14 +426,17 @@ function SettingsView() {
           } catch (e: any) { setStatus(e.message) }
         }} />
         ] }}>
-          <NavigationLink disabled={loginEditMode.value.isEditing} destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
+          <NavigationLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
             <VStack alignment="leading" spacing={3}>
               <Text fixedSize={{ horizontal: false, vertical: true }}>{`${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
               <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
             </VStack>
           </NavigationLink>
           <Spacer />
-        </HStack> }} />
+        </HStack>)}
+        {logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
+          <Text>账号排序</Text>
+        </NavigationLink> : null}
         <Button title={"刷新额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : null}
       {source === "official" && loginProvider === "deepseek" ? <Section header={<Text>添加DeepSeek官方账号</Text>} footer={<Text>不是OAuth：新增账号使用官方API Key查询余额。已有网页Token账号保留原查询能力，失效需更新；此处不再提供新增网页Token入口。无订阅接口。凭据仅保存本机钥匙串，不自动读取其他脚本。每次添加独立账号，退出仅移除该账号。</Text>}>

@@ -6,7 +6,7 @@ let now = 1800000000000, handler, calls = [], reads = []
 const kc = new Map(), storage = new Map(), storageWrites = []
 class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])) } static now() { return now } }
 const modules = {}
-const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { if(k==='WebViewController')return undefined;return o[k] || k } })
+const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { if(k==='WebViewController'||k==='EditMode')return undefined;return o[k] || k } })
 scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
 const registeredIntents=new Map()
 scripting.AppIntentProtocol={AppIntent:0}
@@ -615,16 +615,13 @@ async function main() {
   // Exercise App sorting controls with persistent mock hook state, not only the data helper.
   const states=[];let hook=0
   scripting.useState=initial=>{const i=hook++;if(!(i in states))states[i]=initial;return [states[i],next=>states[i]=typeof next==='function'?next(states[i]):next]}
-  let obsStore=[],obsIndex=0,appObsStore=[]
-  scripting.EditMode={active:()=>({value:'active',isEditing:true}),inactive:()=>({value:'inactive',isEditing:false})}
-  scripting.useObservable=init=>{const i=obsIndex++;if(!(i in obsStore)){const o={value:typeof init==='function'?init():init,setValue(v){o.value=v}};obsStore[i]=o}return obsStore[i]}
   scripting.useEffect=()=>{}
   scripting.Navigation={useDismiss:()=>()=>{}}
   scripting.Widget.reloadAll=async()=>{}
   storage.set('ai_usage_cache_v1',{...data,accounts})
   api.saveAccountOrder(accounts.map(a=>a.id));storage.set('ai_usage_selected_accounts_v1',[accounts[3].id,accounts[0].id])
   const {SettingsView}=load('index.tsx')
-  const render=()=>{const oldStore=obsStore,oldIndex=obsIndex;if(!states.length)appObsStore=[];obsStore=appObsStore;obsIndex=0;hook=0;const result=expand(SettingsView());appObsStore=obsStore;obsStore=oldStore;obsIndex=oldIndex;return result}
+  const render=()=>{hook=0;return expand(SettingsView())}
   let ui=render()
   assert.ok(!ui.some(x=>x.type==='Toggle'))
   assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='目前账号'))
@@ -638,10 +635,11 @@ async function main() {
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
   // Read-only Form list + NavigationLink to a separate ScrollView page using ReorderableForEach (no List/Form drag).
   const indexSource=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
-  for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','EditButton','onMove={busy'])assert.ok(!indexSource.includes(old),old)
-  assert.ok(!ui.some(x=>x.type==='EditButton'||x?.props?.onDrag||x?.props?.onDrop))
+  for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','EditButton','ForEach count','onMove={busy'])assert.ok(!indexSource.includes(old),old)
+  assert.ok(!ui.some(x=>x.type==='ForEach'||x.type==='EditButton'||x?.props?.onDrag||x?.props?.onDrop))
   assert.equal(render().find(x=>x.type==='Form').props.toolbar.confirmationAction,undefined)
   // Minimal documented-shape mocks: Observable{value,setValue}, chainable modifiers() recorder.
+  let obsStore=[],obsIndex=0
   scripting.useObservable=init=>{const i=obsIndex++;if(!(i in obsStore)){const o={value:typeof init==='function'?init():init,setValue(v){o.value=v}};obsStore[i]=o}return obsStore[i]}
   scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
   const ids=()=>Array.from(api.cachedAccounts(),a=>a.id)
@@ -696,7 +694,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.12')
+  assert.equal(api.VERSION,'1.10.13')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -802,7 +800,10 @@ async function main() {
   states.length=0;let emailUI=render()
   assert.ok(emailUI.some(x=>x.type==='Text'&&typeof x.props.children==='string'&&/^\d+\. /.test(x.props.children)&&x.props.children.endsWith('Codex nested@example.test')))
   assert.ok(!emailUI.some(x=>x.type==='Section'&&x.props.header?.props.children==='目前账号'))
-  assert.ok(!emailUI.some(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage'));const orderBuilder=emailUI.find(x=>x.type==='ForEach');assert.ok(orderBuilder);assert.equal(typeof orderBuilder.props.onMove,'function')
+  const orderLink=emailUI.find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
+  obsStore=[];obsIndex=0;const emailOrder=expand(orderLink.props.destination.type(orderLink.props.destination.props))
+  const orderBuilder=emailOrder.find(x=>x.type==='ReorderableForEach')
+  assert.ok(expand(orderBuilder.props.builder(nestedAccount,0)).some(x=>typeof x==='string'&&x.includes('nested@example.test')))
   await emailUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
   emailUI=render();assert.ok(emailUI.some(x=>typeof x==='string'&&x.includes('Codex nested@example.test：5 h')))
   // Refresh response omitting email preserves the previously authorized stored email and aliases.
@@ -973,7 +974,7 @@ async function main() {
   authUI=render();assert.equal(calls.length,before);assert.equal(browserTimers.size,0)
   const unsupported=authUI.find(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed')
   assert.ok(unsupported.props.children.startsWith('当前Scripting不支持WebViewController'))
-  const section=authUI.find(x=>x.type==='Section'&&x.props.header?.props.children?.[0]?.props?.children==='登录账号')
+  const section=authUI.find(x=>x.type==='Section'&&x.props.header?.props.children==='登录账号')
   assert.ok(expand(section).includes(unsupported))
   assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.disabled,false)
   context.WebViewController=supportedBrowser
@@ -1227,13 +1228,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.12')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.13')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.12');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.13');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1423,7 +1424,6 @@ async function main() {
   let releaseBusyRefresh;let heldBusy=false
   handler=async(u,o)=>{if(u.endsWith('/usage')&&!heldBusy){heldBusy=true;await new Promise(resolve=>releaseBusyRefresh=resolve)}return u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)}
   const busyRefresh=exitUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
-  const busySort=render().find(x=>x.type==='Section'&&x.props.header?.props.children?.[0]?.props?.children==='登录账号');assert.equal(busySort.props.header.props.children[2].props.disabled,true);busySort.props.header.props.children[2].props.action();assert.equal(busySort.props.environments.editMode.value.isEditing,false)
   assert.ok(render().filter(x=>x.type==='HStack'&&x.props.trailingSwipeActions).every(x=>x.props.trailingSwipeActions.actions[0].props.disabled))
   for(let i=0;i<12&&!releaseBusyRefresh;i++)await Promise.resolve();assert.ok(releaseBusyRefresh);releaseBusyRefresh();await busyRefresh
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
@@ -1769,7 +1769,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.12')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.13')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1779,7 +1779,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.12 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.13 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1894,7 +1894,7 @@ async function main() {
       const header=dataSection.props.header;assert.equal(header.props.frame.maxWidth,'infinity');assert.deepEqual(Array.from(header.props.children,n=>n.type),['Text','Spacer','Text']);assert.equal(header.props.children[2].props.children,api.VERSION);assert.equal(dataSection.props.footer.props.children,'切换不删除另一来源配置。与额度来源独立，Parrot/Sub2API二选一不合计。');assert.deepEqual(Array.from(dataSection.props.children,n=>n.props.title),['账号来源','统计来源']);assert.ok(!ui.some(n=>n?.type==='Section'&&n.props.header?.props.children==='统计来源'));assert.ok(!ui.some(n=>n?.type==='Button'&&['测试连接','测试Sub2API连接'].includes(n.props.title)))
       assert.equal(ui.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.value,selected)
       for(const title of ['组件刷新','当前状态',...(selected==='official'?[]:['目前账号'])])assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children===title))
-      if(selected==='official')assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children?.[0]?.props?.children==='登录账号'))
+      if(selected==='official')assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children==='登录账号'))
       assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='预览组件'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='账号来源'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='刷新间隔'))
@@ -2303,7 +2303,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.12');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.13');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2705,21 +2705,9 @@ async function main() {
     const rows=()=>render().filter(n=>n?.type==='HStack'&&n.props.trailingSwipeActions)
     const ids=()=>Array.from(rows(),n=>n.key),labels=()=>rows().map(n=>n.props.children[0].props.children.props.children[0].props.children)
     assert.deepEqual(ids(),[ds,'manage-codex','claude:manage:org']);assert.deepEqual(labels(),['1. DeepSeek Manage DeepSeek','2. Codex manage@codex.test','3. Claude manage@claude.test'])
-    assert.ok(!managementUI.some(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage'))
-    const loginSection=()=>render().find(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号')
-    const toggle=()=>loginSection().props.header.props.children[2]
-    const rowsAll=()=>render().filter(n=>n?.type==='HStack'&&n.key&&n.props.children?.[0]?.type==='NavigationLink')
-    assert.equal(toggle().props.title,'排序');assert.equal(loginSection().props.environments.editMode.value.isEditing,false);toggle().props.action()
-    assert.equal(toggle().props.title,'完成');assert.equal(loginSection().props.environments.editMode.value.isEditing,true)
-    assert.ok(rowsAll().every(n=>n.props.trailingSwipeActions===undefined&&n.props.children[0].props.disabled))
-    const reorder=render().find(n=>n?.type==='ForEach');assert.ok(reorder);assert.equal(reorder.props.onDelete,undefined);assert.equal(reorder.props.count,3);reorder.props.onMove([2],0)
-    toggle().props.action();assert.equal(toggle().props.title,'排序');assert.ok(rowsAll().every(n=>n.props.trailingSwipeActions&&n.props.children[0].props.disabled===false))
-    const inactiveOrder=Array.from(api.managementAccounts(),a=>a.id);render().find(n=>n?.type==='ForEach').props.onMove([0],2);assert.deepEqual(Array.from(api.managementAccounts(),a=>a.id),inactiveOrder,'inactive move guard')
-    const currentUI=render();assert.equal(currentUI.filter(n=>n?.type==='ForEach').length,1);assert.ok(currentUI.filter(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children!=='登录账号').every(n=>!n.props.environments?.editMode));assert.equal(currentUI.find(n=>n?.type==='Form').props.environments,undefined)
-    toggle().props.action();const nativeMove=render().find(n=>n?.type==='ForEach').props.onMove;nativeMove([0,0],2);nativeMove([-1],2);assert.deepEqual(Array.from(api.managementAccounts(),a=>a.id),inactiveOrder,'invalid move guard')
-    nativeMove([0,2],1);assert.deepEqual(Array.from(api.managementAccounts(),a=>a.id),[ds,'claude:manage:org','manage-codex'],'native remove-then-insert multi-index contract');nativeMove([1],0)
-    toggle().props.action();states.length=0;assert.equal(toggle().props.title,'排序');assert.equal(loginSection().props.environments.editMode.value.isEditing,false);assert.deepEqual(ids(),['claude:manage:org',ds,'manage-codex'],'reopen sorted and inactive')
-
+    const orderLink=managementUI.find(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage');assert.ok(orderLink);assert.ok(managementUI.find(n=>n?.type==='Section'&&n.props.header?.props.children==='登录账号').props.children.flat().includes(orderLink))
+    const destination=orderLink.props.destination;obsStore=[];obsIndex=0;let orderTree=expand(destination.type(destination.props));assert.ok(orderTree.some(n=>n?.type==='ScrollView'));assert.ok(!orderTree.some(n=>n?.type==='Form'||n?.type==='List'))
+    const reorder=orderTree.find(n=>n?.type==='ReorderableForEach');assert.deepEqual(Array.from(reorder.props.data,n=>n.id),ids());reorder.props.onMove([2],0)
     assert.deepEqual(ids(),['claude:manage:org',ds,'manage-codex']);assert.deepEqual(storage.get('ai_usage_official_order_v1'),ids());assert.deepEqual(labels(),['1. Claude manage@claude.test','2. DeepSeek Manage DeepSeek','3. Codex manage@codex.test']);assert.equal(calls.length,before,'sorting metadata-only list is local')
     const nameDestination=rows()[0].props.children[0].props.destination;assert.equal(nameDestination.type.name,'WidgetNamePage');assert.equal(nameDestination.props.account.id,'claude:manage:org');assert.equal(nameDestination.props.account.fiveHour.usedPercent,null)
     const viewStates=states.slice();states.length=0;hook=0;let nameTree=expand(nameDestination.type(nameDestination.props));nameTree.find(n=>n?.type==='TextField'&&n.props.title==='小组件用户名').props.onChanged('Management Alias');hook=0;nameTree=expand(nameDestination.type(nameDestination.props));await nameTree.find(n=>n?.type==='Button'&&n.props.title==='保存').props.action();states.length=0;states.push(...viewStates)
@@ -2730,14 +2718,9 @@ async function main() {
     const deleting=rows()[1];assert.equal(deleting.key,ds);assert.equal(deleting.props.action,undefined);assert.equal(deleting.props.onTapGesture,undefined);await deleting.props.trailingSwipeActions.actions[0].props.action()
     assert.deepEqual(ids(),['claude:manage:org','manage-codex']);assert.deepEqual(labels(),['1. Claude manage@claude.test','2. Codex manage@codex.test']);assert.equal(api.getWidgetName('claude:manage:org','official'),'Management Alias');assert.ok(!api.cachedAccounts().some(n=>n.id===ds))
     const added=api.addDeepSeekAccount('New Manage','api','SYNTHETIC-MANAGE-NEW');states.length=0;assert.deepEqual(ids(),['claude:manage:org','manage-codex',added]);assert.ok(labels()[2].startsWith('3. DeepSeek'))
-    toggle().props.action();const lateMove=render().find(n=>n?.type==='ForEach').props.onMove;handler=async()=>resp(503,{})
-    await render().find(n=>n?.type==='Picker'&&n.props.title==='账号来源').props.onChanged('parrot');const storedOfficial=JSON.stringify(storage.get('ai_usage_official_order_v1'));lateMove([0],2);assert.equal(JSON.stringify(storage.get('ai_usage_official_order_v1')),storedOfficial,'old source callback cannot write')
-    await render().find(n=>n?.type==='Picker'&&n.props.title==='账号来源').props.onChanged('official');assert.equal(toggle().props.title,'排序');assert.equal(loginSection().props.environments.editMode.value.isEditing,false)
-    handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'SORT-MODE-SYNTHETIC',usercode:'SORT-CODE',interval:'5'}):resp(503,{});await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();assert.equal(toggle().props.disabled,true,'active login disables sort');toggle().props.action();assert.equal(loginSection().props.environments.editMode.value.isEditing,false)
-    const cancel=render().find(n=>n?.type==='Button'&&n.props.title==='取消登录');if(cancel)cancel.props.action()
-    for(const source of ['parrot','sub2api']){api.saveSource(source);states.length=0;assert.ok(render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='目前账号'));assert.ok(!render().some(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号'))}
+    for(const source of ['parrot','sub2api']){api.saveSource(source);states.length=0;assert.ok(render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='目前账号'));assert.ok(!render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='登录账号'))}
     kc.clear();for(const[k,v]of previousKC)kc.set(k,v);storage.clear();for(const[k,v]of previousStore)storage.set(k,v);handler=previousHandler;states.length=0
-    console.log('PASS: official only duplicate Section removed; sorted continuous three-provider labels; no-usage metadata supports name editor and same-page native ForEach edit binding; actual move persists+updates login list; aliases retained; widget sequence matches; reordered swipe deletes exact ID and renumbers; new IDs append; nonofficial module retained; local operations no network')
+    console.log('PASS: official only duplicate Section removed; sorted continuous three-provider labels; no-usage metadata supports existing name editor and original ScrollView/ReorderableForEach; actual move persists+updates returned login list; aliases retained; widget sequence matches; reordered swipe deletes exact ID and renumbers; new IDs append; nonofficial module retained; local operations no network')
   }
   // Saved key display and actual editing are separate: never bind a saved full key or submit a mask.
   {
@@ -2791,6 +2774,7 @@ async function main() {
     kc.clear();for(const[k,v]of oldKC)kc.set(k,v);storage.clear();for(const[k,v]of oldStore)storage.set(k,v);handler=oldHandler;states.length=0
     console.log('PASS: Parrot/Sub2API focus-cleared masked TextField (4 prefix/rest stars, short all stars), old mask never persisted, no-focus events ignored, empty preserves key/new replaces/blur+save+reopen masked/clear default prompt/no secrets in Storage; native swipe-only deletion exact-ID for all three providers; no standalone test buttons; add+Spacer+provider menu row and provider switches retained')
   }
+  assert.equal(scripting.EditMode,undefined);assert.ok(!fs.readFileSync(path.join(root,'index.tsx'),'utf8').includes('EditMode'));
   // Execute the real App run/Navigation.present entry and ALL mount effects (normal UI harness suppresses them).
   {
     const oldKC=[...kc.entries()],oldStore=[...storage.entries()],oldHandler=handler,oldEffect=scripting.useEffect,oldNavigation=scripting.Navigation,oldScript=scripting.Script,oldReload=scripting.Widget.reloadAll
@@ -2798,10 +2782,10 @@ async function main() {
     scripting.Script={exit:()=>exits++};scripting.Widget.reloadAll=async()=>{reloads++}
     scripting.useEffect=(fn,deps)=>effects.push(fn)
     scripting.Navigation={useDismiss:()=>()=>{},present:async({element})=>{
-      assert.equal(element.type.name,'SettingsView');obsStore=[];obsIndex=0;hook=0;mounted=expand(element.type(element.props))
+      assert.equal(element.type.name,'SettingsView');hook=0;mounted=expand(element.type(element.props))
       for(const fn of effects){const cleanup=fn();if(typeof cleanup==='function')cleanups.push(cleanup)}
       for(let i=0;i<20;i++)await Promise.resolve()
-      obsIndex=0;hook=0;mounted=expand(element.type(element.props))
+      hook=0;mounted=expand(element.type(element.props))
     }}
     handler=async()=>{throw Error('App entry must not contact network')}
     api.saveConfig('https://entry-cache-parrot.test','ENTRY-MANAGEMENT');api.saveSub2APIConfig('https://entry-cache-sub.test','ENTRY-ADMIN','Asia/Shanghai')
