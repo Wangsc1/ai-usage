@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.14"
+const VERSION = "1.10.15"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -350,7 +350,7 @@ function SettingsView() {
         cancellationAction: <Button title={"完成"} action={dismiss} />,
       }}
     >
-      <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>} footer={<Text>切换不删除另一来源配置。与额度来源独立，Parrot/Sub2API二选一不合计。</Text>}>
+      <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>}>
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot</Text>
           <Text tag={"official"}>Codex,Claude,DeepSeek</Text>
@@ -373,7 +373,7 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
+      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
           {loginProvider !== "deepseek" && !device && !claude ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
           <Spacer />
@@ -427,7 +427,7 @@ function SettingsView() {
           catch { /* invalid input is not saved */ }
         }} />
       </Section> : null}
-      {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。</Text>}>
+      {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
         <TextField title={"管理密钥"} value={keyEditing ? key : maskedKey(key || cur.managementKey || "")} onFocus={() => { setKey(""); setKeyEditing(true) }} onBlur={() => setKeyEditing(false)} onChanged={value => { if (keyEditing && value !== maskedKey(cur.managementKey || "")) setKey(value) }} prompt="managementKey" />
         <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
