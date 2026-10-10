@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.21"
+const VERSION = "1.10.22"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -60,21 +60,18 @@ function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (n
 function WidgetNamePage({ account, source, onSaved }: { account: Account; source: DataSource; onSaved: () => void }) {
   const close = Navigation.useDismiss()
   const [name, setName] = useState(getWidgetName(account.id, source))
-  const [saved, setSaved] = useState(false)
   async function save() {
     saveWidgetName(account.id, name, source)
     setName(name.trim())
-    setSaved(true)
     onSaved()
     await Widget.reloadAll()
+    close()
   }
   return <Form navigationTitle="小组件用户名" navigationBarTitleDisplayMode="inline">
     <Section header={<Text>{account.name}</Text>} footer={<Text>仅修改本机小组件显示，所有尺寸共用。留空保存恢复原名；不修改远端账号。三种额度来源独立保存。</Text>}>
-      <TextField title="小组件用户名" value={name} onChanged={value => { setName(value); setSaved(false) }} prompt="留空使用原名" />
+      <TextField title="小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
-      {saved ? <Text>已保存</Text> : null}
     </Section>
-    <Button title="完成" action={close} />
   </Form>
 }
 
