@@ -694,7 +694,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.9.18')
+  assert.equal(api.VERSION,'1.10.0')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1122,7 +1122,7 @@ async function main() {
   // App uses the same composed path and reports source/freshness independently.
   states.length=0;authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
-  authUI=render();assert.ok(authUI.includes('统计：Parrot全部账号汇总；额度：官方OAuth（Codex/Claude）'))
+  authUI=render();assert.ok(authUI.includes('统计：Parrot全部账号汇总；额度：官方（Codex/Claude OAuth、DeepSeek）'))
   assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('23 次')))
   assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
   statsTimestamp=storage.get('ai_usage_parrot_stats_v1').fetchedAt
@@ -1228,13 +1228,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.18')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.0')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.9.18');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.0');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1462,7 +1462,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.9.18'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.10.0'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1769,7 +1769,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.9.18')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.0')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1779,7 +1779,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.9.18 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.0 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2297,7 +2297,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.9.18');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.0');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2467,6 +2467,110 @@ async function main() {
     context.Storage.remove=oldRemove;context.Keychain.remove=oldKeyRemove;api.saveSource(source);states.length=0
   }
   console.log('PASS: clear-Parrot entry absent in all App source selections; rendering deletes no Storage/Keychain state; Parrot config load/save intact and unchanged credentials preserved; low-level helper retained but not reachable from App')
+  // DeepSeek uses synthetic credentials only; real endpoints below are handled entirely by mock fetch.
+  {
+    const beforeKC=new Map(kc),beforeStore=new Map(storage),beforeHandler=handler,beforeNow=now,beforeFamily=scripting.Widget.family,beforeParameter=scripting.Widget.parameter
+    kc.clear();storage.clear();api.saveSource('official');states.length=0
+    const dsKey='ai_usage_deepseek_credentials_v1'
+    const apiID=api.addDeepSeekAccount('API余额','api','DS-SYNTHETIC-API'),webID=api.addDeepSeekAccount('网页余额','web','DS-SYNTHETIC-WEB')
+    assert.notEqual(apiID,webID);assert.equal(api.officialAccounts().length,2)
+    let apiFail=false,costFail=false,webFail=false,ambiguousCost=false,malformedAPI=false,held=null,hold=false,apiReads=0,webReads=0
+    const balance=()=>({is_available:false,balance_infos:[{currency:'CNY',total_balance:'0.00',granted_balance:'0.00',topped_up_balance:'0.00'},{currency:'USD',total_balance:'9007199254740993.123456',granted_balance:'0.123456',topped_up_balance:'9007199254740993.00'}]})
+    handler=async(u,o)=>{
+      assert.ok(!o.method||o.method==='GET');assert.ok(!o.body)
+      const h=new Headers(o.headers)
+      if(u==='https://api.deepseek.com/user/balance'){
+        apiReads++;assert.equal(h.get('authorization'),'Bearer DS-SYNTHETIC-API');assert.equal(h.get('accept'),'application/json');assert.equal(h.get('referer'),null)
+        if(hold)await new Promise(resolve=>held=resolve)
+        if(apiFail)throw Error('DeepSeek SECRET-DS-SYNTHETIC-API transport')
+        return resp(200,malformedAPI?{}:balance())
+      }
+      assert.equal(h.get('authorization'),'Bearer DS-SYNTHETIC-WEB');assert.equal(h.get('referer'),'https://platform.deepseek.com/usage');assert.equal(h.get('user-agent'),'ai-usage/1.10.0')
+      if(u.endsWith('/get_user_summary')){webReads++;return webFail?resp(401):resp(200,{code:0,data:{biz_data:{normal_wallets:[{currency:'CNY',balance:'0.1'},{currency:'CNY',balance:'0.2'},{currency:'USD',balance:'2.00'}],bonus_wallets:[{currency:'CNY',balance:'0.00001'},{currency:'USD',balance:'1.00'}],total_costs:[]}}})}
+      const url=new URL(u);assert.equal(url.pathname,'/api/v0/usage/by_api_key/cost');const midnight=Math.floor((now/1000+28800)/86400)*86400-28800
+      assert.equal(Number(url.searchParams.get('start')),midnight-6*86400);assert.equal(Number(url.searchParams.get('end')),midnight+86400);assert.equal(url.searchParams.get('tz'),'28800')
+      const payload={code:0,data:{biz_data:{data:[{currency:'CNY',series:[{buckets:[{cost:'0.1'},{cost:'0.2'}]}]},{currency:'USD',series:[{buckets:[{cost:'0.00'}]}]}]}}};if(ambiguousCost)for(const row of payload.data.biz_data.data)delete row.currency
+      return costFail?resp(503):resp(200,payload)
+    }
+    const first=await api.loadUsage();assert.equal(first.data.accounts.length,2);assert.equal(apiReads,1);assert.equal(webReads,1)
+    const a=first.data.accounts.find(a=>a.id===apiID),w=first.data.accounts.find(a=>a.id===webID)
+    assert.equal(a.balance.money[0].total,'0.00');assert.equal(a.balance.available,false);assert.equal(a.balance.money[1].total,'9007199254740993.123456')
+    assert.equal(w.balance.money[0].total,'0.30001');assert.equal(w.balance.money[0].weekCost,'0.3');assert.equal(w.balance.money[1].weekCost,'0.00');assert.equal(w.balance.available,null)
+    assert.equal(w.fiveHour.remainingPercent,null);assert.equal(w.sevenDay.remainingPercent,null);assert.equal(w.resetCredits,null)
+    assert.ok(!JSON.stringify([...storage]).includes('DS-SYNTHETIC'));assert.ok(!JSON.stringify(first).includes('DS-SYNTHETIC'))
+    malformedAPI=true;ambiguousCost=true;const unknown=await api.loadUsage();assert.equal(unknown.data.accounts.find(a=>a.id===apiID).balance.stale,true);assert.equal(unknown.data.accounts.find(a=>a.id===apiID).balance.money[0].total,'0.00');assert.equal(unknown.data.accounts.find(a=>a.id===webID).balance.weekStale,true);assert.equal(unknown.data.accounts.find(a=>a.id===webID).balance.money[0].weekCost,'0.3');assert.ok(unknown.data.accounts.find(a=>a.id===webID).balance.error);malformedAPI=false;ambiguousCost=false
+    // An original Codex error must not prevent any DeepSeek account from refreshing in mixed official mode.
+    kc.set('ai_usage_official_oauth_v1',JSON.stringify([{id:'official-failing',accountId:'failing',subject:'subject',email:'failing@example.test',name:'failing',access:token('failing','subject'),refresh:'SYNTHETIC-CODEX',expiresAt:now+3600000}]))
+    const dsOnlyHandler=handler;handler=async(u,o)=>u.includes('deepseek.com')?dsOnlyHandler(u,o):resp(503)
+    const mixedFailure=await api.loadUsage();assert.equal(mixedFailure.data.accounts.length,3);assert.ok(mixedFailure.data.accounts.find(a=>a.id==='official-failing').readError);assert.equal(mixedFailure.data.accounts.find(a=>a.id===webID).balance.error,null)
+    kc.delete('ai_usage_official_oauth_v1');handler=dsOnlyHandler
+    now+=10000;apiFail=true;costFail=true
+    const partial=await api.loadUsage(),ca=partial.data.accounts.find(a=>a.id===apiID),cw=partial.data.accounts.find(a=>a.id===webID)
+    assert.equal(ca.balance.fetchedAt,a.balance.fetchedAt);assert.equal(ca.balance.stale,true);assert.ok(!ca.balance.error.includes('SYNTHETIC'));assert.equal(cw.balance.weekFetchedAt,w.balance.weekFetchedAt);assert.equal(cw.balance.weekStale,true);assert.equal(cw.balance.money[0].weekCost,'0.3');assert.equal(cw.balance.fetchedAt,now)
+    apiFail=false;costFail=false;webFail=true;const isolated=await api.loadUsage();assert.equal(isolated.data.accounts.find(a=>a.id===apiID).balance.stale,false);assert.equal(isolated.data.accounts.find(a=>a.id===webID).balance.stale,true)
+    webFail=false
+    api.saveWidgetName(apiID,'鲸鱼别名','official');api.saveAccountOrder([webID,apiID],'official')
+    assert.equal(api.widgetAccounts(first.data.accounts,'2')[0].id,apiID);assert.equal(api.getWidgetName(apiID,'official'),'鲸鱼别名')
+    // Mixed providers and all six widget families: money branch never displays quota labels for a DeepSeek-only account.
+    const mixed={...first.data,accounts:[w,a,...list.slice(0,2).map(x=>({...x,name:'Mixed '+x.id,provider:'claude',fiveHour:{remainingPercent:50,usedPercent:50,resetsAt:null},sevenDay:{remainingPercent:75,usedPercent:25,resetsAt:null},resetCredits:null}))]};api.saveAccountOrder(mixed.accounts.map(a=>a.id),'official')
+    assert.equal(api.widgetAccounts(mixed.accounts,'2,1,3')[0].id,apiID)
+    for(const family of ['systemSmall','systemMedium','systemLarge','accessoryRectangular','accessoryCircular','accessoryInline']){
+      scripting.Widget.family=family;scripting.Widget.parameter='';const nodes=expand(Root({data:{...first.data,accounts:[a]},stale:false,error:null})),text=nodes.filter(x=>typeof x==='string').join(' ')
+      assert.ok(text.includes('CNY')&&text.includes('USD'),family+' separate currencies');assert.ok(!text.includes('5 h')&&!text.includes('5h')&&!text.includes('RE:'),family+' no fabricated quota')
+      assert.ok(!nodes.some(n=>n?.type==='Gauge'),family+' no fabricated percentage gauge')
+      expand(Root({data:mixed,stale:false,error:null}))
+    }
+    states.length=0;const dsUI=render();assert.ok(dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
+    // Shared loader deduplicates active requests, and a late account response cannot undo local logout.
+    hold=true;const p1=api.loadUsage(),p2=api.loadUsage();assert.equal(p1,p2)
+    for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held)
+    api.logoutOfficial(apiID);held();const late=await p1;assert.ok(!late.data.accounts.some(a=>a.id===apiID));assert.ok(!api.officialAccounts().some(a=>a.id===apiID));assert.ok(api.officialAccounts().some(a=>a.id===webID));assert.ok(!api.officialCached().accounts.some(a=>a.id===apiID))
+    hold=false;api.logoutOfficial(webID);assert.equal(api.officialAccounts().length,0)
+    // Drive actual App fields/add action, not only the exported storage helper.
+    states.length=0;let addUI=render();addUI.find(n=>n?.type==='TextField'&&n.props.title==='DeepSeek账号名称').props.onChanged('UI DeepSeek')
+    addUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('DS-SYNTHETIC-API')
+    addUI=render();await addUI.find(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号').props.action()
+    const uiAccount=api.officialAccounts().find(a=>a.name==='UI DeepSeek');assert.ok(uiAccount);assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'')
+    api.logoutOfficial(uiAccount.id)
+    // An official request may complete after switching source, but cannot populate another source's cache.
+    const switchID=api.addDeepSeekAccount('switch','api','DS-SYNTHETIC-API');hold=true;held=null;const switched=api.loadUsage()
+    for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held);api.saveSource('parrot');held();await switched;assert.equal(storage.has('ai_usage_cache_v1'),false);api.logoutOfficial(switchID);hold=false
+
+    // Parrot's new channels envelope uses meta.hasNext, not legacy OAuth item pagination.
+    api.saveConfig('https://parrot-deepseek.test','SYNTHETIC-MANAGEMENT');kc.set('parrot_session_credential','SYNTHETIC-SESSION');api.saveSource('parrot');api.saveStatisticsSource('parrot')
+    let missingChannels=false,brokenSnapshot=false,pages=[],posts=0
+    handler=async(u,o)=>{
+      if(o.method==='POST'){posts++;throw Error('manual POST forbidden')}
+      assert.equal(new Headers(o.headers).get('authorization'),'Bearer SYNTHETIC-SESSION')
+      if(u.includes('/oauth/accounts?'))return resp(200,{data:{items:[{accountId:'legacy',provider:'claude',displayName:'Legacy',enabled:true,available:true}]}})
+      if(u.endsWith('/oauth/accounts/legacy'))return resp(200,{data:{usageWindows:[]}})
+      if(u.includes('/channels?')){if(missingChannels)return resp(404);const url=new URL(u),page=Number(url.searchParams.get('page'));pages.push(page);assert.equal(url.searchParams.get('providerId'),'deepseek');assert.equal(url.searchParams.get('pageSize'),'50')
+        return resp(200,{data:[{id:'api:DS-'+page,name:'DS '+page,providerId:'deepseek',enabled:true,providerUsage:{supported:true,stale:false,fetchedAt:new Date(now-30000).toISOString(),snapshot:brokenSnapshot&&page===2?null:{balances:[{id:'total',value:'0.00',currency:'CNY'},{id:'granted',value:'0.00',currency:'CNY'},{id:'topped_up',value:'0.00',currency:'CNY'},{id:'total',value:'1.0001',currency:'USD'}],notices:['账户不可用']}}}],meta:{page,hasNext:page===1}})
+      }
+      return resp(200,{data:{}})
+    }
+    const parrot=await api.loadUsage();assert.deepEqual(pages,[1,2]);assert.equal(posts,0);assert.equal(parrot.data.accounts.length,3);assert.equal(parrot.data.accounts.find(a=>a.provider==='deepseek').balance.money.length,2)
+    const parrotTime=parrot.data.accounts.find(a=>a.provider==='deepseek').balance.fetchedAt;now+=1000;brokenSnapshot=true
+    const badRow=await api.loadUsage();assert.equal(badRow.data.accounts.find(a=>a.id==='parrot:deepseek:api:DS-2').balance.stale,true);assert.equal(badRow.data.accounts.find(a=>a.id==='parrot:deepseek:api:DS-2').balance.fetchedAt,parrotTime)
+    missingChannels=true;const oldServer=await api.loadUsage();assert.ok(oldServer.data.accounts.some(a=>a.id==='legacy'));assert.equal(oldServer.data.providerErrors.length,1);assert.equal(posts,0)
+    // Sub2API auto-discovers DeepSeek with the existing admin key; each failed balance preserves only its own cache.
+    api.saveSub2APIConfig('https://sub-deepseek.test','SYNTHETIC-ADMIN','Asia/Shanghai');api.saveSource('sub2api');api.saveStatisticsSource('sub2api')
+    let failSecond=false,subPages=[]
+    const stats={total_requests:1,total_input_tokens:2,total_output_tokens:3,total_cache_read_tokens:0,total_cache_creation_tokens:0,total_tokens:5,total_actual_cost:0.1}
+    handler=async(u,o)=>{
+      assert.ok(!o.method||o.method==='GET');assert.equal(new Headers(o.headers).get('x-api-key'),'SYNTHETIC-ADMIN');assert.equal(new Headers(o.headers).has('authorization'),false)
+      const url=new URL(u)
+      if(url.pathname.endsWith('/accounts')){const page=Number(url.searchParams.get('page'));subPages.push(page);return resp(200,{code:0,data:{items:[{id:page,platform:'deepseek',type:'apikey',name:'Sub DS '+page,status:'active'}],pages:2}})}
+      if(url.pathname.endsWith('/usage/stats'))return resp(200,{code:0,data:stats})
+      const id=Number(url.pathname.split('/').at(-2));assert.ok(url.pathname.includes('/cn-providers/accounts/'));return resp(200,{code:0,data:{provider:'deepseek',success:!(failSecond&&id===2),available:true,fetched_at:Math.floor(now/1000),balances:[{currency:'CNY',balance:0},{currency:'USD',balance:1.25},{currency:'EUR',balance:1e-7}],error:failSecond?'SECRET':undefined}})
+    }
+    const sub=await api.loadUsage();assert.deepEqual(subPages,[1,2]);assert.equal(sub.data.accounts.length,2);assert.equal(sub.data.accounts[0].balance.money[0].total,'0');assert.equal(sub.data.accounts[0].balance.money[0].granted,null);assert.equal(sub.data.accounts[0].balance.money[2].total,'0.0000001');assert.equal(sub.data.today.totalTokens,5)
+    now+=1000;failSecond=true;const subPartial=await api.loadUsage();assert.equal(subPartial.data.accounts.find(a=>a.id==='sub2api:2').balance.stale,true);assert.equal(subPartial.data.accounts.find(a=>a.id==='sub2api:1').balance.stale,false)
+    assert.ok(!JSON.stringify([...storage]).includes('SYNTHETIC'));assert.ok(!JSON.stringify(subPartial).includes('SECRET'))
+    assert.equal(api.officialAccounts().length,0)
+    kc.clear();for(const [k,v]of beforeKC)kc.set(k,v);storage.clear();for(const [k,v]of beforeStore)storage.set(k,v);handler=beforeHandler;now=beforeNow;scripting.Widget.family=beforeFamily;scripting.Widget.parameter=beforeParameter;states.length=0
+    console.log('PASS: DeepSeek three-source real schema/auth/pagination/old-server/error cache; official API+private web separate credentials/endpoints, exact decimals and multi-currency, 7-day BJT bounds/partial cost timestamps; no secret in Storage/results; local logout late-response guard; aliases/order/parameters mixed providers; six widget families balance-only branches; no subscription/refresh POST/OAuth spoof')
+  }
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')

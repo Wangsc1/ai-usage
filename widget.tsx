@@ -147,11 +147,23 @@ function shortName(acc: Account) {
 }
 
 function providerName(p: string) {
-  return p === "claude" ? "Claude" : p === "openai" ? "Codex" : p
+  return p === "claude" ? "Claude" : p === "openai" ? "Codex" : p === "deepseek" ? "DeepSeek" : p
 }
 
 export function isQuotaExhausted(acc: Account): boolean {
   return [acc.fiveHour.remainingPercent, acc.sevenDay.remainingPercent].some(v => typeof v === "number" && Number.isFinite(v) && v === 0)
+}
+
+// DeepSeek balances are money, never rolling quota percentages or fabricated subscription limits.
+function BalanceRows({ acc, font = 9 }: { acc: Account; font?: number }) {
+  const b = acc.balance
+  const main = b?.money.map(m => `${m.currency} ${m.total ?? "未提供"}`).join(" · ") || "余额未提供"
+  const detail = b?.money.map(m => b.auth === "网页Token" ? `${m.currency} 7日 ${m.weekCost ?? "未提供"}${b.weekStale ? " 缓存" : ""}` : `${m.currency} 充 ${m.toppedUp ?? "未提供"} 赠 ${m.granted ?? "未提供"}`).join(" · ") || "明细未提供"
+  return <VStack alignment="leading" spacing={1}>
+    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={2} minScaleFactor={0.65}>{main}</Text>
+    <Text font={font} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{detail}</Text>
+    <Text font={font - 1} foregroundStyle={b?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.65}>{`${b?.fetchedAt == null ? "未采集" : fmtTime(b.fetchedAt)}${b?.stale ? " 缓存" : ""}${b?.available === false ? " 不可用" : b?.available === null ? " 状态未提供" : ""}${b?.error ? " 读取失败/可重试" : ""}`}</Text>
+  </VStack>
 }
 
 function AccountTitle({ acc, font }: { acc: Account; font: number }) {
@@ -286,7 +298,7 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   const accounts = data.accounts.slice(0, 2), single = accounts.length === 1
   const account = (acc: Account) => <VStack alignment="leading" spacing={3}>
     <AccountTitle acc={acc} font={s.title} />
-    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
+    {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
   return <GeometryReader>
     {proxy => {
@@ -335,7 +347,7 @@ function Quad({ acc, s, fixedLcd = false, intrinsic = false }: { acc?: Account; 
     fixedSize={intrinsic ? { horizontal: false, vertical: true } : undefined}
     frame={intrinsic ? { maxWidth: "infinity", alignment: "leading" as any } : { maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd={fixedLcd} />)}
+    {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd={fixedLcd} />)}
   </VStack>
 }
 
@@ -451,7 +463,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
           modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" }).padding({ top: 1 })} /> : null}
         <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}><AccountTitle acc={acc} font={12} /></VStack>
         <VStack alignment="leading" spacing={3} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
-          {windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} />)}
+          {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} />)}
         </VStack>
       </VStack>)}
     </VStack>
@@ -480,10 +492,11 @@ function AccessoryRectangular({ acc }: { acc: Account }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
   return <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
+    {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
 }
 function AccessoryCircular({ acc }: { acc: Account }) {
+  if (acc.provider === "deepseek") return <VStack spacing={1}><Text font={9}>DeepSeek</Text><Text font={11} monospacedDigit lineLimit={3} minScaleFactor={0.6}>{acc.balance?.money.map(m => `${m.currency} ${m.total ?? "--"}`).join(" · ") || "未提供"}</Text><Text font={7}>{acc.balance?.error ? "读取失败" : acc.balance?.available === false ? "不可用" : acc.balance?.stale ? "缓存" : "余额"}</Text></VStack>
   // One primary value: the 5 h window remaining percentage.
   const v = acc.fiveHour.remainingPercent
   return <Gauge value={v == null ? 0 : Math.max(0, Math.min(100, v)) / 100} min={0} max={1}
@@ -492,6 +505,7 @@ function AccessoryCircular({ acc }: { acc: Account }) {
     currentValueLabel={<Text font={12} fontWeight="semibold" monospacedDigit>{fmtPct(v)}</Text>} />
 }
 function AccessoryInline({ acc }: { acc: Account }) {
+  if (acc.provider === "deepseek") return <Text lineLimit={1}>{`DeepSeek ${acc.balance?.money.map(m => `${m.currency} ${m.total ?? "未提供"}`).join(" · ") || "余额未提供"}${acc.balance?.stale ? " 缓存" : ""}${acc.balance?.available === false ? " 不可用" : ""}${acc.balance?.error ? " 读取失败" : ""}`}</Text>
   return <Text lineLimit={1} foregroundStyle={isQuotaExhausted(acc) ? SUB : undefined}>{`${providerName(acc.provider)} 5h ${fmtPct(acc.fiveHour.remainingPercent)} · 周 ${fmtPct(acc.sevenDay.remainingPercent)}`}</Text>
 }
 function AccessoryRoot({ data, error, family }: { data: UsageData | null; error: string | null; family: string }) {

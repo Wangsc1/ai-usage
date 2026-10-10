@@ -1,12 +1,12 @@
-# Codex / Claude 用量小组件
+# AI 用量与余额小组件
 
-**支持 Parrot、Sub2API 与独立官方 OAuth，适用于 iPhone 主屏和锁屏**
+**支持 Parrot、Sub2API 与官方账号，适用于 iPhone 主屏和锁屏**
 
-基于 [Scripting](https://apps.apple.com/app/id6479691128)，显示 Codex / Claude 的 5 小时、每周剩余额度、重置倒计时与可用重置卡。主屏还可显示今日与本月用量统计，支持多账号排序、自定义名称和点击刷新。
+基于 [Scripting](https://apps.apple.com/app/id6479691128)，显示 Codex / Claude 的 5 小时、每周剩余额度、重置倒计时与可用重置卡。主屏还可显示今日与本月用量统计，支持多账号排序、自定义名称和点击刷新。DeepSeek使用独立余额显示，不套用5小时／每周额度。
 
 ## 功能与显示
 
-- **账号来源**：Parrot、官方 OAuth（Codex / Claude）、Sub2API 三选一。
+- **账号来源**：Parrot、官方（Codex / Claude OAuth、DeepSeek）、Sub2API 三选一。
 - **统计来源**：Parrot、Sub2API 独立二选一，不合计。可以组合使用，例如官方额度＋Sub2API统计。
 - 配置、账号缓存、排序与自定义名称按账号来源隔离；切换不会删除另一来源的配置或登录。
 - 重置卡只跟随当前账号来源，不从统计来源或其他服务补齐。有效数量大于 0 时显示 `RE:N`；0 或未知时隐藏。只查询，不兑换重置卡或重置额度。
@@ -43,11 +43,13 @@ https://scripting.fun/import_scripts?urls=["https%3A%2F%2Fgithub.com%2FWangsc1%2
 2. 在“Parrot 连接”填写自己的部署地址和 **`managementKey` 管理密钥**。
 3. 点“保存并测试”，确认账号列表与额度读取成功。
 
+DeepSeek频道通过管理接口自动分页发现，无需逐账号填写API Key。读取服务器余额快照，保留其采集时间；较旧部署没有频道接口时原Codex／Claude账号仍可读取。API频道名称改变会改变公开ID，不按凭据猜测迁移排序或别名。
+
 普通 OpenAI API Key 不是 Parrot 管理密钥，不能用于此处。已保存的密钥可留空沿用。Parrot 账号列表包含已停用账号，但脚本不会改变远端状态。重置卡仅在服务提供对应字段时显示，否则保持未知。
 
-### 官方 OAuth（Codex / Claude）
+### 官方账号（Codex / Claude OAuth、DeepSeek）
 
-选择 **官方OAuth（Codex/Claude）**，再在“登录服务”选择对应服务。官方登录和额度读取不需要 Parrot 或 Sub2API；今日／本月统计需要另外配置统计来源。可以添加多个 Codex、Claude 账号，重复登录同一身份会更新原记录。
+选择 **官方（Codex/Claude OAuth、DeepSeek）**，再在“登录服务”选择对应服务。官方登录和额度读取不需要 Parrot 或 Sub2API；今日／本月统计需要另外配置统计来源。可以添加多个 Codex、Claude 账号，重复登录同一身份会更新原记录。
 
 #### Codex
 
@@ -68,9 +70,21 @@ https://scripting.fun/import_scripts?urls=["https%3A%2F%2Fgithub.com%2FWangsc1%2
 
 Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Code 会话、连接器和文件上传权限；本脚本只用于登录、读取资料与额度，不执行推理、连接器或上传业务。
 
+#### DeepSeek
+
+在“添加DeepSeek官方账号”填写本机显示名称，明确选择认证方式，输入凭据后点“添加DeepSeek账号”。每次添加独立账号，支持多个账号及局部退出；更新失效凭据可移除该账号后重新添加。
+
+- **API Key**：只请求 `https://api.deepseek.com/user/balance`，显示总余额、充值余额、赠送余额及可用状态。
+- **网页User Token**：不是API Key，也不是OAuth。查询 `platform.deepseek.com/api/v0/users/get_user_summary` 与 `api/v0/usage/by_api_key/cost`，显示账户余额及北京时间包含今天的7个自然日消费。属于私有网页接口，可能变化或拒绝请求；不冒充浏览器，不自动登录或续期，Token失效需手动更新。
+- 多币种分别显示，绝不合计CNY／USD；没有币种归属的多币种消费保持未知。余额、消费失败分别标错误和缓存时间，缺失不当作零。
+- **没有已核实可用的DeepSeek订阅查询接口**，不显示虚构套餐、到期或订阅百分比。近7日消费不是Token数，不替代今日／本月全站六列统计。
+- 参考 [SylvanRoe/Scripting · DashBoard-Kit](https://github.com/SylvanRoe/Scripting/tree/9eadd3070c9385df8828928ad7eae77316eb8507/DashBoard-Kit) 的endpoint、字段与主余额／次明细思路，独立实现；不自动读取其他脚本或共享目录的密钥，不复制其源代码／素材。
+
+主屏小中大在原账号格位显示总余额和明细／7日消费、采集时刻与缓存／错误；锁屏矩形显示余额明细，圆形／单行显示余额，不绘制额度百分比。多币种或长金额可能受系统格位限制缩小／截断，完整字段在App查看。
+
 #### 官方账号管理
 
-- App 显示完整邮箱；小组件默认显示邮箱前缀，也可设置自定义名称。邮箱未提供时会明确提示。
+- Codex／Claude在App显示完整邮箱；小组件默认显示邮箱前缀，也可设置自定义名称。邮箱未提供时会明确提示。
 - “点击退出”只移除此账号的本机登录及对应显示数据，不退出其他账号，也不是撤销整个官方会话。
 - App、组件和额度刷新按钮共用续期逻辑：访问令牌临近到期或额度接口返回 401 时尝试续期，并保存服务返回的轮换令牌。网络故障、429 或 5xx 不等于登录失效，保留登录和可用额度缓存；429 按有效 `Retry-After` 冷却，未提供时本机退避 5 分钟，冷却后在下次正常刷新时再尝试，不使用后台定时器或无限重试。续期前及失败后会重读本机凭据；若另一执行已保存有效新令牌，会优先复用。仍明确返回 `invalid_grant` 且没有有效新凭据时提示重新添加账号。多个系统执行同时续期仍可能竞争，不能保证跨进程严格互斥。Claude授权交换与续期都使用JSON协商和脚本自身的诚实HTTP标识，不冒充官方客户端；这些兼容设置不能保证消除429。此机制不能消除官方限流，实际续期仍受服务、权限、网络及系统调度限制。
 
@@ -84,7 +98,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 4. 点“保存Sub2API并测试”，确认状态和账号列表。
 
 - 管理员密钥权限较高，使用可信部署及 HTTPS，不要分享密钥。已保存的密钥可留空沿用。
-- 账号额度支持 Claude OAuth／SetupToken 和 Codex OAuth；其他平台、普通 Key 或钱包／订阅余额不会冒充 5 h／每周额度。SetupToken 重置卡未知。
+- 账号额度支持 Claude OAuth／SetupToken 和 Codex OAuth；自动纳入DeepSeek按量账号，通过管理余额接口读取多币种总余额，无需额外Key。Sub2API接口未提供赠送／充值拆分，显示未提供。余额不冒充 5 h／每周额度；SetupToken 重置卡未知。
 - 统计是该部署**全站汇总**，不按用户、Key 或小组件所选账号过滤；花费是实际扣费，不是标准计费或上游账号成本。
 - 客户端只发送 GET 查询，不调用兑换、重置或写入刷新接口；额度查询可能由 Sub2API 请求上游服务。
 - 改变地址、密钥或时区会清理 Sub2API 对应缓存，避免混用。较旧部署缺少接口时显示错误或未知；单账号读取失败保留列表及该来源可用缓存，不用其他来源替代。

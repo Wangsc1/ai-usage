@@ -4,11 +4,11 @@ import {
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
 import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, cachedAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
-import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder } from "./api"
+import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.9.18"
-const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
+const VERSION = "1.10.0"
+const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
 function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (next: Account[]) => void }) {
@@ -135,6 +135,9 @@ function SettingsView() {
     const timer = setTimeout(() => setCooldownTick(cooldownTick + 1), 1000)
     return () => clearTimeout(timer)
   }, [source, loginProvider, cooldownTick, claudeCooling])
+  const [dsName, setDSName] = useState("")
+  const [dsToken, setDSToken] = useState("")
+  const [dsMode, setDSMode] = useState("api")
   const [logins, setLogins] = useState(officialAccounts())
   const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
   const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
@@ -303,16 +306,17 @@ function SettingsView() {
       }
       if (r.data) {
         const d = r.data
-        setStatus(r.stale ? "❌ 额度使用缓存：" + (r.error ?? "读取失败") : d.statistics?.error ? `⚠️ 额度已刷新；${statsName}统计独立读取失败` : "✅ 连接成功")
+        setStatus(r.stale ? "❌ 额度使用缓存：" + (r.error ?? "读取失败") : d.accounts.some(a => a.balance?.error || a.readError) || d.providerErrors?.length ? "⚠️ 部分账号读取失败或使用缓存，见下方详情" : d.statistics?.error ? `⚠️ 额度已刷新；${statsName}统计独立读取失败` : "✅ 连接成功")
         setLines([
-          `统计：${statsName}全部账号汇总；额度：${requestSource === "official" ? "官方OAuth（Codex/Claude）" : requestSource === "sub2api" ? "Sub2API" : "Parrot"}`,
+          `统计：${statsName}全部账号汇总；额度：${requestSource === "official" ? "官方（Codex/Claude OAuth、DeepSeek）" : requestSource === "sub2api" ? "Sub2API" : "Parrot"}`,
           ...(d.statistics ? [d.statistics.fetchedAt == null ? `${statsName}统计未提供` : `${statsName}统计${d.statistics.stale ? "缓存" : "更新时间"}：${new Date(d.statistics.fetchedAt).toLocaleString()}`,
             ...(d.statistics.error ? [`${statsName}统计错误：${d.statistics.error}`] : [])] : []),
           ...(d.today && d.month ? [
             `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
             `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
           ] : [`${statsName}今日/本月Token及花费统计未提供`]),
-          ...d.accounts.map(a => `${a.provider === "claude" ? "Claude" : "Codex"} ${a.name}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
+          ...(d.providerErrors ?? []),
+          ...d.accounts.map(a => a.provider === "deepseek" ? `${a.name}：${deepSeekSummary(a)}` : `${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.name}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
         ])
         await Widget.reloadAll()
       } else {
@@ -348,7 +352,7 @@ function SettingsView() {
         <LabeledContent title="当前脚本版本" value={VERSION} />
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot</Text>
-          <Text tag={"official"}>官方OAuth（Codex/Claude）</Text>
+          <Text tag={"official"}>官方（Codex/Claude OAuth、DeepSeek）</Text>
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
       </Section>
@@ -360,7 +364,7 @@ function SettingsView() {
           <Text tag="parrot">Parrot</Text><Text tag="sub2api">Sub2API</Text>
         </Picker>
       </Section>
-      {statisticsSource === "sub2api" || source === "sub2api" ? <Section header={<Text>Sub2API连接</Text>} footer={<Text>额度与统计共用部署根地址和Admin API Key（不是普通用户Key）。统计为全站汇总，花费为actual_cost实际扣费；时区决定今日/自然月边界。管理员凭据仅存本机钥匙串，权限较高，建议HTTPS。只GET查询，不兑换重置卡、不重置额度。账号仅显示Claude OAuth/SetupToken和Codex OAuth；缺少字段显示未知。</Text>}>
+      {statisticsSource === "sub2api" || source === "sub2api" ? <Section header={<Text>Sub2API连接</Text>} footer={<Text>额度与统计共用部署根地址和Admin API Key（不是普通用户Key）。统计为全站汇总，花费为actual_cost实际扣费；时区决定今日/自然月边界。管理员凭据仅存本机钥匙串，权限较高，建议HTTPS。只GET查询，不兑换重置卡、不重置额度。自动发现Claude OAuth/SetupToken、Codex OAuth和DeepSeek余额账号；缺少字段显示未知。</Text>}>
         <TextField title="Sub2API地址" value={subUrl} onChanged={setSubUrl} prompt="https://你的部署地址" />
         <SecureField title="Sub2API管理员密钥" value={subKey} onChanged={setSubKey} prompt={hasSubKey ? "已保存，留空沿用" : "Admin API Key"} />
         <TextField title="统计时区" value={subTimezone} onChanged={setSubTimezone} prompt="Asia/Shanghai" />
@@ -409,7 +413,7 @@ function SettingsView() {
         </> : null}
         {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
         {logins.map(a => <HStack key={a.id}>
-          <Text fixedSize={{ horizontal: false, vertical: true }}>{`${a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
+          <Text fixedSize={{ horizontal: false, vertical: true }}>{`${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
           <Spacer />
           <Button title="点击退出" buttonStyle="borderless" fixedSize={{ horizontal: true, vertical: true }} disabled={busy || !!device || !!claude} action={async () => {
           try {
@@ -422,6 +426,17 @@ function SettingsView() {
         }} />
         </HStack>)}
         <Button title={"刷新官方额度"} action={test} disabled={busy || !!device || !!claude} />
+      </Section> : null}
+      {source === "official" ? <Section header={<Text>添加DeepSeek官方账号</Text>} footer={<Text>不是OAuth：API Key查询余额；网页User Token通过私有平台接口查询余额与北京时间近7日消费。无订阅接口；Token失效需更新。凭据仅保存本机钥匙串，不自动读取其他脚本。每次添加独立账号，退出仅移除该账号。</Text>}>
+        <TextField title="DeepSeek账号名称" value={dsName} onChanged={setDSName} />
+        <Picker title="DeepSeek认证方式" value={dsMode} onChanged={setDSMode} disabled={busy}>
+          <Text tag="api">API Key（余额）</Text><Text tag="web">网页User Token（余额与7日消费）</Text>
+        </Picker>
+        <SecureField title="DeepSeek凭据" value={dsToken} onChanged={setDSToken} prompt="仅本机钥匙串" />
+        <Button title="添加DeepSeek账号" disabled={busy || !!device || !!claude} action={async () => {
+          try { addDeepSeekAccount(dsName, dsMode as "api" | "web", dsToken); setDSToken(""); setDSName(""); setLogins(officialAccounts()); await test() }
+          catch { setStatus("DeepSeek添加失败，请检查名称、认证方式和钥匙串权限") }
+        }} />
       </Section> : null}
       {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />

@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.9.18"
+export const VERSION = "1.10.0"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -64,6 +64,8 @@ export type QuotaWindow = {
 }
 
 export type Account = {
+  readError?: string
+  balance?: DeepSeekBalance
   id: string
   enabled: boolean
   provider: string // "claude" | "openai" | ...
@@ -75,6 +77,7 @@ export type Account = {
 }
 
 export type UsageData = {
+  providerErrors?: string[]
   today: Metric | null
   month: Metric | null
   todayByFamily: Record<string, Metric>
@@ -275,10 +278,12 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
     })
   )
   // Claude 在前，其余按名称
+  const ds = await dsParrot(baseUrl, cred, (Storage.get<UsageData>(KEY_CACHE)?.accounts ?? []))
+  accounts.push(...ds.accounts)
   accounts.sort((x, y) =>
     x.provider === y.provider ? x.name.localeCompare(y.name) : x.provider === "claude" ? -1 : y.provider === "claude" ? 1 : x.provider.localeCompare(y.provider)
   )
-  return { today: null, month: null, todayByFamily: {}, monthByFamily: {}, fetchedAt: Date.now(), accounts }
+  return { today: null, month: null, todayByFamily: {}, monthByFamily: {}, fetchedAt: Date.now(), accounts, ...(ds.error ? { providerErrors: [ds.error] } : {}) }
 }
 
 function parseStats(today: any, month: any): ParrotStats {
@@ -433,7 +438,7 @@ async function loadSub2APIQuota(): Promise<LoadResult> {
       for (const row of result.items) {
         if (!Number.isSafeInteger(row.id) || row.id <= 0 || seen.has(row.id)) throw new Error("Sub2API账号ID重复或无效")
         seen.add(row.id)
-        if ((row.platform === "anthropic" && ["oauth", "setup-token"].includes(row.type)) || (row.platform === "openai" && row.type === "oauth")) rows.push(row)
+        if ((row.platform === "anthropic" && ["oauth", "setup-token"].includes(row.type)) || (row.platform === "openai" && row.type === "oauth") || row.platform === "deepseek") rows.push(row)
       }
     }
     const errors: string[] = [], cards = Storage.get<Record<string, { count: number | null; at: number; error?: string }>>(KEY_SUB_CARDS) ?? {}
@@ -441,6 +446,7 @@ async function loadSub2APIQuota(): Promise<LoadResult> {
     // Bounded sequential reads avoid a per-account upstream request burst. List remains complete if any read fails.
     for (const row of rows) {
       const id = `sub2api:${row.id}`, old = cached?.accounts.find(a => a.id === id)
+      if (row.platform === "deepseek") { accounts.push(await dsSub2(cfg, row, old)); continue }
       let usage: any = null, credits: any = null, quotaFailed = false
       try { usage = await sub2Get(cfg, row.platform === "openai" ? `/openai/accounts/${row.id}/quota` : `/accounts/${row.id}/usage`) }
       catch (e: any) { quotaFailed = true; errors.push(`${id}额度：${typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API网络或解析失败"}`) }
@@ -591,9 +597,9 @@ function persist(items: Credential[]) {
 function officialDisplay(item: Credential, index: number): string {
   return item.email || `账号 ${index + 1}（邮箱未提供）`
 }
-export function officialAccounts(): { id: string; name: string; email: string; provider: "codex" | "claude" }[] {
+export function officialAccounts(): { id: string; name: string; email: string; provider: "codex" | "claude" | "deepseek" }[] {
   // Legacy Codex records have no provider field; their dedicated credential collection identifies them.
-  return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const })), ...claudeAccounts()]
+  return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const })), ...claudeAccounts(), ...dsCredentials().map(a => ({ id: a.id, name: a.name, email: "", provider: "deepseek" as const }))]
 }
 export function officialCached(): UsageData | null {
   const cache = Storage.get<UsageData>(CACHE)
@@ -602,7 +608,8 @@ export function officialCached(): UsageData | null {
   return { ...cache, accounts: sortAccounts(cache.accounts.map(a => ({ ...a, name: names.get(a.id) ?? a.name })), "official") }
 }
 export function logoutOfficial(id: string) {
-  if (id.startsWith("claude:")) logoutClaude(id)
+  if (id.startsWith("deepseek:")) { if (!Keychain.set(DS_KEY, JSON.stringify(dsCredentials().filter(x => x.id !== id)))) throw new Error("DeepSeek钥匙串保存失败") }
+  else if (id.startsWith("claude:")) logoutClaude(id)
   else persist(credentials().filter(x => x.id !== id))
   saveWidgetName(id, "", "official")
   const cache = officialCached()
@@ -814,12 +821,15 @@ async function fetchAccount(item: Credential, index: number): Promise<Account> {
 export async function loadOfficialUsage(): Promise<LoadResult> {
   try {
     const items = credentials()
-    if (!items.length && !claudeAccounts().length) return { data: null, stale: false, error: "请在脚本中添加官方账号" }
+    if (!items.length && !claudeAccounts().length && !dsCredentials().length) return { data: null, stale: false, error: "请在脚本中添加官方账号" }
     // Keep complete mixed-provider snapshots: a failed account is not silently dropped as current.
-    const [codex, claude] = await Promise.all([Promise.all(items.map(fetchAccount)), loadClaudeAccounts()])
+    const isolate = dsCredentials().length > 0
+    const [codex, claude] = await Promise.all([Promise.all(items.map((item, i) => isolate ? fetchAccount(item, i).catch(() => quotaFallback(item.id, officialDisplay(item, i), "openai")) : fetchAccount(item, i))), loadClaudeAccounts(isolate)])
+    const deepseek = (await Promise.all(dsCredentials().map(dsOfficial))).filter((a): a is Account => !!a)
     const live = new Set(officialAccounts().map(a => a.id))
-    const accounts = syncAccountOrder([...codex, ...claude].filter(a => live.has(a.id)), "official")
-    const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts, fetchedAt: Date.now() }
+    const accounts = syncAccountOrder([...codex, ...claude, ...deepseek].filter(a => live.has(a.id)), "official")
+    const providerErrors = accounts.flatMap(a => a.readError ? [`${a.name}：${a.readError}`] : [])
+    const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts, fetchedAt: Date.now(), ...(providerErrors.length ? { providerErrors } : {}) }
     Storage.set(CACHE, data)
     return { data, stale: false, error: null }
   } catch (e: any) {
@@ -1157,14 +1167,14 @@ export function mapClaudeUsage(b: any): { fiveHour: QuotaWindow; sevenDay: Quota
   // Never substitute model-specific Opus/Sonnet or extra usage for the aggregate weekly window.
   return { fiveHour: window(b?.five_hour), sevenDay: window(b?.seven_day), resetCredits: claudeResetCount(b) }
 }
-export async function loadClaudeAccounts(): Promise<Account[]> {
+export async function loadClaudeAccounts(isolate = false): Promise<Account[]> {
   // In-process de-duplication: concurrent App/widget loads share one request sequence per account.
   return Promise.all(credentials().map(item => {
     const pending = claudeLoads.get(item.id)
-    if (pending) return pending
+    if (pending) return isolate ? pending.catch(() => quotaFallback(item.id, item.email || "Claude账号", "claude")) : pending
     const job = loadClaudeAccount(item).finally(() => { if (claudeLoads.get(item.id) === job) claudeLoads.delete(item.id) })
     claudeLoads.set(item.id, job)
-    return job
+    return isolate ? job.catch(() => quotaFallback(item.id, item.email || "Claude账号", "claude")) : job
   }))
 }
 async function loadClaudeAccount(item: Credential): Promise<Account> {
@@ -1213,3 +1223,170 @@ export const beginClaudeLogin = ClaudeOAuth.beginClaudeLogin
 export const cancelClaudeLogin = ClaudeOAuth.cancelClaudeLogin
 export const finishClaudeLogin = ClaudeOAuth.finishClaudeLogin
 export const mapClaudeUsage = ClaudeOAuth.mapClaudeUsage
+
+// DeepSeek protocols independently implemented from DashBoard-Kit data.ts (SylvanRoe/Scripting,
+// 9eadd307). No reference source/assets copied: repository exposes no license grant.
+export type DeepSeekMoney = { currency: string; total: string | null; granted: string | null; toppedUp: string | null; weekCost: string | null }
+export type DeepSeekBalance = { money: DeepSeekMoney[]; fetchedAt: number | null; weekFetchedAt?: number | null; weekStale?: boolean; stale: boolean; error: string | null; available: boolean | null; auth: string }
+const DS_KEY = "ai_usage_deepseek_credentials_v1"
+type DeepSeekCredential = { id: string; name: string; mode: "api" | "web"; token: string }
+class DeepSeekReadError extends Error {}
+function dsCredentials(): DeepSeekCredential[] { try { return JSON.parse(Keychain.get(DS_KEY) || "[]") } catch { return [] } }
+export function addDeepSeekAccount(name: string, mode: "api" | "web", token: string): string {
+  if (!name.trim() || !token.trim() || !["api", "web"].includes(mode)) throw new Error("DeepSeek名称、认证方式和凭据不能为空")
+  if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function") throw new Error("当前Scripting不支持安全随机ID，请更新Scripting")
+  const id = `deepseek:${Date.now().toString(36)}:${Crypto.generateSymmetricKey(256).toHexString()}`
+  if (!Keychain.set(DS_KEY, JSON.stringify([...dsCredentials(), { id, name: name.trim(), mode, token: token.trim() }]))) throw new Error("DeepSeek钥匙串保存失败")
+  return id
+}
+function dsDecimal(value: any): string | null {
+  let text = typeof value === "number" && Number.isFinite(value) ? String(value) : typeof value === "string" ? value : ""
+  if (typeof value === "number" && /e/i.test(text)) {
+    const match = /^(-?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/i.exec(text)
+    if (!match) return null
+    const digits = match[2] + (match[3] || ""), point = match[2].length + Number(match[4])
+    text = match[1] + (point <= 0 ? "0." + "0".repeat(-point) + digits : point >= digits.length ? digits + "0".repeat(point - digits.length) : digits.slice(0, point) + "." + digits.slice(point))
+  }
+  return /^-?\d+(?:\.\d+)?$/.test(text) ? text : null
+}
+// Exact decimal addition avoids float rounding and keeps currency values separate.
+function dsSum(values: string[]): string {
+  const scale = Math.max(0, ...values.map(v => (v.split(".")[1] || "").length))
+  const total = values.reduce((sum, v) => { const negative = v.startsWith("-"); const [a, b = ""] = v.replace(/^-/, "").split("."); return sum + BigInt((negative ? "-" : "") + a + b.padEnd(scale, "0")) }, 0n)
+  const sign = total < 0n ? "-" : "", digits = (total < 0n ? -total : total).toString().padStart(scale + 1, "0")
+  return sign + (scale ? digits.slice(0, -scale) + "." + digits.slice(-scale) : digits)
+}
+export function deepSeekSummary(a: Account): string {
+  const b = a.balance
+  if (!b) return "余额未提供"
+  return `${b.auth} · ${b.money.map(m => `${m.currency} 总余额 ${m.total ?? "未提供"} · 充值 ${m.toppedUp ?? "未提供"} · 赠送 ${m.granted ?? "未提供"}${b.auth === "网页Token" ? ` · 近7日消费 ${m.weekCost ?? "未提供"}${b.weekStale ? "（缓存）" : ""}` : ""}`).join("；") || "余额未提供"} · ${b.weekFetchedAt ? `7日采集 ${new Date(b.weekFetchedAt).toISOString()}` : ""} · ${b.available === null ? "可用状态未提供" : b.available ? "可用" : "不可用"} · ${b.fetchedAt == null ? "未采集" : `采集 ${new Date(b.fetchedAt).toISOString()}`}${b.stale ? " · 缓存" : ""}${b.error ? ` · ${b.error}` : ""}`
+}
+function dsAccount(id: string, name: string, balance: DeepSeekBalance, enabled = true): Account {
+  return { id, name, provider: "deepseek", enabled, available: balance.available !== false, balance,
+    fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null }, sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null }
+}
+function dsFallback(id: string, name: string, old: Account | undefined, auth: string, error: string): Account {
+  return dsAccount(id, name, { money: old?.balance?.money ?? [], fetchedAt: old?.balance?.fetchedAt ?? null, weekFetchedAt: old?.balance?.weekFetchedAt ?? null, stale: true, available: old?.balance?.available ?? null, auth, error }, old?.enabled ?? true)
+}
+function dsPublicMoney(body: any): DeepSeekMoney[] {
+  if (!Array.isArray(body?.balance_infos) || !body.balance_infos.length) throw new Error("DeepSeek余额字段缺失")
+  return body.balance_infos.map((m: any) => {
+    if (typeof m.currency !== "string" || !m.currency || dsDecimal(m.total_balance) === null) throw new Error("DeepSeek余额字段无效")
+    return { currency: m.currency, total: dsDecimal(m.total_balance), granted: dsDecimal(m.granted_balance), toppedUp: dsDecimal(m.topped_up_balance), weekCost: null }
+  })
+}
+const dsFlights = new Map<string, Promise<Account | null>>()
+async function dsOfficial(item: DeepSeekCredential): Promise<Account | null> {
+  const existing = dsFlights.get(item.id); if (existing) return existing
+  const job = (async () => {
+    const old = officialCached()?.accounts.find(a => a.id === item.id)
+    let account: Account
+    try {
+      const headers = { Authorization: `Bearer ${item.token}`, Accept: "application/json", "User-Agent": "ai-usage/1.10.0" }
+      if (item.mode === "api") {
+        const r = await fetch("https://api.deepseek.com/user/balance", { headers, timeout: 15 })
+        if (r.status !== 200) throw new DeepSeekReadError(`DeepSeek API余额 HTTP ${r.status}`)
+        const body = await r.json(); const money = dsPublicMoney(body)
+        account = dsAccount(item.id, item.name, { money, fetchedAt: Date.now(), stale: false, error: null, available: typeof body.is_available === "boolean" ? body.is_available : null, auth: "API Key" })
+      } else {
+        // Private platform contract; no API-key fallback or automatic session renewal.
+        const webHeaders = { ...headers, Referer: "https://platform.deepseek.com/usage" }
+        const r = await fetch("https://platform.deepseek.com/api/v0/users/get_user_summary", { headers: webHeaders, timeout: 20 })
+        if (r.status !== 200) throw new DeepSeekReadError(`DeepSeek网页余额 HTTP ${r.status}；可重试，Token失效需更新`)
+        const body = await r.json(), biz = body?.data?.biz_data
+        if (body?.code !== 0 || !Array.isArray(biz?.normal_wallets) || !Array.isArray(biz?.bonus_wallets)) throw new DeepSeekReadError("DeepSeek网页余额字段缺失；可重试，Token失效需更新")
+        const currencies = new Set<string>(), normal = new Map<string, string[]>(), bonus = new Map<string, string[]>()
+        for (const [rows, target] of [[biz.normal_wallets, normal], [biz.bonus_wallets, bonus]] as const) for (const row of rows) {
+          const amount = dsDecimal(row.balance)
+          if (typeof row.currency !== "string" || !row.currency || amount === null) throw new DeepSeekReadError("DeepSeek网页钱包字段无效")
+          currencies.add(row.currency); target.set(row.currency, [...target.get(row.currency) ?? [], amount])
+        }
+        const money: DeepSeekMoney[] = [...currencies].map(currency => ({ currency, total: dsSum([...(normal.get(currency) ?? []), ...(bonus.get(currency) ?? [])]), toppedUp: normal.has(currency) ? dsSum(normal.get(currency)!) : null, granted: bonus.has(currency) ? dsSum(bonus.get(currency)!) : null, weekCost: null }))
+        const balance: DeepSeekBalance = { money, fetchedAt: Date.now(), stale: false, error: null, available: null, auth: "网页Token", weekFetchedAt: null }
+        try {
+          const midnight = Math.floor((Date.now() / 1000 + 28800) / 86400) * 86400 - 28800
+          const cost = await fetch(`https://platform.deepseek.com/api/v0/usage/by_api_key/cost?start=${midnight - 6 * 86400}&end=${midnight + 86400}&tz=28800`, { headers: webHeaders, timeout: 15 })
+          if (cost.status !== 200) throw new Error("cost")
+          const cb = await cost.json(), rows = cb?.data?.biz_data?.data
+          if ((cb?.code != null && cb.code !== 0) || !Array.isArray(rows)) throw new Error("schema")
+          const amounts = new Map<string, string[]>()
+          for (const row of rows) {
+            if (!Array.isArray(row.series)) throw new Error("schema")
+            for (const series of row.series) {
+              if (!Array.isArray(series.buckets)) throw new Error("schema")
+              for (const bucket of series.buckets) {
+                const value = dsDecimal(bucket.cost), currency = bucket.currency ?? series.currency ?? row.currency ?? (money.length === 1 ? money[0].currency : null)
+                if (value === null || typeof currency !== "string" || !currencies.has(currency)) throw new Error("currency")
+                amounts.set(currency, [...amounts.get(currency) ?? [], value])
+              }
+            }
+          }
+          for (const m of money) m.weekCost = amounts.has(m.currency) ? dsSum(amounts.get(m.currency)!) : null
+          balance.weekFetchedAt = Date.now()
+        } catch { balance.error = "近7日消费读取失败或币种无法确认，可重试；未提供不等于零"; for (const m of money) m.weekCost = old?.balance?.money.find(o => o.currency === m.currency)?.weekCost ?? null; balance.weekFetchedAt = old?.balance?.weekFetchedAt ?? null; balance.weekStale = true }
+        account = dsAccount(item.id, item.name, balance)
+      }
+    } catch (e: any) {
+      const safe = e instanceof DeepSeekReadError ? e.message : "DeepSeek网络或解析失败，可重试"
+      account = dsFallback(item.id, item.name, old, item.mode === "api" ? "API Key" : "网页Token", safe)
+    }
+    // A removed or changed credential must never be resurrected by late responses.
+    const latest = dsCredentials().find(x => x.id === item.id)
+    return latest && latest.token === item.token && latest.mode === item.mode ? account : null
+  })()
+  dsFlights.set(item.id, job)
+  try { return await job } finally { dsFlights.delete(item.id) }
+}
+async function dsParrot(baseUrl: string, cred: string, old: Account[]): Promise<{ accounts: Account[]; error?: string }> {
+  const accounts: Account[] = [], seen = new Set<string>()
+  try {
+    for (let page = 1, more = true; more; page++) {
+      const r = await fetch(`${baseUrl}/api/management/v1/channels?providerId=deepseek&page=${page}&pageSize=50`, { headers: { Authorization: `Bearer ${cred}` }, timeout: 15 })
+      if (r.status === 401) throw new HttpError(401, "AUTHENTICATION_FAILED")
+      if (r.status !== 200) throw new Error(`HTTP ${r.status}`)
+      const body = await r.json()
+      if (!Array.isArray(body?.data) || typeof body?.meta?.hasNext !== "boolean" || body.meta.page !== page) throw new Error("schema")
+      more = body.meta.hasNext
+      if (more && !body.data.length) throw new Error("pagination")
+      for (const row of body.data) {
+        if (row.providerId !== "deepseek") continue
+        if (typeof row.id !== "string" || !row.id) throw new Error("channel ID missing")
+        const id = `parrot:deepseek:${row.id}`, name = String(row.name || row.id), u = row.providerUsage
+        if (seen.has(id)) throw new Error("duplicate channel ID")
+        seen.add(id)
+        try {
+          if (!u?.supported || !Array.isArray(u?.snapshot?.balances)) throw new Error("snapshot")
+          const map = new Map<string, DeepSeekMoney>()
+          for (const b of u.snapshot.balances) {
+            if (typeof b.currency !== "string" || !b.currency || dsDecimal(b.value) === null) throw new Error("money")
+            const m = map.get(b.currency) ?? { currency: b.currency, total: null, granted: null, toppedUp: null, weekCost: null }
+            if (b.id === "total") m.total = dsDecimal(b.value); else if (b.id === "granted") m.granted = dsDecimal(b.value); else if (b.id === "topped_up") m.toppedUp = dsDecimal(b.value)
+            map.set(b.currency, m)
+          }
+          const time = Date.parse(u.fetchedAt), money = [...map.values()]
+          if (!Number.isFinite(time) || !money.length) throw new Error("snapshot")
+          accounts.push(dsAccount(id, name, { money, fetchedAt: time, stale: !!u.stale, error: u.error ? "Parrot余额快照报告错误" : null, available: u.snapshot.notices?.includes("账户不可用") ? false : u.snapshot.notices?.includes("账户可用") ? true : null, auth: "Parrot快照" }, !!row.enabled))
+        } catch { accounts.push({ ...dsFallback(id, name, old.find(a => a.id === id), "Parrot快照", "Parrot DeepSeek余额未采集或读取失败"), enabled: !!row.enabled }) }
+      }
+    }
+    return { accounts }
+  } catch (e) { if (e instanceof HttpError && e.status === 401) throw e; return { accounts: [...accounts, ...old.filter(a => a.provider === "deepseek" && !accounts.some(current => current.id === a.id)).map(a => dsFallback(a.id, a.name, a, "Parrot快照", "Parrot DeepSeek频道接口不可用，可重试"))], error: "Parrot DeepSeek频道接口不可用（旧版可能未提供），原账号仍可读取" } }
+}
+async function dsSub2(cfg: ReturnType<typeof getSub2APIConfig>, row: any, old?: Account): Promise<Account> {
+  const id = `sub2api:${row.id}`, name = String(row.name || id)
+  try {
+    const b = await sub2Get(cfg, `/cn-providers/accounts/${row.id}/balance`)
+    if (!b.success || !Array.isArray(b.balances) || !b.balances.length || !Number.isFinite(b.fetched_at) || b.fetched_at <= 0 || !Number.isFinite(new Date(b.fetched_at * 1000).getTime())) throw new Error("schema")
+    const money = b.balances.map((m: any) => {
+      const total = dsDecimal(m.balance)
+      if (typeof m.currency !== "string" || !m.currency || total === null) throw new Error("money")
+      return { currency: m.currency, total, granted: null, toppedUp: null, weekCost: null }
+    })
+    return dsAccount(id, name, { money, fetchedAt: b.fetched_at * 1000, stale: false, error: null, available: typeof b.available === "boolean" ? b.available : null, auth: "Sub2API" }, row.status !== "disabled")
+  } catch { return { ...dsFallback(id, name, old, "Sub2API", "Sub2API DeepSeek余额读取失败，可重试；未提供赠送/充值拆分"), enabled: row.status !== "disabled" } }
+}
+
+function quotaFallback(id: string, name: string, provider: string): Account {
+  const old = officialCached()?.accounts.find(a => a.id === id)
+  return { ...(old ?? { id, name, provider, enabled: true, available: false, fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null }, sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null }), readError: "额度读取失败，保留原账号缓存；可重试" }
+}
