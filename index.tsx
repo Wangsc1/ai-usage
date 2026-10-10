@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.5"
+const VERSION = "1.10.6"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -470,8 +470,8 @@ function SettingsView() {
         </Picker>
       </Section>
 
-      <Section header={<Text>预览小组件</Text>}>
-        <Button title="预览小组件" action={() => Widget.preview({ family: "systemSmall" })} />
+      <Section header={<Text>预览组件</Text>}>
+        <Button title="预览组件" action={() => Widget.preview({ family: "systemSmall" })} />
       </Section>
 
 
