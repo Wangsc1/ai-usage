@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.16"
+const VERSION = "1.10.17"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -365,8 +365,7 @@ function SettingsView() {
       {statisticsSource === "sub2api" || source === "sub2api" ? <Section header={<Text>Sub2API连接</Text>}>
         <TextField title="Sub2API地址" value={subUrl} onChanged={setSubUrl} prompt="https://你的部署地址" />
         <TextField title="Sub2API管理员密钥" value={subKeyEditing ? subKey : maskedKey(subKey || subCur.adminKey || "")} onFocus={() => { setSubKey(""); setSubKeyEditing(true) }} onBlur={() => setSubKeyEditing(false)} onChanged={value => { if (subKeyEditing && value !== maskedKey(subCur.adminKey || "")) setSubKey(value) }} prompt="Admin API Key" />
-        <TextField title="统计时区" value={subTimezone} onChanged={setSubTimezone} prompt="Asia/Shanghai" />
-        <Button title="保存Sub2API并测试" disabled={busy} action={async () => {
+        <Button title="保存并测试" disabled={busy} action={async () => {
           try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subTimezone); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
           catch { /* invalid configuration is not saved */ }
         }} />
