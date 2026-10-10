@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.27"
+const VERSION = "1.10.28"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -368,7 +368,7 @@ function SettingsView() {
       <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>}>
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot</Text>
-          <Text tag={"official"}>Codex,Claude,DeepSeek</Text>
+          <Text tag={"official"}>OAuth,API</Text>
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
         <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async value => {

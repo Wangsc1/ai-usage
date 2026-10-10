@@ -8,7 +8,7 @@
 
 进入或重新打开 App 仅显示当前来源的本机缓存，不自动请求或续期；需要最新数据时手动刷新或保存并测试。设置页不显示单独的连接状态，刷新结果体现在账号列表和小组件中。
 
-- **账号来源**：Parrot、Codex,Claude,DeepSeek、Sub2API 三选一。Parrot／Sub2API 自动发现账号与 DeepSeek 频道；官方账号支持 Codex／Claude 授权登录和 DeepSeek 官方 API Key 直接添加。
+- **账号来源**：Parrot、OAuth,API、Sub2API 三选一。Parrot／Sub2API 自动发现账号与 DeepSeek 频道；官方账号支持 Codex／Claude 授权登录和 DeepSeek 官方 API Key 直接添加。
 - **统计来源**：Parrot、Sub2API 独立二选一，不合计。可以组合使用，例如官方额度＋Sub2API统计。
 - 配置、账号缓存、排序与自定义名称按账号来源隔离；切换不会删除另一来源的配置或登录。
 - 重置卡只跟随当前账号来源，不从统计来源或其他服务补齐。有效数量大于 0 时显示 `RE:N`；0 或未知时隐藏。只查询，不兑换重置卡或重置额度。
@@ -51,7 +51,7 @@ DeepSeek频道通过管理接口自动分页发现，无需逐账号填写API Ke
 
 ### 官方账号（Codex / Claude OAuth、DeepSeek）
 
-选择 **Codex,Claude,DeepSeek**，再在“添加账号”右侧选择对应服务。官方登录和额度读取不需要 Parrot 或 Sub2API；今日／本月统计需要另外配置统计来源。可以添加多个 Codex、Claude 账号，重复登录同一身份会更新原记录。
+选择 **OAuth,API**，再在“添加账号”右侧选择对应服务。官方登录和额度读取不需要 Parrot 或 Sub2API；今日／本月统计需要另外配置统计来源。可以添加多个 Codex、Claude 账号，重复登录同一身份会更新原记录。
 
 #### Codex
 
@@ -74,7 +74,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 
 #### DeepSeek
 
-账号来源选“Codex,Claude,DeepSeek”，在“添加账号”同行右侧选择“DeepSeek”，即可看到唯一的“添加DeepSeek”入口，新增账号固定使用API Key。填写本机显示名称，输入官方API Key后点“保存”直接保存并验证余额。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
+账号来源选“OAuth,API”，在“添加账号”同行右侧选择“DeepSeek”，即可看到唯一的“添加DeepSeek”入口，新增账号固定使用API Key。填写本机显示名称，输入官方API Key后点“保存”直接保存并验证余额。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
 
 - **API Key**：只请求 `https://api.deepseek.com/user/balance`，显示总余额、充值余额、赠送余额及可用状态。
 - **已有网页User Token账号**：保留凭据、原查询能力和局部退出，不再提供新添加入口。不是API Key，也不是OAuth。查询 `platform.deepseek.com/api/v0/users/get_user_summary` 与 `api/v0/usage/by_api_key/cost`，显示账户余额及北京时间包含今天的7个自然日消费。属于私有网页接口，可能变化或拒绝请求；不冒充浏览器，不自动登录或续期，Token失效需手动更新。
