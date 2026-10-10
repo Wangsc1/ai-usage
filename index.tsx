@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.30"
+const VERSION = "1.10.31"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -403,17 +403,16 @@ function SettingsView() {
           </Picker>
         </HStack>
         {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
-        {loginProvider === "claude" && claudeProgress ? <Text>{claudeProgress}</Text> : null}
+        {loginProvider === "claude" && claudeProgress && claudeProgress !== "等待Claude回调（尚未收到）" ? <Text>{claudeProgress}</Text> : null}
         {claude ? <>
-          <Text>{claude.manual ? "Claude官方手动授权码：完成授权后粘贴完整code#state" : "Claude本机回调：完成网页授权后自动保存账号"}</Text>
           {claude.fallback ? <Text font={12} foregroundStyle="secondaryLabel">{claude.fallback}</Text> : null}
-          <Button title="打开Claude授权页" action={() => openClaude()} disabled={busy} />
+          <Button title="点击登录" action={() => openClaude()} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
           {claude.manual ? <>
             <SecureField title="本次完整授权码" value={claudeCode} onChanged={setClaudeCode} prompt="code#state" />
             <Button title="完成Claude授权" action={() => completeClaude()} disabled={busy || !claudeCode.trim()} />
-          </> : <Button title="改用手动授权码" action={() => startClaude(true)} disabled={busy} />}
-          <Button title="取消Claude登录" action={() => { stopAuth(); setBusy(false) }} />
+          </> : null}
+          <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
         {device ? <>
           <HStack frame={{ maxWidth: "infinity" }}>

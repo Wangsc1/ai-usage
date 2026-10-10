@@ -702,7 +702,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.30')
+  assert.equal(api.VERSION,'1.10.31')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1244,13 +1244,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.30')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.31')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.30');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.31');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1361,9 +1361,9 @@ async function main() {
     tree.find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('claude')
     tree=render();await tree.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();return render()
   }
-  authUI=await startClaudeUI();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='打开Claude授权页'))
+  authUI=await startClaudeUI();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='点击登录'))
   let uiD=uiAttempt(),uiServer=claudeServers.at(-1)
-  const autoBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
+  const autoBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
   assert.equal(instances.at(-1).options.ephemeral,true);assert.equal(instances.at(-1).urls[0],uiD.url)
   uiServer.handlers['/callback'](callback(uiD.state));await autoBrowser
   for(let i=0;i<50&&!render().some(x=>isLine(x)&&lineOf(x).icon==='claude'&&lineOf(x).name==='ui-auto@example.test');i++)await Promise.resolve()
@@ -1372,13 +1372,19 @@ async function main() {
   assert.ok(api.officialCached().accounts.some(a=>a.id==='claude:ui-claude-auto:org-a'));assert.equal(instances.at(-1).disposed,1);assert.equal(uiServer.stops,1)
   assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'));assert.equal(claudeTimers.size,0)
   closeClaudeModal() // native dismissal settlement may occur later; already disposed/completed
-  // Switching explicitly to manual cancels the old callback and generates a fresh state/redirect.
+  // No manual-switch entry: simulate an unavailable loopback server to test retained automatic fallback.
+  const startManualFallbackUI=()=>{
+    const tree=render();assert.ok(!tree.some(x=>x.type==='Button'&&x.props.title==='改用手动授权码'))
+    tree.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+    const savedServer=context.HttpServer;delete context.HttpServer
+    try { render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action() } finally { context.HttpServer=savedServer }
+  }
   claudeAccount='ui-claude-manual';claudeEmail='ui-manual@example.test';authUI=await startClaudeUI()
   const autoState=uiAttempt().state,oldUiServer=claudeServers.at(-1)
-  authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
+  startManualFallbackUI()
   authUI=render();uiD=uiAttempt();assert.equal(uiD.manual,true);assert.notEqual(uiD.state,autoState);assert.equal(oldUiServer.stops,1)
   assert.ok(!authUI.some(x=>x.type==='Button'&&/Safari/.test(x.props.title||'')),'Claude Safari entry removed')
-  {const savedPresent=presentBrowser;presentBrowser=async()=>{};await authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action();presentBrowser=savedPresent};assert.equal(instances.at(-1).urls[0],uiD.url)
+  {const savedPresent=presentBrowser;presentBrowser=async()=>{};await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();presentBrowser=savedPresent};assert.equal(instances.at(-1).urls[0],uiD.url)
   assert.equal(uiD.consumed,false);authUI=render()
   authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-ui-code#'+uiD.state)
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
@@ -1387,12 +1393,12 @@ async function main() {
   // UI cancel/source/settings dismissal during exchange: late response cannot persist account/code.
   for(const mode of ['cancel','source','dismiss','provider']){
     claudeAccount='ui-abandoned-'+mode;claudeEmail=mode+'@example.test';authUI=await startClaudeUI()
-    authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action();authUI=render();uiD=uiAttempt()
+    startManualFallbackUI();authUI=render();uiD=uiAttempt()
     authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-ui-late#'+uiD.state)
     authUI=render();holdToken=true;releaseClaudeRequest=null
     const credentialSnapshot=kc.get('ai_usage_claude_oauth_v1'),pending=authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
     for(let i=0;i<12&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
-    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     else if(mode==='source')await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
     else if(mode==='provider')authUI.find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('codex')
     else authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
@@ -1401,7 +1407,7 @@ async function main() {
     assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'))
   }
   authUI=await startClaudeUI();uiD=uiAttempt();claudeTimers.get(uiD.timer).fn()
-  assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消Claude登录'),'expiry ends attempt; add button usable again');assert.equal(claudeTimers.size,0);assert.equal(claudeServers.at(-1).stops,1)
+  assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消登录'),'expiry ends attempt; add button usable again');assert.equal(claudeTimers.size,0);assert.equal(claudeServers.at(-1).stops,1)
   const savedCrypto=context.Crypto;delete context.Crypto;authUI=await startClaudeUI()
   assert.ok(authUI.some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children==='当前Scripting不支持Claude PKCE加密，请更新Scripting'))
   context.Crypto=savedCrypto
@@ -1436,7 +1442,7 @@ async function main() {
   exitUI=render();exitUI.find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('claude')
   exitUI=render();await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();exitUI=render()
   assert.ok(exitUI.filter(x=>x.type==='HStack'&&x.props.trailingSwipeActions).every(x=>x.props.trailingSwipeActions.actions[0].props.disabled))
-  exitUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action();exitUI=render()
+  exitUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action();exitUI=render()
   let releaseBusyRefresh;let heldBusy=false
   handler=async(u,o)=>{if(u.endsWith('/usage')&&!heldBusy){heldBusy=true;await new Promise(resolve=>releaseBusyRefresh=resolve)}return u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)}
   const busyRefresh=manualRefresh(exitUI)
@@ -1470,12 +1476,12 @@ async function main() {
     api.cancelClaudeLogin(attempt);assert.equal(claudeTimers.size,0)
     authUI=await startClaudeUI()
     assert.ok(authUI.some(x=>typeof x==='string'&&x.replace(/；诊断：.*(?=），使用Claude官方手动授权码页)/g,'')===`本机回调不可用（阶段：${expectedStage}），使用Claude官方手动授权码页`))
-    authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     context.HttpServer=savedServer;assert.equal(claudeTimers.size,0)
   }
   diagnosticStage=null
   // Exact manual validation branch is visible and input is retained without a token exchange.
-  authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
+  authUI=await startClaudeUI();startManualFallbackUI()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
   assert.ok(!authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前版本'))
   assert.equal(authUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.tint,'secondaryLabel','service selector is gray');
@@ -1498,7 +1504,7 @@ async function main() {
   authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-corrected#'+diagnosticState)
   await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
   assert.ok(api.officialAccounts().some(a=>a.name==='diagnostic@example.test'));assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'))
-  authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action();authUI=render()
+  authUI=await startClaudeUI();startManualFallbackUI();authUI=render()
   authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-fatal#'+uiAttempt().state)
   claudePostFailure=true;await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action();claudePostFailure=false
   assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'));assert.equal(claudeTimers.size,0)
@@ -1543,7 +1549,7 @@ async function main() {
       assert.equal(attempt.fallback.replace(/；诊断：.*(?=），使用Claude官方手动授权码页)/g,''),expected);assert.equal(startCalls,startsBefore+1);assert.equal(calls.length,before)
       assert.equal(claudeServers.at(-1).stops,1);assert.ok(!attempt.fallback.includes('SECRET'));assert.ok(!attempt.fallback.includes('example.test'))
       api.cancelClaudeLogin(attempt);assert.equal(claudeTimers.size,0)
-      authUI=await startClaudeUI();assert.ok(authUI.some(x=>typeof x==='string'&&x.replace(/；诊断：.*(?=），使用Claude官方手动授权码页)/g,'')===expected));authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+      authUI=await startClaudeUI();assert.ok(authUI.some(x=>typeof x==='string'&&x.replace(/；诊断：.*(?=），使用Claude官方手动授权码页)/g,'')===expected));authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     }
   }
   startNativeError=null;startThrows=false
@@ -1601,7 +1607,7 @@ async function main() {
       assert.equal(snapshotServer.state,'stopped');assert.equal(snapshotServer.port,null);assert.equal(snapshotServer.stops,1)
       // The actual authorization section displays the safe snapshot without needing browser/token activity.
       authUI=await startClaudeUI();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes(typeExpected)))
-      assert.equal(calls.length,before);authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+      assert.equal(calls.length,before);authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     }else{assert.equal(snapshotFlow.fallback,null);assert.equal(snapshotServer.stops,0);assert.equal(snapshotFlow.redirect,'http://localhost:8080/callback')}
     api.cancelClaudeLogin(snapshotFlow);assert.equal(claudeTimers.size,0)
   }
@@ -1635,7 +1641,7 @@ async function main() {
     assert.equal(descriptionServer.stops,1);assert.equal(descriptionServer.state,'stopped')
     api.cancelClaudeLogin(descriptionFlow);assert.equal(claudeTimers.size,0)
     authUI=await startClaudeUI();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('；启动描述：'+expected)))
-    authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     assert.equal(calls.length,before);assert.equal(JSON.stringify([...kc]),keysBefore);assert.equal(JSON.stringify([...storage]),storageBefore)
   }
   startNativeError=new Error('Argument mismatch: do not echo thrown text');startThrows=true
@@ -1645,8 +1651,10 @@ async function main() {
   // Synchronous callback response MUST exist even while token/profile promises are unresolved.
   handler=claudeHandler;claudeAccount='stage-auto';claudeEmail='stage-auto@example.test'
   authUI=await startClaudeUI();let stageAttempt=uiAttempt(),stageServer=claudeServers.at(-1)
-  assert.ok(authUI.includes('等待Claude回调（尚未收到）'))
-  const delayedBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
+  assert.ok(!authUI.includes('等待Claude回调（尚未收到）'))
+  assert.ok(!authUI.includes('Claude本机回调：完成网页授权后自动保存账号'))
+  assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='改用手动授权码'))
+  const delayedBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
   const invalidReply=stageServer.handlers['/callback'](callback('mock-wrong-current-state'))
   assertCallbackHTML(invalidReply,'本次回调无效或已失效。请返回脚本检查授权。',['mock-wrong-current-state',stageAttempt.state,stageAttempt.verifier])
   assert.equal(stageAttempt.code,null);assert.equal(stageAttempt.consumed,false)
@@ -1683,16 +1691,16 @@ async function main() {
   for(let i=0;i<100;i++)await Promise.resolve()
   assert.deepEqual(orderedStages,['收到Claude回调，已通过本次校验','正在交换Claude令牌（不重复提交）','正在读取Claude账号资料','正在保存Claude账号到本机','Claude stage-order@example.test'])
   // Browser close WITHOUT callback keeps waiting; cancellation suppresses late signals and late token saves.
-  authUI=await startClaudeUI();const emptyBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
-  closeClaudeModal();await emptyBrowser;assert.ok(render().includes('等待Claude回调（尚未收到）'))
-  render().find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+  authUI=await startClaudeUI();const emptyBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
+  closeClaudeModal();await emptyBrowser;assert.ok(!render().includes('等待Claude回调（尚未收到）'));assert.equal(uiAttempt().progress,'等待Claude回调（尚未收到）')
+  render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
   for(const stop of ['cancel','source']){
     authUI=await startClaudeUI();stageAttempt=uiAttempt();stageServer=claudeServers.at(-1);holdToken=true;releaseClaudeRequest=null
     const credentialsBefore=kc.get('ai_usage_claude_oauth_v1')
     stageServer.handlers['/callback'](callback(stageAttempt.state))
     for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
     authUI=render()
-    if(stop==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action()
+    if(stop==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     else authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
     assert.ok(!render().includes('正在交换Claude令牌（不重复提交）'))
     stageServer.handlers['/callback'](actualCallback)
@@ -1760,7 +1768,7 @@ async function main() {
   handler=async()=>{await new Promise(resolve=>releaseRate429=resolve);return {status:429,headers:{get:n=>n==='Retry-After'?'30':n==='Content-Type'?'application/json':null},json:async()=>({error:{type:'rate_limit_error',message:'SECRET'}})}}
   before=calls.length;lateRateServer.handlers['/callback'](callback(lateRateAttempt.state))
   for(let i=0;i<20&&!releaseRate429;i++)await Promise.resolve();assert.ok(releaseRate429)
-  render().find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action();releaseRate429()
+  render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action();releaseRate429()
   for(let i=0;i<100;i++)await Promise.resolve()
   assert.equal(calls.length,before+1);assert.equal(kc.get('ai_usage_claude_oauth_v1'),lateRateCredentials);assert.equal(lateRateServer.stops,1)
   assert.equal(api.claudeCooldownUntil(),now+30000);assert.ok(!render().includes('Claude账号已保存'))
@@ -1782,12 +1790,12 @@ async function main() {
   // Controller/browser/listener lifetime is independent of native global fetch; no early release during exchange.
   storage.delete(cooldownKey);handler=claudeHandler;claudeAccount='headers-auto';claudeEmail='headers-auto@example.test'
   authUI=await startClaudeUI();const headerAttempt=uiAttempt(),headerServer=claudeServers.at(-1)
-  const headerBrowserAction=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action(),headerBrowser=instances.at(-1)
+  const headerBrowserAction=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action(),headerBrowser=instances.at(-1)
   holdToken=true;releaseClaudeRequest=null;before=calls.length
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.30')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.31')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1797,7 +1805,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.30 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.31 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1809,12 +1817,12 @@ async function main() {
     const otherCredKey=kc.get('ai_usage_official_oauth_v1')
     authUI=await startClaudeUI()
     if(mode==='manual'){
-      authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action();authUI=render()
+      startManualFallbackUI();authUI=render()
       authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-complete#'+uiAttempt().state)
       await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
     }else{
       const completionAttempt=uiAttempt(),completionServer=claudeServers.at(-1)
-      const completingBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action()
+      const completingBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
       completionServer.handlers['/callback'](callback(completionAttempt.state))
       await completingBrowser
     }
@@ -1836,7 +1844,7 @@ async function main() {
     claudeAccount='missing-email-'+mode;claudeEmail='';const targetID='claude:'+claudeAccount+':org-a'
     authUI=await startClaudeUI()
     if(mode==='manual'){
-      authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action();authUI=render()
+      startManualFallbackUI();authUI=render()
       authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-missing#'+uiAttempt().state)
       await render().find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
     }else claudeServers.at(-1).handlers['/callback'](callback(uiAttempt().state))
@@ -2323,7 +2331,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.30');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.31');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2780,7 +2788,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     states.length=0;await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();check('codex device in progress',false)
     render().find(n=>n?.type==='Button'&&n.props.title==='取消登录').props.action();check('codex after cancel',true)
     await render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('claude');check('claude idle',true)
-    await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();if(render().some(n=>n?.type==='Button'&&n.props.title==='取消Claude登录')){check('claude in progress',false);render().find(n=>n?.type==='Button'&&n.props.title==='取消Claude登录').props.action()}
+    await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();if(render().some(n=>n?.type==='Button'&&n.props.title==='取消登录')){check('claude in progress',false);render().find(n=>n?.type==='Button'&&n.props.title==='取消登录').props.action()}
     states.length=0
     kc.clear();for(const[k,v]of oldKC)kc.set(k,v);storage.clear();for(const[k,v]of oldStore)storage.set(k,v);handler=oldHandler;states.length=0
     console.log('PASS: login provider row structure stable codex/claude/deepseek x idle/in-progress: left Button or placeholder Text + Spacer + right Picker, never Spacer+Picker only')
