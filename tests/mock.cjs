@@ -702,7 +702,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.26')
+  assert.equal(api.VERSION,'1.10.27')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1244,13 +1244,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.26')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.27')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.26');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.27');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1786,7 +1786,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.26')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.27')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1796,7 +1796,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.26 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.27 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2322,7 +2322,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.26');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.27');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2804,7 +2804,10 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     const {ProviderIcon:OldIcon}=baseWidget;load('widget.tsx')
     // The new widget module's ProviderIcon is exercised through Root elsewhere; here compare directly through exported test hook.
     const NewIcon=load('widget.tsx').ProviderIcon;assert.equal(typeof NewIcon,'function')
-    for(const provider of ['claude','openai','deepseek','mystery'])for(const muted of [false,true])assert.equal(JSON.stringify(NewIcon({provider,size:13,muted})),JSON.stringify(OldIcon({provider,size:13,muted})),'widget icon '+provider+' muted='+muted)
+    for(const provider of ['claude','openai','mystery'])for(const muted of [false,true])assert.equal(JSON.stringify(NewIcon({provider,size:13,muted})),JSON.stringify(OldIcon({provider,size:13,muted})),'widget icon '+provider+' muted='+muted)
+    // DeepSeek is the only intentional change: same shape, fill recolored to the confirmed blue; widget and settings share one constant.
+    for(const muted of [false,true]){const n=NewIcon({provider:'deepseek',size:13,muted}),o=OldIcon({provider:'deepseek',size:13,muted});assert.equal(n.props.code.includes('#4D6BFE'),true);assert.equal(n.props.code.includes('#3c3c43'),false);assert.equal(n.props.code,o.props.code.replace('#3c3c43','#4D6BFE'),'only the fill colour differs');assert.deepEqual(n.props.frame,o.props.frame)}
+    assert.equal(api.DEEPSEEK_SVG.includes('fill="#4D6BFE"'),true);assert.equal(expand(AccountLine({index:0,provider:'deepseek',name:'X'})).find(n=>n?.type==='SVG').props.code,api.DEEPSEEK_SVG,'settings list uses the same blue icon')
     console.log('PASS: settings account line = number + shared brand SVG(17pt resizable) + name for codex(OpenAI light/dark)/claude/deepseek in official and Parrot/Sub2API lists; unknown provider falls back to text; widget ProviderIcon JSON output identical to pre-change for all providers x muted')
   }
   // Saved key display and actual editing are separate: never bind a saved full key or submit a mask.
