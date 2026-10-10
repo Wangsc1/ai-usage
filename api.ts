@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.9.17"
+export const VERSION = "1.9.18"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -1024,12 +1024,10 @@ function tokenBody(b: any, old?: Credential) {
     expiresAt: Date.now() + b.expires_in * 1000, scope: typeof b.scope === "string" ? b.scope : old?.scope || SCOPE }
 }
 const post = (body: any) => {
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  // Controlled compatibility: standard JSON negotiation and this script's honest identity, not browser/CLI spoofing.
-  // Limit the change to initial exchange; existing credential refresh keeps its original wire headers.
-  if (body.grant_type === "authorization_code") {
-    headers.Accept = "application/json"
-    headers["User-Agent"] = `ai-usage/${VERSION}`
+  // Same honest HTTP identity and JSON negotiation for initial exchange and renewal.
+  // A controlled compatibility adjustment, not evidence that these headers cure service HTTP429.
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json", Accept: "application/json", "User-Agent": `ai-usage/${VERSION}`,
   }
   return request(TOKEN, { method: "POST", headers, body: JSON.stringify(body) })
 }
