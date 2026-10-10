@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.6"
+const VERSION = "1.10.7"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -347,8 +347,8 @@ function SettingsView() {
         cancellationAction: <Button title={"完成"} action={dismiss} />,
       }}
     >
-      <Section header={<Text>数据来源</Text>} footer={<Text>切换不删除另一来源的配置、账号或选择。普通 API Key 不能查询 Parrot 管理接口。</Text>}>
-        <LabeledContent title="当前脚本版本" value={VERSION} />
+      <Section header={<Text>数据来源</Text>} footer={<Text>切换不删除另一来源配置。</Text>}>
+        <LabeledContent title="当前版本" value={VERSION} />
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot</Text>
           <Text tag={"official"}>Codex,Claude,DeepSeek</Text>
@@ -356,7 +356,7 @@ function SettingsView() {
         </Picker>
       </Section>
 
-      <Section header={<Text>统计来源</Text>} footer={<Text>与额度来源独立，Parrot/Sub2API二选一不合计。均为该服务全部账号汇总，不按小组件账号过滤；重置卡只跟随额度来源。切换不清除配置或凭据。</Text>}>
+      <Section header={<Text>统计来源</Text>} footer={<Text>与额度来源独立，Parrot/Sub2API二选一不合计。</Text>}>
         <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async value => {
           saveStatisticsSource(value as StatisticsSource); setStatisticsSource(value as StatisticsSource); setLines([]); await test()
         }}>
@@ -375,11 +375,11 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubUrl(""); setHasSubKey(false); setLines([]); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证，不是OAuth。Codex/Claude默认临时会话不保留登录Cookie，便于添加不同账号；支持独立Codex与Claude登录。Claude自动接收本机回调，无法使用时可重新发起手动授权码流程。Google/Apple等可能限制嵌入登录，可用Safari备用（可能复用旧会话）。Codex也可在外部无痕窗口打开下方网址输入本次代码后返回检查；Claude可重新发起手动授权码流程。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
+      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
         <Picker title="登录服务" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
           <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text>
         </Picker>
-        {loginProvider !== "deepseek" && !device && !claude ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
+        {loginProvider !== "deepseek" && !device && !claude ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
         {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
         {loginProvider === "claude" && claudeProgress ? <Text>{claudeProgress}</Text> : null}
         {claude ? <>
@@ -424,7 +424,7 @@ function SettingsView() {
           } catch (e: any) { setStatus(e.message) }
         }} />
         </HStack>)}
-        <Button title={"刷新官方额度"} action={test} disabled={busy || !!device || !!claude} />
+        <Button title={"刷新额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : null}
       {source === "official" && loginProvider === "deepseek" ? <Section header={<Text>添加DeepSeek官方账号</Text>} footer={<Text>不是OAuth：新增账号使用官方API Key查询余额。已有网页Token账号保留原查询能力，失效需更新；此处不再提供新增网页Token入口。无订阅接口。凭据仅保存本机钥匙串，不自动读取其他脚本。每次添加独立账号，退出仅移除该账号。</Text>}>
         <TextField title="DeepSeek账号名称" value={dsName} onChanged={setDSName} />

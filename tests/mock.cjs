@@ -694,7 +694,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.6')
+  assert.equal(api.VERSION,'1.10.7')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -804,7 +804,7 @@ async function main() {
   obsStore=[];obsIndex=0;const emailOrder=expand(orderLink.props.destination.type(orderLink.props.destination.props))
   const orderBuilder=emailOrder.find(x=>x.type==='ReorderableForEach')
   assert.ok(expand(orderBuilder.props.builder(nestedAccount,0)).some(x=>typeof x==='string'&&x.includes('nested@example.test')))
-  await emailUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  await emailUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
   emailUI=render();assert.ok(emailUI.some(x=>typeof x==='string'&&x.includes('Codex nested@example.test：5 h')))
   // Refresh response omitting email preserves the previously authorized stored email and aliases.
   const refreshRecord=JSON.parse(kc.get('ai_usage_official_oauth_v1'));const nr=refreshRecord.find(a=>a.id===nested.id)
@@ -849,7 +849,7 @@ async function main() {
   // Full Settings action: browser closes, check succeeds, quota cache/list and widget refresh follow.
   states.length=0;context.Safari.present=async()=>{};namedFlow({name:'自动授权名称',email:'automatic@example.test'},'automatic-user')
   let reloadCount=0;scripting.Widget.reloadAll=async()=>{reloadCount++}
-  let authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  let authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
   authUI=render();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('automatic@example.test')))
   assert.ok(api.officialCached().accounts.some(a=>a.name==='automatic@example.test'));assert.ok(reloadCount>0)
@@ -857,7 +857,7 @@ async function main() {
   // Cancel/dismiss during open Safari makes the captured UI action inert, no token save or request.
   for(const mode of ['cancel','dismiss','source']){
     states.length=0;namedFlow({},'abandoned-'+mode);context.Safari.present=()=>new Promise(r=>browserClose=r)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
     authUI=render();const action=authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
     await Promise.resolve();before=calls.length
     await authUI.find(x=>x.type==='Button'&&x.props.title==='检查授权').props.action();assert.equal(calls.length,before) // busy lock blocks competing checks
@@ -867,7 +867,7 @@ async function main() {
     browserClose();await action;assert.equal(calls.length,before);api.saveSource('official')
   }
   states.length=0;namedFlow({},'ui-pending');context.Safari.present=async()=>{}
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
   handler=async()=>resp(403)
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
   authUI=render();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.ok(authUI.some(x=>typeof x==='string'&&x.startsWith('等待授权')))
@@ -926,7 +926,7 @@ async function main() {
   assert.equal(await checkAfterSafari(intervalDevice,()=>true,async ms=>{waited.push(ms);now+=ms},presentIsolatedAuthorization),'pending')
   assert.deepEqual(waited,[3000]);assert.equal(calls.length,before+1);assert.equal(intervalDevice.cancelled,false);assert.equal(instances.at(-1).disposed,1)
   api.saveSource('official');states.length=0;namedFlow({email:'isolated@example.test'},'isolated-user')
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
   authUI=render();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='Safari备用授权页'))
   assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('外部无痕授权网址')))
   await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
@@ -936,7 +936,7 @@ async function main() {
   for(const mode of ['cancel','source','dismiss']){
     api.saveSource('official');states.length=0;namedFlow({},'isolated-abandoned-'+mode)
     let closeBrowser;presentBrowser=()=>new Promise(resolve=>closeBrowser=resolve)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
     authUI=render();const pendingAction=authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
     for(let i=0;i<8&&!closeBrowser;i++)await Promise.resolve()
     assert.ok(closeBrowser);before=calls.length
@@ -948,14 +948,14 @@ async function main() {
     assert.equal(browserTimers.size,0);closeBrowser() // native dismiss may settle later; cancellation already released and completed
   }
   api.saveSource('official');states.length=0;namedFlow({},'isolated-failure');presentBrowser=async()=>{throw new Error('blocked identity provider')}
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
   authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
   assert.equal(calls.length,before);assert.equal(instances.at(-1).disposed,1)
   authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='Safari备用授权页'))
   states.length=0;api.saveSource('official');namedFlow({},'ui-navigation-hung')
   loadBrowser=()=>new Promise(()=>{});presentBrowser=()=>new Promise(()=>{})
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
   authUI=render();before=calls.length
   const hungUI=authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
   assert.ok(render().some(x=>typeof x==='string'&&x.startsWith('正在打开官方授权页')))
@@ -968,7 +968,7 @@ async function main() {
   // Global absent: accurate error displayed adjacent to opening buttons, device remains retryable.
   const supportedBrowser=context.WebViewController;delete context.WebViewController
   states.length=0;api.saveSource('official');namedFlow({},'unsupported-global')
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
   authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
   authUI=render();assert.equal(calls.length,before);assert.equal(browserTimers.size,0)
@@ -982,7 +982,7 @@ async function main() {
   let copied=[];context.Pasteboard={setString:async value=>copied.push(value)}
   for(const mode of ['cancel','source','dismiss','expired','success']){
     states.length=0;api.saveSource('official');namedFlow({},'copy-'+mode)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
     authUI=render();const codeText=authUI.find(x=>x.type==='Text'&&x.props.contextMenu)
     assert.equal(codeText.props.children[0],'一次性代码：')
     const copy=expand(codeText.props.contextMenu.menuItems).find(x=>x.type==='Button'&&x.props.title==='复制代码')
@@ -1121,7 +1121,7 @@ async function main() {
 
   // App uses the same composed path and reports source/freshness independently.
   states.length=0;authUI=render();before=calls.length
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
   authUI=render();assert.ok(authUI.includes('统计：Parrot全部账号汇总；额度：官方（Codex/Claude OAuth、DeepSeek）'))
   assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('23 次')))
   assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
@@ -1136,7 +1136,7 @@ async function main() {
     const ageData={...combined.data,statistics:{...combined.data.statistics,fetchedAt:now-minutes*60000}}
     assertOriginalRefreshFooter(ageData,false);assertOriginalRefreshFooter(ageData,true)
   }
-  states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
   assert.ok(render().includes('⚠️ 额度已刷新；Parrot统计独立读取失败'))
   // No statistics cache, malformed response, and no config all yield unknown, never fabricated zero.
   storage.delete('ai_usage_parrot_stats_v1');combined=await api.loadUsage();assert.equal(combined.data.today,null);assert.equal(combined.data.month,null);assert.equal(combined.data.statistics.fetchedAt,null)
@@ -1164,7 +1164,7 @@ async function main() {
   // A delayed official App refresh must not replace the newly selected Parrot account list.
   states.length=0;authUI=render();let finishOldQuota;let held=false
   handler=async(u,o)=>{if(u.endsWith('/usage')&&!held){held=true;await new Promise(resolve=>finishOldQuota=resolve)}return combinedHandler(u,o)}
-  const delayedRefresh=authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  const delayedRefresh=authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
   for(let i=0;i<8&&!finishOldQuota;i++)await Promise.resolve();assert.ok(finishOldQuota)
   await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
   const beforeOldReturns=JSON.stringify(render().filter(x=>typeof x==='string'))
@@ -1228,13 +1228,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.6')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.7')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.6');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.7');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1323,7 +1323,7 @@ async function main() {
     assert.ok(tree.includes('自定义Claude'));assert.ok(tree.includes('Claude'));assert.ok(!tree.includes('only-parrot'))
     const resets=tree.filter(x=>x.type==='Text'&&String(x.props.children).startsWith('RE:'));assert.equal(resets.length,1) // only Codex, never Claude
   }
-  states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
   assert.ok(render().some(x=>typeof x==='string'&&x.includes('Claude claude-b@example.test：')))
   claudeUsageFailure=true;combined=await api.loadUsage();assert.equal(combined.stale,true);assert.equal(combined.data.accounts.length,5);assert.equal(combined.data.statistics.stale,false);claudeUsageFailure=false
   // Local provider-scoped exits preserve Codex, other Claude accounts, Parrot cache and unrelated aliases.
@@ -1343,7 +1343,7 @@ async function main() {
   const startClaudeUI=async()=>{
     states.length=0;api.saveSource('official');let tree=render()
     tree.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('claude')
-    tree=render();await tree.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action();return render()
+    tree=render();await tree.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();return render()
   }
   authUI=await startClaudeUI();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='打开Claude授权页'))
   let uiD=uiAttempt(),uiServer=claudeServers.at(-1)
@@ -1415,16 +1415,16 @@ async function main() {
   exitUI=render();assert.equal(exitRow(exitUI,legacyCodex.id).props.children[0].props.children,'Codex '+longEmail)
   // Identical disabling rules during either login flow, plus a held busy refresh.
   handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'row-disable-device',usercode:'MOCK-ROW',interval:'5'}):u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
-  await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action();exitUI=render()
+  await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();exitUI=render()
   assert.ok(exitUI.filter(x=>x.type==='Button'&&x.props.title==='点击退出').every(x=>x.props.disabled))
   exitUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
   exitUI=render();exitUI.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('claude')
-  exitUI=render();await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action();exitUI=render()
+  exitUI=render();await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();exitUI=render()
   assert.ok(exitUI.filter(x=>x.type==='Button'&&x.props.title==='点击退出').every(x=>x.props.disabled))
   exitUI.find(x=>x.type==='Button'&&x.props.title==='取消Claude登录').props.action();exitUI=render()
   let releaseBusyRefresh;let heldBusy=false
   handler=async(u,o)=>{if(u.endsWith('/usage')&&!heldBusy){heldBusy=true;await new Promise(resolve=>releaseBusyRefresh=resolve)}return u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)}
-  const busyRefresh=exitUI.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+  const busyRefresh=exitUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
   assert.ok(render().filter(x=>x.type==='Button'&&x.props.title==='点击退出').every(x=>x.props.disabled))
   for(let i=0;i<12&&!releaseBusyRefresh;i++)await Promise.resolve();assert.ok(releaseBusyRefresh);releaseBusyRefresh();await busyRefresh
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
@@ -1462,7 +1462,8 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.10.6'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前版本'&&x.props.value==='1.10.7'))
+  for(const [header,footer]of [['数据来源','切换不删除另一来源配置。'],['统计来源','与额度来源独立，Parrot/Sub2API二选一不合计。'],['官方账号（独立登录）','登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。']]){const section=authUI.find(x=>x.type==='Section'&&x.props.header?.props.children===header);assert.ok(section,header);assert.equal(section.props.footer.props.children,footer)}
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1646,7 +1647,7 @@ async function main() {
   stageServer.handlers['/callback'](actualCallback) // duplicate must not regress progress or exchange twice
   closeClaudeModal();await delayedBrowser
   assert.ok(render().includes('正在交换Claude令牌（不重复提交）'))
-  assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.disabled)
+  assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.disabled)
   assert.ok(!api.officialAccounts().some(a=>a.email==='stage-auto@example.test'));assert.equal(stageServer.stops,0)
   const releaseTokenStage=releaseClaudeRequest;releaseClaudeRequest=null;holdToken=false;releaseTokenStage()
   for(let i=0;i<30&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
@@ -1719,16 +1720,16 @@ async function main() {
       assert.ok(rateError.includes('可重新授权时间：'+api.formatBeijingDeadline(now+wait)));assert.ok(!rateError.includes('Z'));assert.ok(!rateError.includes('UTC+8'))
       const serversBefore=claudeServers.length;assert.throws(()=>api.beginClaudeLogin(),/冷却中/);assert.throws(()=>api.beginClaudeLogin(()=>{},()=>{},true),/冷却中/)
       assert.equal(claudeServers.length,serversBefore)
-      authUI=await startClaudeUI();assert.ok(authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled)
+      authUI=await startClaudeUI();assert.ok(authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.disabled)
       assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('冷却中')));assert.equal(calls.length,before+1)
       states.length=0;api.saveSource('official');authUI=render();authUI.find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('claude')
-      assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled)
+      assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.disabled)
       now+=1000;assert.ok(render().some(x=>typeof x==='string'&&x.includes('剩余'+Math.ceil((wait-1000)/1000)+'秒')))
       // Codex device flow is independent of Claude cooldown, and no existing credentials are removed.
       render().find(x=>x.type==='Picker'&&x.props.title==='登录服务').props.onChanged('codex')
-      assert.equal(render().find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled,false)
+      assert.equal(render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.disabled,false)
       handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'rate-codex',usercode:'MOCK-COOLDOWN',interval:'5'}):combinedHandler(u,o)
-      await render().find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.action()
+      await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
       assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
       assert.equal(storage.get(cooldownKey),baseRateNow+wait)
       now=baseRateNow+wait;assert.equal(api.claudeCooldownUntil(),0);const fresh=api.beginClaudeLogin();api.cancelClaudeLogin(fresh)
@@ -1757,7 +1758,7 @@ async function main() {
   now+=1000;rateTick[1].fn();assert.ok(render().some(x=>typeof x==='string'&&x.includes('剩余2秒')))
   countdownCleanup();assert.ok(!claudeTimers.has(rateTick[0]))
   now+=2000;rateEffects.length=0;authUI=render();assert.equal(rateEffects[0].fn(),undefined)
-  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='添加官方账号').props.disabled,false)
+  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.disabled,false)
   assert.ok(!authUI.some(x=>typeof x==='string'&&x.includes('冷却中')))
   scripting.useEffect=effectBefore;storage.delete(cooldownKey);now=baseRateNow
   console.log('PASS: real countdown effect updates remaining seconds, cleans its timer, re-enables Claude at deadline; no token polling')
@@ -1769,7 +1770,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.6')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.7')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1779,7 +1780,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.6 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.7 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1885,14 +1886,15 @@ async function main() {
     const source=api.getSource(),beforeCalls=calls.length,beforeCreds=JSON.stringify([...kc.entries()])
     for(const selected of ['parrot','official','sub2api']){
       api.saveSource(selected);states.length=0;const beforeStore=JSON.stringify([...storage.entries()]),ui=render()
-      for(const title of ['更新','检查更新','强制重新下载','当前版本']){
+      for(const title of ['更新','检查更新','强制重新下载']){
         assert.ok(!ui.some(x=>typeof x==='string'&&x===title));assert.ok(!ui.some(x=>x.props?.title===title))
       }
       assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('从 GitHub 拉取')))
+      assert.ok(ui.some(x=>x.type==='LabeledContent'&&x.props.title==='当前版本'&&x.props.value==='1.10.7'))
       assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='预览组件'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='账号来源'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='刷新间隔'))
-      if(selected==='official')assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='刷新官方额度'))
+      if(selected==='official')assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='刷新额度'))
       assert.equal(JSON.stringify([...storage.entries()]),beforeStore)
     }
     assert.equal(calls.length,beforeCalls);assert.equal(JSON.stringify([...kc.entries()]),beforeCreds)
@@ -2297,7 +2299,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.6');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.7');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2331,7 +2333,7 @@ async function main() {
         assert.equal(until,expected);await load();assert.equal(posted.length,1)
         // A new module instance shares only persisted Keychain/Storage, not the in-process promise maps.
         delete modules['renewal-fresh-api.ts'];const freshAPI=globalLoadFreshAPI();assert.equal((await freshAPI.loadUsage()).stale,true);assert.equal(posted.length,1)
-        states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+        states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
         await modules['widget.tsx'].exports.runWidget();await registeredIntents.get('RefreshUsageIntent').perform(undefined);assert.equal(posted.length,1)
         now=until+1;mode='ok';assert.equal((await load()).stale,false);assert.equal(posted.length,2);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-refresh-rotated')
       }
@@ -2356,7 +2358,7 @@ async function main() {
       // Multiple independent module executions and every family reuse unexpired tokens with zero renewal POSTs.
       prepare(provider);const future=fixture(provider);future.expiresAt=now+3600000;kc.set(keyOf(provider),JSON.stringify([future]))
       for(let instance=0;instance<3;instance++){delete modules['renewal-fresh-api.ts'];assert.equal((await globalLoadFreshAPI().loadUsage()).stale,false)}
-      states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()
+      states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
       for(const family of ['systemSmall','systemMedium','systemLarge','accessoryRectangular']){const originalFamily=scripting.Widget.family;scripting.Widget.family=family;await modules['widget.tsx'].exports.runWidget();scripting.Widget.family=originalFamily}
       await registeredIntents.get('RefreshUsageIntent').perform(undefined);assert.equal(posted.length,0)
       // Distinct modules arriving after a successful renewal read the saved rotation, not the old refresh token.
@@ -2371,7 +2373,7 @@ async function main() {
       // App/widget/intent all call the same loader, and each automatically renews without authorization.
       for(const entry of ['App','Widget','Intent']){
         prepare(provider)
-        if(entry==='App'){states.length=0;const ui=render();await ui.find(x=>x.type==='Button'&&x.props.title==='刷新官方额度').props.action()}
+        if(entry==='App'){states.length=0;const ui=render();await ui.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()}
         else if(entry==='Widget')await modules['widget.tsx'].exports.runWidget()
         else await registeredIntents.get('RefreshUsageIntent').perform(undefined)
         assert.equal(posted.length,1,provider+' '+entry);assert.equal(JSON.parse(kc.get(keyOf(provider)))[0].refresh,'mock-refresh-rotated')
@@ -2551,7 +2553,7 @@ async function main() {
       assert.ok(!nodes.some(n=>n?.type==='Gauge'),family+' no fabricated percentage gauge')
       expand(Root({data:mixed,stale:false,error:null}))
     }
-    states.length=0;let dsUI=render();assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.children==='DeepSeek'));assert.ok(!dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));dsUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('deepseek');dsUI=render();assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(dsUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key');assert.equal(dsUI.filter(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号').length,1);assert.ok(!dsUI.some(n=>n?.type==='Button'&&n.props.title==='添加官方账号'));assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
+    states.length=0;let dsUI=render();assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.children==='DeepSeek'));assert.ok(!dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));dsUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('deepseek');dsUI=render();assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(dsUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key');assert.equal(dsUI.filter(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号').length,1);assert.ok(!dsUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
     // Shared loader deduplicates active requests, and a late account response cannot undo local logout.
     hold=true;const p1=api.loadUsage(),p2=api.loadUsage();assert.equal(p1,p2)
     for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held)
@@ -2563,7 +2565,7 @@ async function main() {
     addUI=render();await addUI.find(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号').props.action()
     const uiAccount=api.officialAccounts().find(a=>a.name==='UI DeepSeek');assert.ok(uiAccount);assert.equal(JSON.parse(kc.get(dsKey)).find(a=>a.id===uiAccount.id).mode,'api');assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'')
     api.logoutOfficial(uiAccount.id)
-    let loginUI=render();assert.ok(!loginUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('codex');loginUI=render();assert.ok(loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加官方账号'));assert.ok(!loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key')
+    let loginUI=render();assert.ok(!loginUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('codex');loginUI=render();assert.ok(loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key')
     // An official request may complete after switching source, but cannot populate another source's cache.
     const switchID=api.addDeepSeekAccount('switch','api','DS-SYNTHETIC-API');hold=true;held=null;const switched=api.loadUsage()
     for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held);api.saveSource('parrot');held();await switched;assert.equal(storage.has('ai_usage_cache_v1'),false);api.logoutOfficial(switchID);hold=false
