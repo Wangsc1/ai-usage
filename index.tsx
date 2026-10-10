@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.0"
+const VERSION = "1.10.1"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -376,11 +376,11 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubUrl(""); setHasSubKey(false); setLines([]); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>默认临时会话不保留登录Cookie，便于添加不同账号；支持独立Codex与Claude登录。Claude自动接收本机回调，无法使用时可重新发起手动授权码流程。Google/Apple等可能限制嵌入登录，可用Safari备用（可能复用旧会话）。Codex也可在外部无痕窗口打开下方网址输入本次代码后返回检查；Claude可重新发起手动授权码流程。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
-        <Picker title="登录服务" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
-          <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text>
+      {source === "official" ? <Section header={<Text>官方账号（独立登录）</Text>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证，不是OAuth；网页Token可作为备用方式。Codex/Claude默认临时会话不保留登录Cookie，便于添加不同账号；支持独立Codex与Claude登录。Claude自动接收本机回调，无法使用时可重新发起手动授权码流程。Google/Apple等可能限制嵌入登录，可用Safari备用（可能复用旧会话）。Codex也可在外部无痕窗口打开下方网址输入本次代码后返回检查；Claude可重新发起手动授权码流程。Token仅存本机钥匙串；账号显示官方授权中已有的完整邮箱，仅本机保存；未提供邮箱时需重新登录尝试获取。退出只移除此账号的本机登录。</Text>}>
+        <Picker title="登录服务" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); if (value === "deepseek") setDSMode("api"); setBusy(false); setBrowserError("") }} disabled={busy}>
+          <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek（官方API Key）</Text>
         </Picker>
-        {!device && !claude ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
+        {loginProvider !== "deepseek" && !device && !claude ? <Button title={"添加官方账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
         {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
         {loginProvider === "claude" && claudeProgress ? <Text>{claudeProgress}</Text> : null}
         {claude ? <>
@@ -427,7 +427,7 @@ function SettingsView() {
         </HStack>)}
         <Button title={"刷新官方额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : null}
-      {source === "official" ? <Section header={<Text>添加DeepSeek官方账号</Text>} footer={<Text>不是OAuth：API Key查询余额；网页User Token通过私有平台接口查询余额与北京时间近7日消费。无订阅接口；Token失效需更新。凭据仅保存本机钥匙串，不自动读取其他脚本。每次添加独立账号，退出仅移除该账号。</Text>}>
+      {source === "official" && loginProvider === "deepseek" ? <Section header={<Text>添加DeepSeek官方账号</Text>} footer={<Text>不是OAuth：API Key查询余额；网页User Token通过私有平台接口查询余额与北京时间近7日消费。无订阅接口；Token失效需更新。凭据仅保存本机钥匙串，不自动读取其他脚本。每次添加独立账号，退出仅移除该账号。</Text>}>
         <TextField title="DeepSeek账号名称" value={dsName} onChanged={setDSName} />
         <Picker title="DeepSeek认证方式" value={dsMode} onChanged={setDSMode} disabled={busy}>
           <Text tag="api">API Key（余额）</Text><Text tag="web">网页User Token（余额与7日消费）</Text>

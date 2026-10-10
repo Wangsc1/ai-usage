@@ -694,7 +694,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.0')
+  assert.equal(api.VERSION,'1.10.1')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1228,13 +1228,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.0')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.1')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.0');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.1');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1462,7 +1462,7 @@ async function main() {
   // Exact manual validation branch is visible and input is retained without a token exchange.
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
-  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.10.0'))
+  assert.ok(authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前脚本版本'&&x.props.value==='1.10.1'))
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1769,7 +1769,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.0')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.1')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1779,7 +1779,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.0 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.1 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2297,7 +2297,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.0');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.1');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2496,6 +2496,8 @@ async function main() {
     const a=first.data.accounts.find(a=>a.id===apiID),w=first.data.accounts.find(a=>a.id===webID)
     assert.equal(a.balance.money[0].total,'0.00');assert.equal(a.balance.available,false);assert.equal(a.balance.money[1].total,'9007199254740993.123456')
     assert.equal(w.balance.money[0].total,'0.30001');assert.equal(w.balance.money[0].weekCost,'0.3');assert.equal(w.balance.money[1].weekCost,'0.00');assert.equal(w.balance.available,null)
+    const cachedSummary=api.deepSeekSummary({...w,balance:{...w.balance,stale:true,weekStale:true,error:'读取失败，可重试'}})
+    assert.ok(cachedSummary.includes('账户余额 CNY 0.30001'));assert.ok(cachedSummary.includes('充值')&&cachedSummary.includes('赠送'));assert.ok(!cachedSummary.includes('缓存'));assert.ok(cachedSummary.includes('采集')&&cachedSummary.includes('读取失败'))
     assert.equal(w.fiveHour.remainingPercent,null);assert.equal(w.sevenDay.remainingPercent,null);assert.equal(w.resetCredits,null)
     assert.ok(!JSON.stringify([...storage]).includes('DS-SYNTHETIC'));assert.ok(!JSON.stringify(first).includes('DS-SYNTHETIC'))
     malformedAPI=true;ambiguousCost=true;const unknown=await api.loadUsage();assert.equal(unknown.data.accounts.find(a=>a.id===apiID).balance.stale,true);assert.equal(unknown.data.accounts.find(a=>a.id===apiID).balance.money[0].total,'0.00');assert.equal(unknown.data.accounts.find(a=>a.id===webID).balance.weekStale,true);assert.equal(unknown.data.accounts.find(a=>a.id===webID).balance.money[0].weekCost,'0.3');assert.ok(unknown.data.accounts.find(a=>a.id===webID).balance.error);malformedAPI=false;ambiguousCost=false
@@ -2516,22 +2518,27 @@ async function main() {
     assert.equal(api.widgetAccounts(mixed.accounts,'2,1,3')[0].id,apiID)
     for(const family of ['systemSmall','systemMedium','systemLarge','accessoryRectangular','accessoryCircular','accessoryInline']){
       scripting.Widget.family=family;scripting.Widget.parameter='';const nodes=expand(Root({data:{...first.data,accounts:[a]},stale:false,error:null})),text=nodes.filter(x=>typeof x==='string').join(' ')
-      assert.ok(text.includes('CNY')&&text.includes('USD'),family+' separate currencies');assert.ok(!text.includes('5 h')&&!text.includes('5h')&&!text.includes('RE:'),family+' no fabricated quota')
+      assert.ok(text.includes('账户余额 CNY 0.00')&&text.includes('账户余额 USD 9007199254740993.123456'),family+' labelled separate currencies');
+      if(['systemSmall','systemMedium','systemLarge','accessoryRectangular'].includes(family)){assert.ok(text.includes('充值 0.00')&&text.includes('赠送 0.00'),family+' full detail labels');const brand=nodes.find(n=>n?.type==='SVG'&&typeof n.props.code==='string'&&n.props.code.includes('aria-label="DeepSeek"'));assert.ok(brand,family+' official embedded brand mark');assert.equal(brand.props.frame.width,brand.props.frame.height);assert.ok(brand.props.code.includes('M26.5174 3.39471'))}
+      const cachedAccount={...a,balance:{...a.balance,stale:true,weekStale:true}}
+      assert.equal(expand(Root({data:{...first.data,accounts:[cachedAccount]},stale:false,error:null})).filter(x=>typeof x==='string').join(' '),text,family+' no visible DeepSeek cache marker; flags retained')
+      assert.equal(cachedAccount.balance.stale,true);assert.ok(!text.includes('5 h')&&!text.includes('5h')&&!text.includes('RE:'),family+' no fabricated quota')
       assert.ok(!nodes.some(n=>n?.type==='Gauge'),family+' no fabricated percentage gauge')
       expand(Root({data:mixed,stale:false,error:null}))
     }
-    states.length=0;const dsUI=render();assert.ok(dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
+    states.length=0;let dsUI=render();assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'));assert.ok(!dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));dsUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('deepseek');dsUI=render();assert.equal(dsUI.find(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式').props.value,'api');assert.equal(dsUI.filter(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号').length,1);assert.ok(!dsUI.some(n=>n?.type==='Button'&&n.props.title==='添加官方账号'));assert.ok(dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
     // Shared loader deduplicates active requests, and a late account response cannot undo local logout.
     hold=true;const p1=api.loadUsage(),p2=api.loadUsage();assert.equal(p1,p2)
     for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held)
     api.logoutOfficial(apiID);held();const late=await p1;assert.ok(!late.data.accounts.some(a=>a.id===apiID));assert.ok(!api.officialAccounts().some(a=>a.id===apiID));assert.ok(api.officialAccounts().some(a=>a.id===webID));assert.ok(!api.officialCached().accounts.some(a=>a.id===apiID))
     hold=false;api.logoutOfficial(webID);assert.equal(api.officialAccounts().length,0)
     // Drive actual App fields/add action, not only the exported storage helper.
-    states.length=0;let addUI=render();addUI.find(n=>n?.type==='TextField'&&n.props.title==='DeepSeek账号名称').props.onChanged('UI DeepSeek')
+    states.length=0;let addUI=render();addUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('deepseek');addUI=render();addUI.find(n=>n?.type==='TextField'&&n.props.title==='DeepSeek账号名称').props.onChanged('UI DeepSeek')
     addUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('DS-SYNTHETIC-API')
     addUI=render();await addUI.find(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号').props.action()
     const uiAccount=api.officialAccounts().find(a=>a.name==='UI DeepSeek');assert.ok(uiAccount);assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'')
     api.logoutOfficial(uiAccount.id)
+    let loginUI=render();loginUI.find(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式').props.onChanged('web');loginUI=render();loginUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('codex');loginUI=render();assert.ok(loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加官方账号'));assert.ok(!loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='登录服务').props.onChanged('deepseek');assert.equal(render().find(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式').props.value,'api')
     // An official request may complete after switching source, but cannot populate another source's cache.
     const switchID=api.addDeepSeekAccount('switch','api','DS-SYNTHETIC-API');hold=true;held=null;const switched=api.loadUsage()
     for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held);api.saveSource('parrot');held();await switched;assert.equal(storage.has('ai_usage_cache_v1'),false);api.logoutOfficial(switchID);hold=false
@@ -2570,6 +2577,32 @@ async function main() {
     assert.equal(api.officialAccounts().length,0)
     kc.clear();for(const [k,v]of beforeKC)kc.set(k,v);storage.clear();for(const [k,v]of beforeStore)storage.set(k,v);handler=beforeHandler;now=beforeNow;scripting.Widget.family=beforeFamily;scripting.Widget.parameter=beforeParameter;states.length=0
     console.log('PASS: DeepSeek three-source real schema/auth/pagination/old-server/error cache; official API+private web separate credentials/endpoints, exact decimals and multi-currency, 7-day BJT bounds/partial cost timestamps; no secret in Storage/results; local logout late-response guard; aliases/order/parameters mixed providers; six widget families balance-only branches; no subscription/refresh POST/OAuth spoof')
+  }
+  // User report: medium parameter means four selected accounts, including sorted index 5.
+  {
+    const previousStore=new Map(storage),previousFamily=scripting.Widget.family,previousParameter=scripting.Widget.parameter,previousSize=scripting.Widget.displaySize
+    const make=(i,provider)=>({id:'selection-'+i,name:'SelectionName'+i,provider,enabled:true,available:true,fiveHour:{remainingPercent:50,usedPercent:50,resetsAt:null},sevenDay:{remainingPercent:75,usedPercent:25,resetsAt:null},resetCredits:null,...(provider==='deepseek'?{balance:{money:[{currency:'CNY',total:'7.88',toppedUp:'7.88',granted:'0',weekCost:null}],auth:'API Key',fetchedAt:now,stale:false,error:null,available:true}}:{})})
+    const ordered=[make(1,'claude'),make(2,'deepseek'),make(3,'openai'),make(4,'claude'),make(5,'deepseek'),make(6,'openai')]
+    const raw=[ordered[4],ordered[2],ordered[5],ordered[0],ordered[3],ordered[1]]
+    const selectedNames=nodes=>nodes.filter(x=>typeof x==='string'&&/^SelectionName\d+$|^AliasFive$/.test(x))
+    for(const source of ['parrot','official','sub2api']){
+      api.saveSource(source);api.saveAccountOrder(ordered.map(a=>a.id),source)
+      api.saveWidgetName(ordered[4].id,'AliasFive',source)
+      assert.deepEqual(Array.from(api.widgetAccounts(raw).map(a=>a.id)),ordered.slice(0,4).map(a=>a.id))
+      for(const parameter of ['1 2 3 5','1,2,3,5','1，2，3，5']){
+        assert.deepEqual(Array.from(api.widgetAccounts(raw,parameter).map(a=>a.id)),[1,2,3,5].map(i=>'selection-'+i))
+        scripting.Widget.family='systemMedium';scripting.Widget.displaySize={width:358,height:170};scripting.Widget.parameter=parameter
+        const data={today:null,month:null,todayByFamily:{},monthByFamily:{},accounts:raw,fetchedAt:now}
+        assert.deepEqual(selectedNames(expand(Root({data,stale:false,error:null}))),['SelectionName1','SelectionName2','SelectionName3','AliasFive'],source+' '+parameter+' actual medium Root four cells')
+        for(const [family,expected]of [['systemSmall',['SelectionName1','SelectionName2']],['systemLarge',['SelectionName1','SelectionName2','SelectionName3','AliasFive']],['accessoryRectangular',['SelectionName1']]]){
+          scripting.Widget.family=family;assert.deepEqual(selectedNames(expand(Root({data,stale:false,error:null}))),expected,source+' '+family+' selection semantics unchanged')
+        }
+      }
+      assert.deepEqual(Array.from(api.widgetAccounts(raw,'1 1 2 99 0 x 3 5 6').map(a=>a.id)),[1,2,3,5].map(i=>'selection-'+i))
+      assert.equal(api.widgetAccounts(raw,'99 0 x').length,0)
+    }
+    storage.clear();for(const[k,v]of previousStore)storage.set(k,v);scripting.Widget.family=previousFamily;scripting.Widget.parameter=previousParameter;scripting.Widget.displaySize=previousSize
+    console.log('PASS: actual medium Root sorted six mixed-provider accounts, space/comma/Chinese-comma 1 2 3 5 shows indexes 1/2/3/5 (four cells, including DeepSeek); all three sources; alias/default first4/duplicates/out-of-range/small/large/lockscreen unchanged')
   }
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
