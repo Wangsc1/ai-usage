@@ -1,13 +1,16 @@
 import {
-  Button, Form, Group, HStack, Spacer, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, EditButton, ForEach, Form, Group, HStack, Spacer, LabeledContent, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, fmtUsd, fmtTokens, fmtPct, Account, UsageData, cachedAccounts, cachedUsage, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
-import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
+import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.13"
+const VERSION = "1.10.14"
+// EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
+// Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
+const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -76,7 +79,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
 }
 
 const DEVICE_URL = "https://auth.openai.com/codex/device"
-const UNSUPPORTED_BROWSER = "当前Scripting不支持WebViewController临时浏览器，请更新Scripting或使用Safari备用"
+const UNSUPPORTED_BROWSER = "当前Scripting不支持WebViewController临时浏览器，请更新Scripting"
 async function presentIsolatedAuthorization(register?: (release: (() => void) | null) => void, url = DEVICE_URL) {
   // loadURL resolves on navigation completion, not on initiating the load. Present BEFORE waiting
   // for a login/redirect page, otherwise its pending navigation can hide the modal indefinitely.
@@ -91,12 +94,12 @@ async function presentIsolatedAuthorization(register?: (release: (() => void) | 
   register?.(release)
   try {
     const failure = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("授权页面加载超时，请使用Safari备用或外部无痕浏览器")), 20000)
+      timer = setTimeout(() => reject(new Error("授权页面加载超时，请重试")), 20000)
     })
     const shown = browser.present({ fullscreen: true, navigationTitle: "官方授权（临时会话）" })
     const loading = browser.loadURL(url).then(ok => {
       if (timer != null) clearTimeout(timer)
-      if (!ok && !released) throw new Error("授权页面加载失败，请使用Safari备用或外部无痕浏览器")
+      if (!ok && !released) throw new Error("授权页面加载失败，请重试")
       return new Promise<void>(() => {}) // Loading success is NOT dismissal or authorization success.
     })
     await Promise.race([shown, loading, failure, cancelled])
@@ -106,10 +109,10 @@ async function presentIsolatedAuthorization(register?: (release: (() => void) | 
     register?.(null)
   }
 }
-// One foreground check after either browser closes, no polling loop.
-async function checkAfterSafari(d: DeviceLogin, active: () => boolean,
+// One foreground check after the authorization browser closes, no polling loop.
+async function checkAfterBrowser(d: DeviceLogin, active: () => boolean,
   wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  present: () => Promise<void> = () => Safari.present(DEVICE_URL)) {
+  present: () => Promise<void> = () => presentIsolatedAuthorization()) {
   try { await present() }
   catch (e: any) {
     throw new Error((e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载")) ? e.message : "无法打开官方授权页，请稍后重试")
@@ -123,20 +126,6 @@ async function checkAfterSafari(d: DeviceLogin, active: () => boolean,
 function maskedKey(value: string): string {
   const chars = Array.from(value)
   return chars.length > 4 ? chars.slice(0, 4).join("") + "*".repeat(chars.length - 4) : "*".repeat(chars.length)
-}
-function usageLines(d: UsageData, requestSource: DataSource, requestStats: StatisticsSource, cached = false): string[] {
-  const statsName = requestStats === "sub2api" ? "Sub2API" : "Parrot"
-  return [
-          `统计：${statsName}全部账号汇总；额度：${requestSource === "official" ? "官方（Codex/Claude OAuth、DeepSeek）" : requestSource === "sub2api" ? "Sub2API" : "Parrot"}`,
-          ...(d.statistics ? [d.statistics.fetchedAt == null ? `${statsName}统计未提供` : `${statsName}统计${cached || d.statistics.stale ? "缓存" : "更新时间"}：${new Date(d.statistics.fetchedAt).toLocaleString()}`,
-            ...(d.statistics.error ? [`${statsName}统计错误：${d.statistics.error}`] : [])] : []),
-          ...(d.today && d.month ? [
-            `今日 ${fmtUsd(d.today.costUsd)} · ${fmtTokens(d.today.totalTokens)} tok · ${d.today.requests} 次`,
-            `本月 ${fmtUsd(d.month.costUsd)} · ${fmtTokens(d.month.totalTokens)} tok`,
-          ] : [`${statsName}今日/本月Token及花费统计未提供`]),
-          ...(d.providerErrors ?? []),
-          ...d.accounts.map(a => a.provider === "deepseek" ? `${a.name}：${deepSeekSummary(a)}` : `${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.name}：5 h 余 ${fmtPct(a.fiveHour.remainingPercent)}、每周余 ${fmtPct(a.sevenDay.remainingPercent)}${a.resetCredits == null ? " · 重置卡未提供" : ` · 重置:${a.resetCredits}`}`),
-        ]
 }
 function SettingsView() {
   const close = Navigation.useDismiss()
@@ -171,10 +160,7 @@ function SettingsView() {
   const [key, setKey] = useState("")
   const [keyEditing, setKeyEditing] = useState(false)
   const [busy, setBusy] = useState(false)
-  const cached = cachedUsage()
-  const [status, setStatus] = useState(cached ? "本机缓存（未刷新），可手动刷新" : "暂无缓存，请手动刷新或保存并测试")
   const [browserError, setBrowserError] = useState("")
-  const [lines, setLines] = useState<string[]>(cached ? usageLines(cached, source, statisticsSource, true) : [])
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
@@ -185,7 +171,6 @@ function SettingsView() {
     saveSource(value as DataSource)
     setSource(value as DataSource)
     setAccounts(cachedAccounts())
-    setLines([])
     await test()
     await Widget.reloadAll()
   }
@@ -202,25 +187,23 @@ function SettingsView() {
       if (!auth.alive || epoch !== auth.epoch || getSource() !== "official") { cancelDeviceLogin(d); return }
       auth.device = d
       setDevice(d)
-      setStatus("请打开官方授权页输入一次性代码；关闭网页后自动检查，也可手动检查")
-    } catch (e: any) { if (auth.alive) setStatus(e.message) }
+    } catch { /* begin failure leaves the add button available for retry */ }
     finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
   }
 
   function startClaude(manual = false) {
     if (auth.running) return
-    if (claudeCooldownUntil()) { setStatus(claudeCooldownMessage()); return }
+    if (claudeCooldownUntil()) return
     stopAuth(); setBrowserError("")
     try {
       const d = beginClaudeLogin(() => { if (auth.claude === d && auth.alive) void completeClaude(d) }, () => {
-        if (auth.claude === d && auth.alive) { stopAuth(); setBusy(false); setStatus("Claude授权已过期，请重新开始") }
+        if (auth.claude === d && auth.alive) { stopAuth(); setBusy(false) }
       }, manual, stage => {
         // Completed account identity is rendered only by the shared login row, never a second Text.
         if (auth.claude === d && auth.alive && getSource() === "official" && !stage.startsWith("Claude ")) setClaudeProgress(stage)
       })
       auth.claude = d; setClaude(d); setClaudeCode(""); setClaudeProgress(d.progress)
-      setStatus(d.fallback || (d.manual ? "请完成Claude官方页面授权并粘贴完整code#state" : "请打开Claude授权页；本机回调成功后自动检查并保存"))
-    } catch (e: any) { setStatus(e.message); setBrowserError(e.message) }
+    } catch (e: any) { setBrowserError(e.message) }
   }
   async function completeClaude(attempt = auth.claude) {
     if (!attempt || attempt.consumed) return
@@ -236,7 +219,7 @@ function SettingsView() {
       setLogins(officialAccounts()); await test()
     } catch (e: any) {
       if (valid()) {
-        setStatus(e.message); setBrowserError(e.message)
+        setBrowserError(e.message)
         if (attempt.consumed || attempt.cancelled) setClaudeProgress(e.message?.startsWith("Claude授权交换失败（HTTP 429")
           ? "Claude授权已结束：令牌交换受限（HTTP 429），请勿立即重试"
           : "Claude授权未完成，请查看错误提示")
@@ -247,22 +230,18 @@ function SettingsView() {
       }
     } finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
   }
-  async function openClaude(safari: boolean) {
+  async function openClaude() {
     const d = auth.claude
     if (!d || auth.running) return
     const epoch = auth.epoch
     const valid = () => auth.alive && auth.claude === d && auth.epoch === epoch && getSource() === "official"
-    auth.running = true; setBusy(true); setBrowserError(""); setStatus("正在打开Claude官方授权页…")
+    auth.running = true; setBusy(true); setBrowserError("")
     try {
-      if (safari) await Safari.present(d.url)
-      else await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url)
-      if (valid() && !d.consumed) {
-        if (d.code) await completeClaude(d)
-        else setStatus(d.manual ? "请粘贴本次完整code#state后完成Claude授权" : "尚未收到Claude回调，可重试或重新发起手动授权码流程")
-      }
+      await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url)
+      if (valid() && !d.consumed && d.code) await completeClaude(d)
     } catch (e: any) { if (valid()) {
-      const message = e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载") ? e.message : "无法打开Claude授权页，请重试或使用Safari备用"
-      setBrowserError(message); setStatus(message)
+      const message = e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载") ? e.message : "无法打开Claude授权页，请重试"
+      setBrowserError(message)
     } }
     finally {
       // Closing the browser must not unlock an exchange/profile request still in flight.
@@ -272,20 +251,19 @@ function SettingsView() {
     }
   }
 
-  async function checkOfficial(browser: boolean | "safari" = false) {
+  async function checkOfficial(browser = false) {
     const d = auth.device
     if (!d || auth.running) return
     auth.running = true
     setBusy(true)
     const epoch = auth.epoch
     const active = () => auth.alive && auth.device === d && auth.epoch === epoch && getSource() === "official"
-    if (browser) { setBrowserError(""); setStatus("正在打开官方授权页…；加载失败时可改用Safari备用") }
+    if (browser) setBrowserError("")
     try {
-      const result = browser ? await checkAfterSafari(d, active, undefined,
-        browser === "safari" ? () => Safari.present(DEVICE_URL) : () => presentIsolatedAuthorization(release => { auth.releaseBrowser = release })) : await checkDeviceLogin(d)
+      const result = browser ? await checkAfterBrowser(d, active, undefined,
+        () => presentIsolatedAuthorization(release => { auth.releaseBrowser = release })) : await checkDeviceLogin(d)
       if (!active() || result == null) return
-      if (result === "pending") setStatus("等待授权：请完成官方页面操作后再次检查（15分钟内有效）")
-      else {
+      if (result !== "pending") {
         auth.device = null
         setDevice(null)
         setLogins(officialAccounts())
@@ -301,49 +279,68 @@ function SettingsView() {
           auth.device = null
           setDevice(null)
         }
-        setStatus(e.message)
       }
     } finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
   }
 
   async function test() {
     const requestSource = getSource(), requestStats = getStatisticsSource()
-    const statsName = requestStats === "sub2api" ? "Sub2API" : "Parrot"
     setBusy(true)
-    setStatus("连接中…")
-    setLines([])
     try {
       const r = await loadUsage()
-      // A late refresh from the previous source must not replace this source's account list/status.
+      // A late refresh from the previous source must not replace this source's account list.
       if (!auth.alive || getSource() !== requestSource || getStatisticsSource() !== requestStats) return
       if (r.data) {
         setAccounts(r.data.accounts)
-      }
-      if (r.data) {
-        const d = r.data
-        setStatus(r.stale ? "❌ 额度使用缓存：" + (r.error ?? "读取失败") : d.accounts.some(a => a.balance?.error || a.readError) || d.providerErrors?.length ? "⚠️ 部分账号读取失败或使用缓存，见下方详情" : d.statistics?.error ? `⚠️ 额度已刷新；${statsName}统计独立读取失败` : "✅ 连接成功")
-        setLines(usageLines(d, requestSource, requestStats))
         await Widget.reloadAll()
-      } else {
-        setStatus("❌ " + (r.error ?? "未知错误"))
       }
-    } catch (e: any) {
-      setStatus("❌ " + String(e?.message ?? e))
-    }
+    } catch { /* failures keep the existing cached list */ }
     setBusy(false)
+  }
+
+  // Same remove-then-insert contract as the official editable_list onMove example; persisted by stable ID.
+  function moveLogins(indices: number[], newOffset: number) {
+    if (busy || device || claude || getSource() !== "official") return
+    const current = sortAccounts(logins, "official")
+    if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
+    const moving = indices.map(i => current[i])
+    const next = current.filter((_, i) => !indices.includes(i))
+    next.splice(Math.max(0, Math.min(newOffset, next.length)), 0, ...moving)
+    if (next.every((a, i) => a.id === current[i].id)) return
+    saveAccountOrder(next.map(a => a.id), "official")
+    setLogins(next)
+    setAccounts(cachedAccounts())
+    void Widget.reloadAll()
   }
 
   async function save() {
     const finalKey = key.trim() || cur.managementKey || ""
-    if (!baseUrl.trim() || !finalKey) {
-      setStatus("❌ 地址和管理密钥都不能为空")
-      return
-    }
+    if (!baseUrl.trim() || !finalKey) return
     saveConfig(baseUrl, finalKey)
     setKey("")
     setKeyEditing(false)
     await test()
   }
+
+  const loginRow = (a: ReturnType<typeof officialAccounts>[number], i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
+          <Button title="删除" role="destructive" disabled={busy || !!device || !!claude} action={async () => {
+          try {
+            logoutOfficial(a.id)
+            setLogins(officialAccounts())
+            setAccounts(cachedAccounts())
+            await test()
+            await Widget.reloadAll()
+          } catch { /* local removal failure leaves the row in place */ }
+        }} />
+        ] }}>
+          <NavigationLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
+            <VStack alignment="leading" spacing={3}>
+              <Text fixedSize={{ horizontal: false, vertical: true }}>{`${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
+              <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
+            </VStack>
+          </NavigationLink>
+          <Spacer />
+        </HStack>
 
   return <NavigationStack>
     <Form
@@ -360,7 +357,7 @@ function SettingsView() {
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
         <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async value => {
-          saveStatisticsSource(value as StatisticsSource); setStatisticsSource(value as StatisticsSource); setLines([]); await test()
+          saveStatisticsSource(value as StatisticsSource); setStatisticsSource(value as StatisticsSource); await test()
         }}>
           <Text tag="parrot">Parrot</Text><Text tag="sub2api">Sub2API</Text>
         </Picker>
@@ -371,12 +368,12 @@ function SettingsView() {
         <TextField title="统计时区" value={subTimezone} onChanged={setSubTimezone} prompt="Asia/Shanghai" />
         <Button title="保存Sub2API并测试" disabled={busy} action={async () => {
           try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subTimezone); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
-          catch (e: any) { setStatus(String(e?.message ?? "Sub2API配置无效")) }
+          catch { /* invalid configuration is not saved */ }
         }} />
-        {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setLines([]); setAccounts(cachedAccounts()); await test() }} /> : null}
+        {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<Text>登录账号</Text>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
+      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>} footer={<Text>登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。</Text>}>
         <HStack frame={{ maxWidth: "infinity" }}>
           {loginProvider !== "deepseek" && !device && !claude ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} /> : null}
           <Spacer />
@@ -389,16 +386,16 @@ function SettingsView() {
         {claude ? <>
           <Text>{claude.manual ? "Claude官方手动授权码：完成授权后粘贴完整code#state" : "Claude本机回调：完成网页授权后自动保存账号"}</Text>
           {claude.fallback ? <Text font={12} foregroundStyle="secondaryLabel">{claude.fallback}</Text> : null}
-          <Button title="打开Claude授权页" action={() => openClaude(false)} disabled={busy} />
-          <Button title="Safari备用Claude授权页" action={() => openClaude(true)} disabled={busy} />
+          <Button title="打开Claude授权页" action={() => openClaude()} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
           {claude.manual ? <>
             <SecureField title="本次完整授权码" value={claudeCode} onChanged={setClaudeCode} prompt="code#state" />
             <Button title="完成Claude授权" action={() => completeClaude()} disabled={busy || !claudeCode.trim()} />
           </> : <Button title="改用手动授权码" action={() => startClaude(true)} disabled={busy} />}
-          <Button title="取消Claude登录" action={() => { stopAuth(); setBusy(false); setStatus("已取消Claude登录") }} />
+          <Button title="取消Claude登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
         {device ? <>
+          <HStack frame={{ maxWidth: "infinity" }}>
           <Text contextMenu={{ menuItems: <Group>
             <Button title="复制代码" action={async () => {
               // A retained menu action must not copy an old, cancelled or expired attempt.
@@ -406,57 +403,35 @@ function SettingsView() {
               await Pasteboard.setString(device.code)
             }} disabled={device.cancelled || Date.now() >= device.expiresAt} />
           </Group> }}>一次性代码：{device.code}</Text>
-          <Text>仅输入你自己在此脚本发起的代码，有效期15分钟。</Text>
+          <Spacer />
+          <Text foregroundStyle="secondaryLabel">{`有效期${Math.max(0, Math.ceil((device.expiresAt - Date.now()) / 60000))}分钟`}</Text>
+          </HStack>
           <Button title={"打开官方授权页"} action={() => checkOfficial(true)} disabled={busy} />
-          <Button title={"Safari备用授权页"} action={() => checkOfficial("safari")} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-          <Text font={12} foregroundStyle="secondaryLabel">外部无痕授权网址：https://auth.openai.com/codex/device；输入本次代码后返回点“检查授权”。无需退出已授权账号。</Text>
           <Button title={"检查授权"} action={() => checkOfficial()} disabled={busy} />
-          <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false); setStatus("已取消登录") }} />
+          <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
         {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-        {sortAccounts(logins, "official").map((a, i) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
-          <Button title="删除" role="destructive" disabled={busy || !!device || !!claude} action={async () => {
-          try {
-            logoutOfficial(a.id)
-            setLogins(officialAccounts())
-            setAccounts(cachedAccounts())
-            await test()
-            await Widget.reloadAll()
-          } catch (e: any) { setStatus(e.message) }
-        }} />
-        ] }}>
-          <NavigationLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
-            <VStack alignment="leading" spacing={3}>
-              <Text fixedSize={{ horizontal: false, vertical: true }}>{`${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} ${a.provider === "claude" ? a.email || "邮箱未提供" : a.name}`}</Text>
-              <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
-            </VStack>
-          </NavigationLink>
-          <Spacer />
-        </HStack>)}
-        {logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
+        {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortAccounts(logins, "official")[i], i)} />
+          : sortAccounts(logins, "official").map(loginRow)}
+        {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}
         <Button title={"刷新额度"} action={test} disabled={busy || !!device || !!claude} />
       </Section> : null}
-      {source === "official" && loginProvider === "deepseek" ? <Section header={<Text>添加DeepSeek官方账号</Text>} footer={<Text>不是OAuth：新增账号使用官方API Key查询余额。已有网页Token账号保留原查询能力，失效需更新；此处不再提供新增网页Token入口。无订阅接口。凭据仅保存本机钥匙串，不自动读取其他脚本。每次添加独立账号，退出仅移除该账号。</Text>}>
+      {source === "official" && loginProvider === "deepseek" ? <Section header={<Text>添加DeepSeek</Text>}>
         <TextField title="DeepSeek账号名称" value={dsName} onChanged={setDSName} />
         <SecureField title="DeepSeek凭据" value={dsToken} onChanged={setDSToken} prompt="填入api key" />
-        <Button title="添加DeepSeek账号" disabled={busy || !!device || !!claude} action={async () => {
+        <Button title="保存" disabled={busy || !!device || !!claude} action={async () => {
           try { addDeepSeekAccount(dsName, "api", dsToken); setDSToken(""); setDSName(""); setLogins(officialAccounts()); await test() }
-          catch { setStatus("DeepSeek添加失败，请检查名称、API Key和钥匙串权限") }
+          catch { /* invalid input is not saved */ }
         }} />
       </Section> : null}
-      {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。已保存过密钥时可留空。</Text>}>
+      {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>} footer={<Text>密钥只保存在本机钥匙串。</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
         <TextField title={"管理密钥"} value={keyEditing ? key : maskedKey(key || cur.managementKey || "")} onFocus={() => { setKey(""); setKeyEditing(true) }} onBlur={() => setKeyEditing(false)} onChanged={value => { if (keyEditing && value !== maskedKey(cur.managementKey || "")) setKey(value) }} prompt="managementKey" />
         <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
       </Section> : null}
-
-      <Section header={<Text>当前状态</Text>}>
-        <Text>{status}</Text>
-        {lines.map(l => <Text font={13}>{l}</Text>)}
-      </Section>
 
       {source !== "official" ? <Section header={<Text>目前账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。</Text>}>
         {accounts.map((a, i) => <NavigationLink key={a.id}
@@ -472,7 +447,7 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section> : null}
 
-      <Section header={<Text>组件刷新</Text>} footer={<Text>刷新间隔，实际时间由ios调度</Text>}>
+      <Section header={<Text>组件刷新</Text>}>
         <Picker title={"刷新间隔"} value={refreshMinutes} onChanged={async (value: string) => {
           setRefreshMinutes(value)
           saveRefreshMinutes(Number(value))

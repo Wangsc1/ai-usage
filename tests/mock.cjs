@@ -6,7 +6,8 @@ let now = 1800000000000, handler, calls = [], reads = []
 const kc = new Map(), storage = new Map(), storageWrites = []
 class Clock extends Date { constructor(...a) { super(...(a.length ? a : [now])) } static now() { return now } }
 const modules = {}
-const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { if(k==='WebViewController'||k==='EditMode')return undefined;return o[k] || k } })
+const missingExports = new Set()
+const scripting = new Proxy({ Widget: { family: 'systemLarge', parameter: '' } }, { get(o,k) { if(k==='WebViewController'||k==='EditMode'||missingExports.has(k))return undefined;return o[k] || k } })
 scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
 const registeredIntents=new Map()
 scripting.AppIntentProtocol={AppIntent:0}
@@ -24,7 +25,7 @@ function load(name) {
   let code = fs.readFileSync(name === 'renewal-fresh-api.ts' ? path.join(root,'api.ts') : name === 'background-baseline-api.ts' ? path.join(path.dirname(process.env.BACKGROUND_BASELINE_PATH),'api.ts') : name === 'background-baseline.tsx' ? process.env.BACKGROUND_BASELINE_PATH : name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'pre-accessory-widget.tsx' ? process.env.PRE_ACCESSORY_WIDGET_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
   if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout, BalanceRows, run as runWidget }')
   if (name === 'background-baseline.tsx' || name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx' || name === 'pre-accessory-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
-  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterSafari, presentIsolatedAuthorization, run as runApp }')
+  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterBrowser, presentIsolatedAuthorization, run as runApp }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
   const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : name === 'background-baseline.tsx' && n === './api' ? load('background-baseline-api.ts') : load(n.replace('./','') + (fs.existsSync(path.join(root,n.replace('./','')+'.tsx'))?'.tsx':'.ts'))
@@ -620,7 +621,9 @@ async function main() {
   scripting.Widget.reloadAll=async()=>{}
   storage.set('ai_usage_cache_v1',{...data,accounts})
   api.saveAccountOrder(accounts.map(a=>a.id));storage.set('ai_usage_selected_accounts_v1',[accounts[3].id,accounts[0].id])
-  const {SettingsView}=load('index.tsx')
+  const loadSettingsWith=missing=>{delete modules['index.tsx'];missing.forEach(k=>missingExports.add(k));try{return load('index.tsx').SettingsView}finally{missing.forEach(k=>missingExports.delete(k));delete modules['index.tsx']}}
+  let SettingsView=load('index.tsx').SettingsView
+  const withMissingSort=fn=>{const saved=SettingsView;SettingsView=loadSettingsWith(['EditButton','ForEach']);try{return fn()}finally{SettingsView=saved;load('index.tsx')}}
   const render=()=>{hook=0;return expand(SettingsView())}
   let ui=render()
   assert.ok(!ui.some(x=>x.type==='Toggle'))
@@ -635,7 +638,7 @@ async function main() {
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
   // Read-only Form list + NavigationLink to a separate ScrollView page using ReorderableForEach (no List/Form drag).
   const indexSource=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
-  for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','EditButton','ForEach count','onMove={busy'])assert.ok(!indexSource.includes(old),old)
+  for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','onMove={busy','EditMode'])assert.ok(!indexSource.includes(old),old)
   assert.ok(!ui.some(x=>x.type==='ForEach'||x.type==='EditButton'||x?.props?.onDrag||x?.props?.onDrop))
   assert.equal(render().find(x=>x.type==='Form').props.toolbar.confirmationAction,undefined)
   // Minimal documented-shape mocks: Observable{value,setValue}, chainable modifiers() recorder.
@@ -694,7 +697,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.13')
+  assert.equal(api.VERSION,'1.10.14')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -800,12 +803,15 @@ async function main() {
   states.length=0;let emailUI=render()
   assert.ok(emailUI.some(x=>x.type==='Text'&&typeof x.props.children==='string'&&/^\d+\. /.test(x.props.children)&&x.props.children.endsWith('Codex nested@example.test')))
   assert.ok(!emailUI.some(x=>x.type==='Section'&&x.props.header?.props.children==='目前账号'))
-  const orderLink=emailUI.find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
+  assert.ok(!emailUI.some(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage'),'native sort replaces official sub-page')
+  const nativeOrder=emailUI.find(x=>x.type==='ForEach');assert.ok(nativeOrder);assert.equal(typeof nativeOrder.props.onMove,'function')
+  const fallbackUI=withMissingSort(()=>{states.length=0;return render()})
+  const orderLink=fallbackUI.find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
   obsStore=[];obsIndex=0;const emailOrder=expand(orderLink.props.destination.type(orderLink.props.destination.props))
   const orderBuilder=emailOrder.find(x=>x.type==='ReorderableForEach')
   assert.ok(expand(orderBuilder.props.builder(nestedAccount,0)).some(x=>typeof x==='string'&&x.includes('nested@example.test')))
   await emailUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
-  emailUI=render();assert.ok(emailUI.some(x=>typeof x==='string'&&x.includes('Codex nested@example.test：5 h')))
+  emailUI=render();assert.ok(!emailUI.some(x=>x.type==='Section'&&x.props.header?.props.children==='当前状态'));assert.ok(api.officialCached().accounts.some(a=>a.id===nested.id&&a.fiveHour.remainingPercent!=null),'manual refresh still updates cache')
   // Refresh response omitting email preserves the previously authorized stored email and aliases.
   const refreshRecord=JSON.parse(kc.get('ai_usage_official_oauth_v1'));const nr=refreshRecord.find(a=>a.id===nested.id)
   nr.expiresAt=now-1;kc.set('ai_usage_official_oauth_v1',JSON.stringify(refreshRecord))
@@ -820,20 +826,24 @@ async function main() {
   assert.equal(api.getWidgetName(nested.id,'parrot'),'另一来源保留')
   assert.deepEqual(Array.from(api.sortAccounts(api.officialCached().accounts,"official"),a=>a.id),beforeExitOrder.filter(id=>id!==nested.id))
   console.log('PASS: separate email/name; top+profile claims; legacy access migration; full-email App logout/list/order; status full email; widget prefix/alias priority; refresh email retention; scoped exit cleanup')
-  // Safari Promise closes before exactly one check. Early-close interval is respected with one bounded wait.
-  const {checkAfterSafari}=load('index.tsx')
+  // In-app authorization browser closes before exactly one check. Early-close interval is respected with one bounded wait.
+  // context.Safari.present remains the test's close handle; the stub browser presents through it (Safari entry removed).
+  const earlySetTimeout=context.setTimeout,earlyClearTimeout=context.clearTimeout
+  context.setTimeout=(fn,ms)=>{if(ms===20000)return 0;now+=ms;Promise.resolve().then(fn);return 0};context.clearTimeout=()=>{}
+  context.WebViewController=class{async loadURL(){return true}present(){return context.Safari.present()}dispose(){}}
+  const {checkAfterBrowser}=load('index.tsx')
   namedFlow({},'pending-test');let autoDevice=await api.beginDeviceLogin(),browserClose
   context.Safari.present=()=>new Promise(r=>browserClose=r)
   let active=true,before=calls.length
-  const afterClose=checkAfterSafari(autoDevice,()=>active);await Promise.resolve();assert.equal(calls.length,before)
+  const afterClose=checkAfterBrowser(autoDevice,()=>active);await Promise.resolve();assert.equal(calls.length,before)
   handler=async()=>resp(403);browserClose();assert.equal(await afterClose,'pending');assert.equal(autoDevice.cancelled,false)
   before=calls.length;let waited=[]
   context.Safari.present=async()=>{}
-  assert.equal(await checkAfterSafari(autoDevice,()=>true,async ms=>{waited.push(ms);now+=ms}),'pending')
+  assert.equal(await checkAfterBrowser(autoDevice,()=>true,async ms=>{waited.push(ms);now+=ms}),'pending')
   assert.deepEqual(waited,[5000]);assert.equal(calls.length,before+1)
   for(const mode of ['cancel','source','dismiss']){
     context.Safari.present=()=>new Promise(r=>browserClose=r);active=true
-    const promise=checkAfterSafari(autoDevice,()=>active&&api.getSource()==='official')
+    const promise=checkAfterBrowser(autoDevice,()=>active&&api.getSource()==='official')
     await Promise.resolve();before=calls.length
     if(mode==='cancel')api.cancelDeviceLogin(autoDevice)
     else if(mode==='source')api.saveSource('parrot')
@@ -842,15 +852,15 @@ async function main() {
     api.saveSource('official');namedFlow({},'pending-test');autoDevice=await api.beginDeviceLogin()
   }
   context.Safari.present=async()=>{};autoDevice.nextPoll=now+5000;before=calls.length
-  assert.equal(await checkAfterSafari(autoDevice,()=>true,async ms=>{api.cancelDeviceLogin(autoDevice);now+=ms}),null)
+  assert.equal(await checkAfterBrowser(autoDevice,()=>true,async ms=>{api.cancelDeviceLogin(autoDevice);now+=ms}),null)
   assert.equal(calls.length,before)
   namedFlow({},'expired-auto');autoDevice=await api.beginDeviceLogin();autoDevice.expiresAt=now
-  await assert.rejects(()=>checkAfterSafari(autoDevice,()=>true),/过期/)
+  await assert.rejects(()=>checkAfterBrowser(autoDevice,()=>true),/过期/)
   // Full Settings action: browser closes, check succeeds, quota cache/list and widget refresh follow.
   states.length=0;context.Safari.present=async()=>{};namedFlow({name:'自动授权名称',email:'automatic@example.test'},'automatic-user')
   let reloadCount=0;scripting.Widget.reloadAll=async()=>{reloadCount++}
   let authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
   authUI=render();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('automatic@example.test')))
   assert.ok(api.officialCached().accounts.some(a=>a.name==='automatic@example.test'));assert.ok(reloadCount>0)
   assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
@@ -858,7 +868,7 @@ async function main() {
   for(const mode of ['cancel','dismiss','source']){
     states.length=0;namedFlow({},'abandoned-'+mode);context.Safari.present=()=>new Promise(r=>browserClose=r)
     authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
-    authUI=render();const action=authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
+    authUI=render();const action=authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
     await Promise.resolve();before=calls.length
     await authUI.find(x=>x.type==='Button'&&x.props.title==='检查授权').props.action();assert.equal(calls.length,before) // busy lock blocks competing checks
     if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
@@ -869,11 +879,12 @@ async function main() {
   states.length=0;namedFlow({},'ui-pending');context.Safari.present=async()=>{}
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
   handler=async()=>resp(403)
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
-  authUI=render();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.ok(authUI.some(x=>typeof x==='string'&&x.startsWith('等待授权')))
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
+  authUI=render();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.ok(!authUI.some(x=>typeof x==='string'&&x.startsWith('等待授权')),'no status section text')
   context.Safari.present=async()=>{throw new Error('mock failure')}
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.action()
+  await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
   authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
+  context.setTimeout=earlySetTimeout;context.clearTimeout=earlyClearTimeout;delete context.WebViewController
   // Documented-shape WebViewController: each attempt has its own non-persistent store and finally disposal.
   const browserTimers=new Map();let timerId=0
   context.setTimeout=(fn,ms)=>{if(ms===20000){const id=++timerId;browserTimers.set(id,fn);return id}now+=ms;Promise.resolve().then(fn);return 0}
@@ -923,12 +934,12 @@ async function main() {
   api.saveSource('official');namedFlow({},'isolated-interval')
   const intervalDevice=await api.beginDeviceLogin();intervalDevice.nextPoll=now+3000
   handler=async()=>resp(403);before=calls.length;waited=[]
-  assert.equal(await checkAfterSafari(intervalDevice,()=>true,async ms=>{waited.push(ms);now+=ms},presentIsolatedAuthorization),'pending')
+  assert.equal(await checkAfterBrowser(intervalDevice,()=>true,async ms=>{waited.push(ms);now+=ms},presentIsolatedAuthorization),'pending')
   assert.deepEqual(waited,[3000]);assert.equal(calls.length,before+1);assert.equal(intervalDevice.cancelled,false);assert.equal(instances.at(-1).disposed,1)
   api.saveSource('official');states.length=0;namedFlow({email:'isolated@example.test'},'isolated-user')
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
-  authUI=render();assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='Safari备用授权页'))
-  assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('外部无痕授权网址')))
+  authUI=render();assert.ok(!authUI.some(x=>x.type==='Button'&&/Safari/.test(x.props.title||'')));assert.ok(!authUI.some(x=>typeof x==='string'&&(x.includes('外部无痕授权网址')||x.includes('仅输入你自己'))))
+  const codeRow=authUI.find(x=>x.type==='HStack'&&Array.isArray(x.props.children)&&x.props.children[0]?.props?.contextMenu);assert.ok(codeRow);assert.deepEqual(Array.from(codeRow.props.children,c=>c.type),['Text','Spacer','Text']);assert.ok(expand(codeRow.props.children[0]).join('').includes('一次性代码'));assert.equal(codeRow.props.children[2].props.children,'有效期15分钟')
   await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
   assert.equal(instances.at(-1).disposed,1)
   assert.ok(api.officialCached().accounts.some(a=>a.name==='isolated@example.test'))
@@ -952,17 +963,17 @@ async function main() {
   authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
   assert.equal(calls.length,before);assert.equal(instances.at(-1).disposed,1)
-  authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='Safari备用授权页'))
+  authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(!authUI.some(x=>x.type==='Button'&&/Safari/.test(x.props.title||'')))
   states.length=0;api.saveSource('official');namedFlow({},'ui-navigation-hung')
   loadBrowser=()=>new Promise(()=>{});presentBrowser=()=>new Promise(()=>{})
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
   authUI=render();before=calls.length
   const hungUI=authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.action()
-  assert.ok(render().some(x=>typeof x==='string'&&x.startsWith('正在打开官方授权页')))
+  assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.disabled,'busy while opening')
   Array.from(browserTimers.values())[0]();await hungUI
   authUI=render();assert.equal(calls.length,before)
   assert.ok(authUI.some(x=>typeof x==='string'&&x.startsWith('授权页面加载超时')))
-  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.disabled,false)
+  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.disabled,false,'timeout unlocks retry')
   assert.ok(authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
   assert.equal(instances.at(-1).disposed,1);assert.equal(browserTimers.size,0)
   // Global absent: accurate error displayed adjacent to opening buttons, device remains retryable.
@@ -974,9 +985,9 @@ async function main() {
   authUI=render();assert.equal(calls.length,before);assert.equal(browserTimers.size,0)
   const unsupported=authUI.find(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed')
   assert.ok(unsupported.props.children.startsWith('当前Scripting不支持WebViewController'))
-  const section=authUI.find(x=>x.type==='Section'&&x.props.header?.props.children==='登录账号')
+  const section=authUI.find(x=>x.type==='Section'&&(x.props.header?.props.children==='登录账号'||x.props.header?.props.children?.[0]?.props?.children==='登录账号'))
   assert.ok(expand(section).includes(unsupported))
-  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用授权页').props.disabled,false)
+  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='打开官方授权页').props.disabled,false)
   context.WebViewController=supportedBrowser
   // Long press uses official contextMenu and Pasteboard, copying ONLY this code value.
   let copied=[];context.Pasteboard={setString:async value=>copied.push(value)}
@@ -1122,8 +1133,7 @@ async function main() {
   // App uses the same composed path and reports source/freshness independently.
   states.length=0;authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
-  authUI=render();assert.ok(authUI.includes('统计：Parrot全部账号汇总；额度：官方（Codex/Claude OAuth、DeepSeek）'))
-  assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('23 次')))
+  authUI=render();assert.ok(!authUI.some(x=>typeof x==='string'&&(x.startsWith('统计：')||x.includes('23 次'))),'refresh summary had only the removed status section')
   assert.equal(calls.slice(before).filter(c=>c.url.includes('/stats/summary')).length,2)
   statsTimestamp=storage.get('ai_usage_parrot_stats_v1').fetchedAt
   // Only statistics fails: quota refresh is still current; stats cache has its OWN unchanged time.
@@ -1137,7 +1147,7 @@ async function main() {
     assertOriginalRefreshFooter(ageData,false);assertOriginalRefreshFooter(ageData,true)
   }
   states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
-  assert.ok(render().includes('⚠️ 额度已刷新；Parrot统计独立读取失败'))
+  assert.ok(!render().includes('⚠️ 额度已刷新；Parrot统计独立读取失败'));assert.equal(storage.get('ai_usage_parrot_stats_v1').fetchedAt,statsTimestamp,'stats cache kept on failure')
   // No statistics cache, malformed response, and no config all yield unknown, never fabricated zero.
   storage.delete('ai_usage_parrot_stats_v1');combined=await api.loadUsage();assert.equal(combined.data.today,null);assert.equal(combined.data.month,null);assert.equal(combined.data.statistics.fetchedAt,null)
   assertOriginalRefreshFooter(combined.data,false);assertOriginalRefreshFooter(combined.data,true)
@@ -1228,13 +1238,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.13')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.14')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.13');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.14');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1324,7 +1334,7 @@ async function main() {
     const resets=tree.filter(x=>x.type==='Text'&&String(x.props.children).startsWith('RE:'));assert.equal(resets.length,1) // only Codex, never Claude
   }
   states.length=0;authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='刷新额度').props.action()
-  assert.ok(render().some(x=>typeof x==='string'&&x.includes('Claude claude-b@example.test：')))
+  assert.ok(render().some(x=>typeof x==='string'&&/^\d+\. Claude claude-b@example.test$/.test(x)))
   claudeUsageFailure=true;combined=await api.loadUsage();assert.equal(combined.stale,true);assert.equal(combined.data.accounts.length,5);assert.equal(combined.data.statistics.stale,false);claudeUsageFailure=false
   // Local provider-scoped exits preserve Codex, other Claude accounts, Parrot cache and unrelated aliases.
   const parrotCacheSnapshot=JSON.stringify(storage.get('ai_usage_cache_v1')),codexBeforeLogout=kc.get('ai_usage_official_oauth_v1')
@@ -1361,8 +1371,8 @@ async function main() {
   const autoState=uiAttempt().state,oldUiServer=claudeServers.at(-1)
   authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();uiD=uiAttempt();assert.equal(uiD.manual,true);assert.notEqual(uiD.state,autoState);assert.equal(oldUiServer.stops,1)
-  context.Safari.present=async url=>{assert.equal(url,uiD.url)}
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='Safari备用Claude授权页').props.action()
+  assert.ok(!authUI.some(x=>x.type==='Button'&&/Safari/.test(x.props.title||'')),'Claude Safari entry removed')
+  {const savedPresent=presentBrowser;presentBrowser=async()=>{};await authUI.find(x=>x.type==='Button'&&x.props.title==='打开Claude授权页').props.action();presentBrowser=savedPresent};assert.equal(instances.at(-1).urls[0],uiD.url)
   assert.equal(uiD.consumed,false);authUI=render()
   authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged('mock-ui-code#'+uiD.state)
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='完成Claude授权').props.action()
@@ -1385,7 +1395,7 @@ async function main() {
     assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'))
   }
   authUI=await startClaudeUI();uiD=uiAttempt();claudeTimers.get(uiD.timer).fn()
-  assert.ok(render().includes('Claude授权已过期，请重新开始'));assert.equal(claudeTimers.size,0);assert.equal(claudeServers.at(-1).stops,1)
+  assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消Claude登录'),'expiry ends attempt; add button usable again');assert.equal(claudeTimers.size,0);assert.equal(claudeServers.at(-1).stops,1)
   const savedCrypto=context.Crypto;delete context.Crypto;authUI=await startClaudeUI()
   assert.ok(authUI.some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children==='当前Scripting不支持Claude PKCE加密，请更新Scripting'))
   context.Crypto=savedCrypto
@@ -1462,7 +1472,8 @@ async function main() {
   authUI=await startClaudeUI();authUI.find(x=>x.type==='Button'&&x.props.title==='改用手动授权码').props.action()
   authUI=render();const diagnosticAttempt=uiAttempt(),diagnosticState=diagnosticAttempt.state
   assert.ok(!authUI.some(x=>x.type==='LabeledContent'&&x.props.title==='当前版本'))
-  for(const [header,footer]of [['组件刷新','刷新间隔，实际时间由ios调度'],['数据来源','切换不删除另一来源配置。与额度来源独立，Parrot/Sub2API二选一不合计。'],['登录账号','登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。']]){const section=authUI.find(x=>x.type==='Section'&&(x.props.header?.props.children===header||x.props.header?.props.children?.[0]?.props?.children===header));assert.ok(section,header);assert.equal(section.props.footer.props.children,footer)}
+  assert.equal(authUI.find(x=>x.type==='Section'&&x.props.header?.props.children==='组件刷新').props.footer,undefined,'refresh footer removed');assert.ok(!authUI.some(x=>x.type==='Section'&&x.props.header?.props.children==='当前状态'))
+  for(const [header,footer]of [['数据来源','切换不删除另一来源配置。与额度来源独立，Parrot/Sub2API二选一不合计。'],['登录账号','登录服务可选Codex、Claude或DeepSeek。DeepSeek使用官方API Key直接添加并验证。']]){const section=authUI.find(x=>x.type==='Section'&&(x.props.header?.props.children===header||x.props.header?.props.children?.[0]?.props?.children===header));assert.ok(section,header);assert.equal(section.props.footer.props.children,footer)}
   const validationCases=[['','Claude授权码输入为空'],['   ','Claude授权码输入为空'],['secret-without-hash','Claude授权码缺少#分隔符'],['secret#','Claude授权码格式错误'],['#state','Claude授权码格式错误'],['secret#state#extra','Claude授权码格式错误'],['secret#different-state','Claude授权码state不匹配']]
   for(const [input,expected] of validationCases){
     authUI=render();authUI.find(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码').props.onChanged(input)
@@ -1769,7 +1780,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.13')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.14')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1779,7 +1790,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.13 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.14 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -1893,8 +1904,9 @@ async function main() {
       const dataSection=ui.find(x=>x.type==='Section'&&x.props.header?.type==='HStack'&&x.props.header.props.children?.[0]?.props.children==='数据来源');assert.ok(dataSection)
       const header=dataSection.props.header;assert.equal(header.props.frame.maxWidth,'infinity');assert.deepEqual(Array.from(header.props.children,n=>n.type),['Text','Spacer','Text']);assert.equal(header.props.children[2].props.children,api.VERSION);assert.equal(dataSection.props.footer.props.children,'切换不删除另一来源配置。与额度来源独立，Parrot/Sub2API二选一不合计。');assert.deepEqual(Array.from(dataSection.props.children,n=>n.props.title),['账号来源','统计来源']);assert.ok(!ui.some(n=>n?.type==='Section'&&n.props.header?.props.children==='统计来源'));assert.ok(!ui.some(n=>n?.type==='Button'&&['测试连接','测试Sub2API连接'].includes(n.props.title)))
       assert.equal(ui.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.value,selected)
-      for(const title of ['组件刷新','当前状态',...(selected==='official'?[]:['目前账号'])])assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children===title))
-      if(selected==='official')assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children==='登录账号'))
+      assert.ok(!ui.some(x=>x.type==='Section'&&x.props.header?.props.children==='当前状态'))
+      for(const title of ['组件刷新',...(selected==='official'?[]:['目前账号'])])assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children===title))
+      if(selected==='official')assert.ok(ui.some(x=>x.type==='Section'&&(x.props.header?.props.children==='登录账号'||x.props.header?.props.children?.[0]?.props?.children==='登录账号')))
       assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='预览组件'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='账号来源'))
       assert.ok(ui.some(x=>x.type==='Picker'&&x.props.title==='刷新间隔'))
@@ -2303,7 +2315,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.13');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.14');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2557,7 +2569,9 @@ async function main() {
       assert.ok(!nodes.some(n=>n?.type==='Gauge'),family+' no fabricated percentage gauge')
       expand(Root({data:mixed,stale:false,error:null}))
     }
-    states.length=0;let dsUI=render();assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.children==='DeepSeek'));assert.ok(!dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));dsUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');dsUI=render();assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(dsUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key');assert.equal(dsUI.filter(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号').length,1);assert.ok(!dsUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
+    states.length=0;let dsUI=render();
+    {const pre=render();pre.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');const ds=render().find(n=>n?.type==='Section'&&n.props.header?.props.children==='添加DeepSeek');assert.ok(ds);assert.equal(ds.props.footer,undefined);assert.deepEqual(expand(ds).filter(n=>n?.type==='Button').map(n=>n.props.title),['保存']);assert.ok(!render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='添加DeepSeek官方账号'));pre.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('codex');states.length=0;dsUI=render()}
+assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.children==='DeepSeek'));assert.ok(!dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));dsUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');dsUI=render();assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(dsUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key');assert.equal(dsUI.filter(n=>n?.type==='Button'&&n.props.title==='保存').length,1);assert.ok(!dsUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
     // Shared loader deduplicates active requests, and a late account response cannot undo local logout.
     hold=true;const p1=api.loadUsage(),p2=api.loadUsage();assert.equal(p1,p2)
     for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held)
@@ -2566,10 +2580,10 @@ async function main() {
     // Drive actual App fields/add action, not only the exported storage helper.
     states.length=0;let addUI=render();addUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');addUI=render();addUI.find(n=>n?.type==='TextField'&&n.props.title==='DeepSeek账号名称').props.onChanged('UI DeepSeek')
     addUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('DS-SYNTHETIC-API')
-    addUI=render();await addUI.find(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号').props.action()
+    addUI=render();await addUI.find(n=>n?.type==='Button'&&n.props.title==='保存').props.action()
     const uiAccount=api.officialAccounts().find(a=>a.name==='UI DeepSeek');assert.ok(uiAccount);assert.equal(JSON.parse(kc.get(dsKey)).find(a=>a.id===uiAccount.id).mode,'api');assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'')
     api.logoutOfficial(uiAccount.id)
-    let loginUI=render();assert.ok(!loginUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('codex');loginUI=render();assert.ok(loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key')
+    let loginUI=render();assert.ok(!loginUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('codex');loginUI=render();assert.ok(loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!loginUI.some(n=>n?.type==='Button'&&n.props.title==='保存'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key')
     // An official request may complete after switching source, but cannot populate another source's cache.
     const switchID=api.addDeepSeekAccount('switch','api','DS-SYNTHETIC-API');hold=true;held=null;const switched=api.loadUsage()
     for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held);api.saveSource('parrot');held();await switched;assert.equal(storage.has('ai_usage_cache_v1'),false);api.logoutOfficial(switchID);hold=false
@@ -2705,9 +2719,23 @@ async function main() {
     const rows=()=>render().filter(n=>n?.type==='HStack'&&n.props.trailingSwipeActions)
     const ids=()=>Array.from(rows(),n=>n.key),labels=()=>rows().map(n=>n.props.children[0].props.children.props.children[0].props.children)
     assert.deepEqual(ids(),[ds,'manage-codex','claude:manage:org']);assert.deepEqual(labels(),['1. DeepSeek Manage DeepSeek','2. Codex manage@codex.test','3. Claude manage@claude.test'])
-    const orderLink=managementUI.find(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage');assert.ok(orderLink);assert.ok(managementUI.find(n=>n?.type==='Section'&&n.props.header?.props.children==='登录账号').props.children.flat().includes(orderLink))
-    const destination=orderLink.props.destination;obsStore=[];obsIndex=0;let orderTree=expand(destination.type(destination.props));assert.ok(orderTree.some(n=>n?.type==='ScrollView'));assert.ok(!orderTree.some(n=>n?.type==='Form'||n?.type==='List'))
-    const reorder=orderTree.find(n=>n?.type==='ReorderableForEach');assert.deepEqual(Array.from(reorder.props.data,n=>n.id),ids());reorder.props.onMove([2],0)
+    // Native (exports present): header EditButton, single ForEach with onMove, no official sub-page entry; rows keep swipe/name link.
+    const loginSec=()=>render().find(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号')
+    assert.deepEqual(Array.from(loginSec().props.header.props.children.filter(Boolean),n=>n.type),['Text','Spacer','EditButton'])
+    assert.ok(!managementUI.some(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage'))
+    const nativeEach=()=>render().filter(n=>n?.type==='ForEach');assert.equal(nativeEach().length,1);const fe=nativeEach()[0]
+    assert.equal(fe.props.count,3);assert.equal(fe.props.onDelete,undefined);assert.equal(typeof fe.props.onMove,'function')
+    assert.ok(rows().every(n=>n.props.trailingSwipeActions&&n.props.children[0].type==='NavigationLink'))
+    const move=(idx,off)=>render().find(n=>n?.type==='ForEach').props.onMove(idx,off)
+    const order0=ids();move([0,0],1);move([-1],1);move([5],0);move([0],0);assert.deepEqual(ids(),order0,'invalid/no-op moves ignored');assert.deepEqual(storage.get('ai_usage_official_order_v1'),order0)
+    move([0,2],1);assert.deepEqual(ids(),['manage-codex',ds,'claude:manage:org'],'official remove-then-insert multi-index');move([0],3);assert.deepEqual(ids(),[ds,'claude:manage:org','manage-codex']);move([1],0)
+    // Missing exports: first render succeeds, no ForEach/EditButton, original sub-page entry returns and still sorts.
+    {const fallback=withMissingSort(()=>{states.length=0;return render()})
+     assert.ok(!fallback.some(n=>n?.type==='ForEach'||n?.type==='EditButton'))
+     const orderLink=fallback.find(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage');assert.ok(orderLink)
+     const destination=orderLink.props.destination;obsStore=[];obsIndex=0;const orderTree=expand(destination.type(destination.props));assert.ok(orderTree.some(n=>n?.type==='ScrollView'))
+     assert.deepEqual(Array.from(orderTree.find(n=>n?.type==='ReorderableForEach').props.data,n=>n.id),['claude:manage:org',ds,'manage-codex'])}
+    states.length=0
     assert.deepEqual(ids(),['claude:manage:org',ds,'manage-codex']);assert.deepEqual(storage.get('ai_usage_official_order_v1'),ids());assert.deepEqual(labels(),['1. Claude manage@claude.test','2. DeepSeek Manage DeepSeek','3. Codex manage@codex.test']);assert.equal(calls.length,before,'sorting metadata-only list is local')
     const nameDestination=rows()[0].props.children[0].props.destination;assert.equal(nameDestination.type.name,'WidgetNamePage');assert.equal(nameDestination.props.account.id,'claude:manage:org');assert.equal(nameDestination.props.account.fiveHour.usedPercent,null)
     const viewStates=states.slice();states.length=0;hook=0;let nameTree=expand(nameDestination.type(nameDestination.props));nameTree.find(n=>n?.type==='TextField'&&n.props.title==='小组件用户名').props.onChanged('Management Alias');hook=0;nameTree=expand(nameDestination.type(nameDestination.props));await nameTree.find(n=>n?.type==='Button'&&n.props.title==='保存').props.action();states.length=0;states.push(...viewStates)
@@ -2718,9 +2746,9 @@ async function main() {
     const deleting=rows()[1];assert.equal(deleting.key,ds);assert.equal(deleting.props.action,undefined);assert.equal(deleting.props.onTapGesture,undefined);await deleting.props.trailingSwipeActions.actions[0].props.action()
     assert.deepEqual(ids(),['claude:manage:org','manage-codex']);assert.deepEqual(labels(),['1. Claude manage@claude.test','2. Codex manage@codex.test']);assert.equal(api.getWidgetName('claude:manage:org','official'),'Management Alias');assert.ok(!api.cachedAccounts().some(n=>n.id===ds))
     const added=api.addDeepSeekAccount('New Manage','api','SYNTHETIC-MANAGE-NEW');states.length=0;assert.deepEqual(ids(),['claude:manage:org','manage-codex',added]);assert.ok(labels()[2].startsWith('3. DeepSeek'))
-    for(const source of ['parrot','sub2api']){api.saveSource(source);states.length=0;assert.ok(render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='目前账号'));assert.ok(!render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='登录账号'))}
+    for(const source of ['parrot','sub2api']){api.saveSource(source);states.length=0;assert.ok(render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='目前账号'));assert.ok(!render().some(n=>n?.type==='Section'&&(n.props.header?.props.children==='登录账号'||n.props.header?.props.children?.[0]?.props?.children==='登录账号')))}
     kc.clear();for(const[k,v]of previousKC)kc.set(k,v);storage.clear();for(const[k,v]of previousStore)storage.set(k,v);handler=previousHandler;states.length=0
-    console.log('PASS: official only duplicate Section removed; sorted continuous three-provider labels; no-usage metadata supports existing name editor and original ScrollView/ReorderableForEach; actual move persists+updates returned login list; aliases retained; widget sequence matches; reordered swipe deletes exact ID and renumbers; new IDs append; nonofficial module retained; local operations no network')
+    console.log('PASS: official only duplicate Section removed; sorted continuous three-provider labels; no-usage metadata supports existing name editor and header EditButton + same-page ForEach.onMove (exports present) and original long-press sub-page (exports missing); actual move persists+updates login list; aliases retained; widget sequence matches; reordered swipe deletes exact ID and renumbers; new IDs append; nonofficial module retained; local operations no network')
   }
   // Saved key display and actual editing are separate: never bind a saved full key or submit a mask.
   {
@@ -2759,7 +2787,7 @@ async function main() {
     assert.ok(row);assert.equal(row.props.frame.maxWidth,'infinity');assert.deepEqual(Array.from(row.props.children,n=>n.type),['Button','Spacer','Picker']);assert.equal(row.props.children[0].props.title,'添加账号');assert.equal(row.props.children[2].props.pickerStyle,'menu');assert.equal(row.props.children[2].props.value,'codex');assert.equal(row.props.children[2].props.disabled,false)
     assert.deepEqual(Array.from(row.props.children[2].props.children,n=>n.props.tag),['codex','claude','deepseek']);assert.ok(!tree.some(n=>n?.type==='Picker'&&n.props.title==='登录服务'))
     row.props.children[2].props.onChanged('claude');assert.equal(render().find(n=>n?.type==='Picker'&&n.props.title==='').props.value,'claude')
-    render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(render().some(n=>n?.type==='Button'&&n.props.title==='添加DeepSeek账号'))
+    render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(render().some(n=>n?.type==='Button'&&n.props.title==='保存'))
     kc.set('ai_usage_official_oauth_v1',JSON.stringify([{id:'swipe-codex',accountId:'swipe-codex',name:'Swipe Codex',email:'swipe@codex.test',access:token('swipe-codex','swipe-user'),refresh:'SYNTHETIC-REFRESH',expiresAt:now+3600000}]))
     kc.set('ai_usage_claude_oauth_v1',JSON.stringify([{id:'claude:swipe:org',name:'Swipe Claude',email:'swipe@claude.test',organization:'org',access:'SYNTHETIC-CLAUDE',refresh:'SYNTHETIC-REFRESH',expiresAt:now+3600000}]))
     api.addDeepSeekAccount('Swipe DeepSeek','api','SYNTHETIC-DEEPSEEK')
@@ -2802,29 +2830,31 @@ async function main() {
       if(cacheMode==='full'||cacheMode==='quota-only')storage.set(quotaKeys[source],{...data,today:null,month:null,accounts:[acc],fetchedAt:now-3600000})
       if(cacheMode==='full'||cacheMode==='stats-only')storage.set(statsKeys[statsSource],{today:metric,month:metric,todayByFamily:{},monthByFamily:{},fetchedAt:now-7200000})
       const beforeCalls=calls.length,beforeKC=JSON.stringify([...kc]),beforeStore=JSON.stringify([...storage]),beforeReload=reloads
-      for(const opening of ['first','reopen']){
-        states.length=0;effects=[];cleanups=[];await load('index.tsx').runApp()
+      for(const opening of ['first','reopen','first-missing','reopen-missing']){
+        const missing=opening.endsWith('missing')?['EditButton','ForEach']:[];delete modules['index.tsx'];missing.forEach(k=>missingExports.add(k))
+        let runApp;try{runApp=load('index.tsx').runApp}finally{missing.forEach(k=>missingExports.delete(k))}
+        states.length=0;effects=[];cleanups=[];await runApp()
+        assert.ok(mounted.some(n=>n?.type==='Form'),opening+' first render non-blank')
+        if(source==='official'){assert.equal(mounted.some(n=>n?.type==='ForEach'),!missing.length);assert.equal(mounted.some(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage'),!!missing.length)}
         assert.equal(calls.length,beforeCalls,source+'/'+statsSource+'/'+cacheMode+'/'+opening+' zero network including expiry renewal')
         assert.equal(reloads,beforeReload,'entry does not reload widgets');assert.equal(JSON.stringify([...kc]),beforeKC);assert.equal(JSON.stringify([...storage]),beforeStore)
         const text=mounted.filter(x=>typeof x==='string').join(' ')
-        if(cacheMode==='none')assert.ok(text.includes('暂无缓存，请手动刷新或保存并测试'))
-        else assert.ok(text.includes('本机缓存（未刷新），可手动刷新'))
-        assert.ok(!text.includes('✅ 连接成功'))
-        if(cacheMode==='full'||cacheMode==='quota-only')assert.ok(text.includes('CachedName-'+source))
-        if(cacheMode==='full'||cacheMode==='stats-only'){assert.ok(text.includes('今日 $7.8'));assert.ok(text.includes('37 次'));assert.ok(text.includes((statsSource==='parrot'?'Parrot':'Sub2API')+'统计缓存'))}
-        if(cacheMode==='quota-only')assert.ok(text.includes('今日/本月Token及花费统计未提供'))
+        assert.ok(!mounted.some(n=>n?.type==='Section'&&n.props.header?.props.children==='当前状态'));assert.ok(!text.includes('✅ 连接成功'))
+        if(source!=='official'&&(cacheMode==='full'||cacheMode==='quota-only'))assert.ok(text.includes('CachedName-'+source))
+        if(source==='official')assert.ok(mounted.some(n=>n?.type==='HStack'&&n.key==='cached-codex'),'official login rows from local credentials')
         assert.ok(mounted.some(n=>n?.type==='Button'&&['刷新额度','保存并测试','保存Sub2API并测试'].includes(n.props.title)&&!n.props.disabled),'manual actions available')
         for(const cleanup of cleanups)cleanup()
       }
     }
-    assert.equal(exits,48)
+    assert.equal(exits,96)
+    delete modules['index.tsx'];load('index.tsx')
     kc.clear();for(const[k,v]of oldKC)kc.set(k,v);storage.clear();for(const[k,v]of oldStore)storage.set(k,v);handler=oldHandler;scripting.useEffect=oldEffect;scripting.Navigation=oldNavigation;scripting.Script=oldScript;scripting.Widget.reloadAll=oldReload;states.length=0
-    console.log('PASS: real runApp/Navigation.present all mount effects; three quota x two stats sources, full/quota-only/stats-only/no-cache first+reopen 48 runs ZERO fetch or renewal/reload; cached accounts+stats shown, no fake success, manual actions available; Storage/Keychain untouched including expired Codex/Claude credentials')
+    console.log('PASS: real runApp/Navigation.present all mount effects; three quota x two stats sources, full/quota-only/stats-only/no-cache first+reopen x native-exports present/missing 96 runs ZERO fetch or renewal/reload, non-blank first render; cached accounts shown, no status section, manual actions available; Storage/Keychain untouched including expired Codex/Claude credentials')
   }
   console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
-  console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks Safari; close-before-load late rejection handled; timers cleared and dispose once')
-  console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; explicit Safari fallback preserved')
-  console.log('PASS: Safari dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
+  console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks retry; close-before-load late rejection handled; timers cleared and dispose once')
+  console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; Safari fallback entries removed')
+  console.log('PASS: in-app browser dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
   console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
   console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/native-update metadata; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude exact-zero account gray title+SVG/LCD/percent/lit bars; enabled/available/stale not gray triggers; App foreground unchanged')
 }
