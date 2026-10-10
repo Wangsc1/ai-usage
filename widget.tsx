@@ -159,12 +159,12 @@ export function isQuotaExhausted(acc: Account): boolean {
 }
 
 // DeepSeek balances are money, never rolling quota percentages or fabricated subscription limits.
-function BalanceRows({ acc, font = 9 }: { acc: Account; font?: number }) {
+function BalanceRows({ acc, font = 9, compact = false }: { acc: Account; font?: number; compact?: boolean }) {
   const b = acc.balance
   const main = b?.money.map(m => `账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`).join(" · ") || "余额未提供"
   const detail = b?.money.map(m => b.auth === "网页Token" ? `7日 ${fmtDeepSeekMoney(m.currency, m.weekCost)}` : `充值 ${fmtDeepSeekMoney(m.currency, m.toppedUp)} 赠送 ${fmtDeepSeekMoney(m.currency, m.granted)}`).join(" · ") || "明细未提供"
   const status = `${b?.available === false ? "不可用" : b?.available == null ? "状态未提供" : ""}${b?.error ? " 读取失败/可重试" : ""}`.trim()
-  return <VStack alignment="leading" spacing={3}>
+  return <VStack alignment="leading" spacing={compact ? 3 : 6}>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={2} minScaleFactor={0.65}>{main}</Text>
     <Text font={font} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{detail}</Text>
     {status ? <Text font={font - 1} foregroundStyle={b?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.65}>{status}</Text> : null}
@@ -301,7 +301,7 @@ function smallRegionLayout(height: number) {
 function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
   const accounts = data.accounts.slice(0, 2), single = accounts.length === 1
-  const account = (acc: Account) => <VStack alignment="leading" spacing={3}>
+  const account = (acc: Account) => <VStack alignment="leading" spacing={acc.provider === "deepseek" ? 6 : 3}>
     <AccountTitle acc={acc} font={s.title} />
     {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
@@ -348,7 +348,7 @@ function QuadWindow({ label, w, fmt, s, muted = false, fixedLcd = false, rowToBa
 
 function Quad({ acc, s, fixedLcd = false, intrinsic = false }: { acc?: Account; s: Scale; fixedLcd?: boolean; intrinsic?: boolean }) {
   if (!acc) return <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}><Spacer /></VStack>
-  return <VStack alignment="leading" spacing={s.gap + 1}
+  return <VStack alignment="leading" spacing={s.gap + (acc.provider === "deepseek" ? 4 : 1)}
     fixedSize={intrinsic ? { horizontal: false, vertical: true } : undefined}
     frame={intrinsic ? { maxWidth: "infinity", alignment: "leading" as any } : { maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
@@ -467,7 +467,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
         {i > 0 ? <Rectangle fill={DIVIDER}
           modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" }).padding({ top: 1 })} /> : null}
         <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}><AccountTitle acc={acc} font={12} /></VStack>
-        <VStack alignment="leading" spacing={3} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
+        <VStack alignment="leading" spacing={3} padding={acc.provider === "deepseek" ? { top: 3 } : undefined} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
           {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} />)}
         </VStack>
       </VStack>)}
@@ -497,7 +497,7 @@ function AccessoryRectangular({ acc }: { acc: Account }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
   return <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
+    {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} compact /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
 }
 function AccessoryCircular({ acc }: { acc: Account }) {
