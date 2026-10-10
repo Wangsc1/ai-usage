@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.24"
+const VERSION = "1.10.25"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -445,7 +445,7 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section> : null}
 
-      <Section header={<Text>组件刷新</Text>}>
+      <Section header={<Text>刷新预览</Text>}>
         <Picker title={"刷新间隔"} value={refreshMinutes} onChanged={async (value: string) => {
           setRefreshMinutes(value)
           saveRefreshMinutes(Number(value))
@@ -453,9 +453,6 @@ function SettingsView() {
         }}>
           {REFRESH_OPTIONS.map(m => <Text tag={String(m)}>{m}分钟</Text>)}
         </Picker>
-      </Section>
-
-      <Section header={<Text>预览组件</Text>}>
         <Button title="预览组件" action={() => Widget.preview({ family: "systemSmall" })} />
       </Section>
 
