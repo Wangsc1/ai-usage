@@ -1,12 +1,12 @@
-# AI 用量与余额小组件
+# AI 用量与余额小组件 · Codex / Claude / DeepSeek
 
-**支持 Parrot、Sub2API 与官方账号，适用于 iPhone 主屏和锁屏**
+**Codex / Claude 额度、DeepSeek 余额；支持 Parrot、Sub2API 与官方账号，适用于 iPhone 主屏和锁屏**
 
 基于 [Scripting](https://apps.apple.com/app/id6479691128)，显示 Codex / Claude 的 5 小时、每周剩余额度、重置倒计时与可用重置卡。主屏还可显示今日与本月用量统计，支持多账号排序、自定义名称和点击刷新。DeepSeek使用独立余额显示，不套用5小时／每周额度。
 
 ## 功能与显示
 
-- **账号来源**：Parrot、官方（Codex / Claude OAuth、DeepSeek）、Sub2API 三选一。
+- **账号来源**：Parrot、Codex,Claude,DeepSeek、Sub2API 三选一。Parrot／Sub2API 自动发现账号与 DeepSeek 频道；官方账号支持 Codex／Claude 授权登录和 DeepSeek 官方 API Key 直接添加。
 - **统计来源**：Parrot、Sub2API 独立二选一，不合计。可以组合使用，例如官方额度＋Sub2API统计。
 - 配置、账号缓存、排序与自定义名称按账号来源隔离；切换不会删除另一来源的配置或登录。
 - 重置卡只跟随当前账号来源，不从统计来源或其他服务补齐。有效数量大于 0 时显示 `RE:N`；0 或未知时隐藏。只查询，不兑换重置卡或重置额度。
@@ -17,8 +17,8 @@
 | 主屏小号 | 最多 2 个账号，上下排列；只选 1 个时，顶部显示今日／本月的缓存、缓存率、Token、花费 |
 | 主屏中号 | 最多 4 个账号；选 2 个时，上方显示六项统计、下方并排显示账号；选 3 个时，一个格子显示四项统计 |
 | 主屏大号 | 顶部显示今日／本月六项统计，下方纵向显示最多 4 个账号 |
-| 锁屏矩形 | 只显示所选序列的第一个账号，包含标题及 5 h／每周两行额度 |
-| 锁屏圆形／单行 | 只显示第一个账号；圆形显示 5 h 剩余百分比，单行显示两窗百分比（系统支持时） |
+| 锁屏矩形 | 只显示所选序列的第一个账号，包含标题及 5 h／每周两行额度，DeepSeek 显示余额明细 |
+| 锁屏圆形／单行 | 只显示第一个账号；圆形显示 5 h 剩余百分比，单行显示两窗百分比（系统支持时）；DeepSeek 显示余额 |
 
 六项统计为输入、输出、缓存、缓存率、Token、花费。锁屏不显示统计或刷新按钮，由系统按锁屏样式着色。
 
@@ -49,7 +49,7 @@ DeepSeek频道通过管理接口自动分页发现，无需逐账号填写API Ke
 
 ### 官方账号（Codex / Claude OAuth、DeepSeek）
 
-选择 **官方（Codex/Claude OAuth、DeepSeek）**，再在“登录服务”选择对应服务。官方登录和额度读取不需要 Parrot 或 Sub2API；今日／本月统计需要另外配置统计来源。可以添加多个 Codex、Claude 账号，重复登录同一身份会更新原记录。
+选择 **Codex,Claude,DeepSeek**，再在“登录服务”选择对应服务。官方登录和额度读取不需要 Parrot 或 Sub2API；今日／本月统计需要另外配置统计来源。可以添加多个 Codex、Claude 账号，重复登录同一身份会更新原记录。
 
 #### Codex
 
@@ -72,7 +72,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 
 #### DeepSeek
 
-账号来源选“官方”，在“登录服务”选择“DeepSeek”，即可看到唯一的“添加DeepSeek官方账号”入口，新增账号固定使用API Key。填写本机显示名称，输入官方API Key后点“添加DeepSeek账号”直接保存并验证余额。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
+账号来源选“Codex,Claude,DeepSeek”，在“登录服务”选择“DeepSeek”，即可看到唯一的“添加DeepSeek官方账号”入口，新增账号固定使用API Key。填写本机显示名称，输入官方API Key后点“添加DeepSeek账号”直接保存并验证余额。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
 
 - **API Key**：只请求 `https://api.deepseek.com/user/balance`，显示总余额、充值余额、赠送余额及可用状态。
 - **已有网页User Token账号**：保留凭据、原查询能力和局部退出，不再提供新添加入口。不是API Key，也不是OAuth。查询 `platform.deepseek.com/api/v0/users/get_user_summary` 与 `api/v0/usage/by_api_key/cost`，显示账户余额及北京时间包含今天的7个自然日消费。属于私有网页接口，可能变化或拒绝请求；不冒充浏览器，不自动登录或续期，Token失效需手动更新。

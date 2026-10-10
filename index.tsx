@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.4"
+const VERSION = "1.10.5"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -351,7 +351,7 @@ function SettingsView() {
         <LabeledContent title="当前脚本版本" value={VERSION} />
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
           <Text tag={"parrot"}>Parrot</Text>
-          <Text tag={"official"}>官方（Codex/Claude OAuth、DeepSeek）</Text>
+          <Text tag={"official"}>Codex,Claude,DeepSeek</Text>
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
       </Section>
