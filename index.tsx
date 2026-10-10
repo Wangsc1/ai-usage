@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.19"
+const VERSION = "1.10.20"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -305,7 +305,9 @@ function SettingsView() {
     if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
     const moving = indices.map(i => current[i])
     const next = current.filter((_, i) => !indices.includes(i))
-    next.splice(Math.max(0, Math.min(newOffset, next.length)), 0, ...moving)
+    // newOffset is a destination in the ORIGINAL list (SwiftUI move semantics): drop the moved items that sit before it.
+    const at = newOffset - indices.filter(i => i < newOffset).length
+    next.splice(Math.max(0, Math.min(at, next.length)), 0, ...moving)
     if (next.every((a, i) => a.id === current[i].id)) return
     saveAccountOrder(next.map(a => a.id), "official")
     setLogins(next)
