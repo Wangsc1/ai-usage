@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount, deepSeekSummary } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.7"
+const VERSION = "1.10.8"
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
@@ -446,7 +446,7 @@ function SettingsView() {
         {lines.map(l => <Text font={13}>{l}</Text>)}
       </Section>
 
-      <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。点“账号排序”进入单独页面，长按账号卡片拖动排序，松手即保存。默认按此列表顺序显示，小号前2个、中大号前4个，不按启用状态过滤。数字参数按排序后序号映射，参数顺序仍有效（如3,1显示第三、第一）。三种额度来源的排序独立保存。</Text>}>
+      <Section header={<Text>小组件账号</Text>} footer={<Text>保留列表全部账号，不改变远端状态。</Text>}>
         {accounts.map((a, i) => <NavigationLink key={a.id}
           destination={<WidgetNamePage account={a} source={source} onSaved={() => setAccounts(cachedAccounts())} />}>
           <VStack alignment="leading" spacing={3}>
@@ -460,7 +460,7 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section>
 
-      <Section header={<Text>小组件刷新</Text>} footer={<Text>这是请求刷新间隔，实际时间由iOS调度，可能延后。更短间隔会增加网络请求与耗电。</Text>}>
+      <Section header={<Text>小组件刷新</Text>} footer={<Text>刷新间隔，实际时间由ios调度</Text>}>
         <Picker title={"刷新间隔"} value={refreshMinutes} onChanged={async (value: string) => {
           setRefreshMinutes(value)
           saveRefreshMinutes(Number(value))
