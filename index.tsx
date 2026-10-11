@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.31"
+const VERSION = "1.10.32"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -264,17 +264,17 @@ function SettingsView() {
     }
   }
 
-  async function checkOfficial(browser = false) {
+  async function checkOfficial() {
     const d = auth.device
     if (!d || auth.running) return
     auth.running = true
     setBusy(true)
     const epoch = auth.epoch
     const active = () => auth.alive && auth.device === d && auth.epoch === epoch && getSource() === "official"
-    if (browser) setBrowserError("")
+    setBrowserError("")
     try {
-      const result = browser ? await checkAfterBrowser(d, active, undefined,
-        () => presentIsolatedAuthorization(release => { auth.releaseBrowser = release })) : await checkDeviceLogin(d)
+      const result = await checkAfterBrowser(d, active, undefined,
+        () => presentIsolatedAuthorization(release => { auth.releaseBrowser = release }))
       if (!active() || result == null) return
       if (result !== "pending") {
         auth.device = null
@@ -422,13 +422,12 @@ function SettingsView() {
               if (!auth.alive || auth.device !== device || device.cancelled || Date.now() >= device.expiresAt || getSource() !== "official") return
               await Pasteboard.setString(device.code)
             }} disabled={device.cancelled || Date.now() >= device.expiresAt} />
-          </Group> }}>一次性代码：{device.code}</Text>
+          </Group> }}>{device.code}</Text>
           <Spacer />
           <Text foregroundStyle="secondaryLabel">{`有效期${Math.max(0, Math.ceil((device.expiresAt - Date.now()) / 60000))}分钟`}</Text>
           </HStack>
-          <Button title={"打开官方授权页"} action={() => checkOfficial(true)} disabled={busy} />
+          <Button title={"点击登录"} action={() => checkOfficial()} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-          <Button title={"检查授权"} action={() => checkOfficial()} disabled={busy} />
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
         {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
