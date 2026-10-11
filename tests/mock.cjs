@@ -314,7 +314,7 @@ async function main() {
   assert.deepEqual(Array.from(smallRows[0].props.children,x=>x.props.children[1].props.children),['70','17.6%','370','$0.1'])
   assert.equal(smallRows[1].props.children[3].props.children[1].props.children,'$1234.6')
   const singleTexts=single.filter(x=>typeof x==='string')
-  assert.equal(singleTexts.filter(x=>x==='Codex').length,1);assert.ok(singleTexts.includes('5 h'));assert.ok(singleTexts.includes('7d'))
+  assert.equal(singleTexts.filter(x=>x==='Codex').length,1);assert.ok(singleTexts.includes('5 h'));assert.ok(singleTexts.includes('7 d'))
   assert.ok(single.some(x=>x.type==='Image'&&x.props.systemName==='arrow.triangle.2.circlepath'))
   const missing=expand(Root({data:{...singleData,today:null,month:null},stale:false,error:null}))
   assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='GeometryReader'&&x.props.frame?.height!=null));assert.ok(!missing.some(x=>x==='$0.0'))
@@ -341,7 +341,7 @@ async function main() {
         assert.equal(time.props.monospacedDigit,true)
         baselineStyle??=headerStyle(h);assert.equal(headerStyle(h),baselineStyle,family+parameter)
         const text=Array.from(time.props.children).join('')
-        if(label.props.children==='7d')assert.equal(text,`· ${days}d 15:33`)
+        if(label.props.children==='7 d')assert.equal(text,`· ${days}d 15:33`)
         else assert.equal(text,'· '+api.fmtReset(longData.accounts[0].fiveHour.resetsAt))
       }
     }
@@ -712,7 +712,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.38')
+  assert.equal(api.VERSION,'1.10.39')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1118,13 +1118,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.38')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.39')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.38');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.39');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1669,7 +1669,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.38')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.39')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerBrowser.dismissed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1680,7 +1680,7 @@ async function main() {
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
 
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.38 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.39 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Failed Claude exchange keeps the presented page open; only saved success triggers auto-return.
   const oldPresentBrowser=presentBrowser;let closeFailedClaude;presentBrowser=()=>new Promise(resolve=>closeFailedClaude=resolve)
   authUI=await startClaudeUI();const failedClaude=uiAttempt(),failedClaudeServer=claudeServers.at(-1),failedClaudeKC=kc.get('ai_usage_claude_oauth_v1')
@@ -1915,8 +1915,8 @@ async function main() {
           const titles=titlesOf(tree);assert.equal(titles.length,1)
           assert.equal(titles[0].props.children[0].props.provider,expected.provider)
           const shown=api.getWidgetName(expected.id)||expected.name.replace(/@.*$/,'');assert.ok(strings.includes(shown),shown+' '+JSON.stringify(strings))
-          assert.equal(tree.filter(x=>x.type==='SVG'&&x.props.frame?.height===10).length,2) // 5 h + 7d LCDs
-          assert.ok(strings.includes('5 h'));assert.ok(strings.includes('7d'))
+          assert.equal(tree.filter(x=>x.type==='SVG'&&x.props.frame?.height===10).length,2) // 5 h + 7 d LCDs
+          assert.ok(strings.includes('5 h'));assert.ok(strings.includes('7 d'))
           // Title name/provider text never forced to a narrow fixed width (the old "C..." cause was grid cell width).
           assert.ok(tree.filter(x=>x.type==='Text').every(x=>x.props.frame?.width==null||x.props.frame.width<=8*2.1+1e-9))
         }else if(family==='accessoryCircular'){
@@ -1954,7 +1954,7 @@ async function main() {
     }else console.log('NOTE: PRE_ACCESSORY_WIDGET_PATH unset; home-screen identity comparison skipped')
     scripting.Widget.family='systemLarge';scripting.Widget.parameter='';scripting.Widget.displaySize={width:358,height:376}
   }
-  console.log('PASS: accessoryRectangular/Circular/Inline render exactly the first account after parameter/sort (one title, 5 h/7d rows; one gauge; one inline line); no grid/divider/stats/background/footer button; empty/no-data/bad-parameter compact; systemSmall/Medium/Large/ExtraLarge trees identical except requested refresh icon/font/hit frame to baseline for all selections')
+  console.log('PASS: accessoryRectangular/Circular/Inline render exactly the first account after parameter/sort (one title, 5 h/7 d rows; one gauge; one inline line); no grid/divider/stats/background/footer button; empty/no-data/bad-parameter compact; systemSmall/Medium/Large/ExtraLarge trees identical except requested refresh icon/font/hit frame to baseline for all selections')
   // Sub2API admin contracts: all-site stats, calendar dates, pagination, GET-only + x-api-key, no user-key/JWT.
   {
     const fixture=JSON.parse(fs.readFileSync(path.join(root,'tests/fixtures/sub2api-admin.json'),'utf8'))
@@ -2213,7 +2213,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.38');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.39');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
