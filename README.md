@@ -74,7 +74,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 
 #### DeepSeek
 
-账号来源选“OAuth,API”，在“添加账号”同行右侧选择“DeepSeek”，在“登录账号”顶部输入官方API Key后点“保存”，直接保存并验证余额。新增账号默认名称为“DeepSeek”，固定使用API Key。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
+账号来源选“OAuth,API”，在“添加账号”同行右侧选择“DeepSeek”，先点“添加账号”，再在“登录账号”顶部输入官方API Key后点“保存”，直接保存并验证余额。新增账号默认名称为“DeepSeek”，固定使用API Key。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
 
 - **API Key**：只请求 `https://api.deepseek.com/user/balance`，显示总余额、充值余额、赠送余额及可用状态。
 - **已有网页User Token账号**：保留凭据、原查询能力和局部退出，不再提供新添加入口。不是API Key，也不是OAuth。查询 `platform.deepseek.com/api/v0/users/get_user_summary` 与 `api/v0/usage/by_api_key/cost`，显示账户余额及北京时间包含今天的7个自然日消费。属于私有网页接口，可能变化或拒绝请求；不冒充浏览器，不自动登录或续期，Token失效需手动更新。

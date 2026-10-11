@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.33"
+const VERSION = "1.10.34"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -157,9 +157,10 @@ function SettingsView() {
     return () => clearTimeout(timer)
   }, [source, loginProvider, cooldownTick, claudeCooling])
   const [dsToken, setDSToken] = useState("")
+  const [dsAdding, setDSAdding] = useState(false)
   const [logins, setLogins] = useState(officialAccounts())
   const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
-  const stopAuth = () => { auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
+  const stopAuth = () => { setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const [statisticsSource, setStatisticsSource] = useState<StatisticsSource>(getStatisticsSource())
   const subCur = getSub2APIConfig()
@@ -188,6 +189,10 @@ function SettingsView() {
   }
 
   async function addOfficial() {
+    if (loginProvider === "deepseek") {
+      if (!auth.alive || auth.running || busy || auth.device || auth.claude || getSource() !== "official") return
+      setDSToken(""); setDSAdding(true); return
+    }
     if (loginProvider === "claude") { startClaude(); return }
     if (auth.running) return
     setBrowserError("")
@@ -393,7 +398,7 @@ function SettingsView() {
 
       {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
-          {loginProvider !== "deepseek" && !device && !claude
+          {!dsAdding && !device && !claude
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
             : <Text foregroundStyle="secondaryLabel">{loginProvider === "deepseek" ? "API Key" : "授权进行中"}</Text>}
           <Spacer />
@@ -401,10 +406,11 @@ function SettingsView() {
             <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text>
           </Picker>
         </HStack>
-        {loginProvider === "deepseek" ? <>
+        {loginProvider === "deepseek" && dsAdding ? <>
           <SecureField title="DeepSeek凭据" value={dsToken} onChanged={setDSToken} prompt="填入api key" />
           <Button title="保存" disabled={busy || !!device || !!claude} action={async () => {
-            try { addDeepSeekAccount("DeepSeek", "api", dsToken); setDSToken(""); setLogins(officialAccounts()); await test() }
+            if (!auth.alive || busy || auth.running || auth.device || auth.claude || getSource() !== "official" || loginProvider !== "deepseek" || !dsAdding) return
+            try { addDeepSeekAccount("DeepSeek", "api", dsToken); setDSAdding(false); setDSToken(""); setLogins(officialAccounts()); await test() }
             catch { /* invalid input is not saved */ }
           }} />
         </> : null}

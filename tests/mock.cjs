@@ -702,7 +702,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.33')
+  assert.equal(api.VERSION,'1.10.34')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -1245,13 +1245,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.33')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.34')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.33');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.34');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1796,7 +1796,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.33')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.34')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1806,7 +1806,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.33 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.34 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2332,7 +2332,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.33');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.34');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2589,7 +2589,7 @@ async function main() {
     states.length=0;let dsUI=render();
     {
       const pre=render();pre.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek')
-      const tree=render(),sec=tree.find(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号');assert.ok(sec)
+      const initial=render();assert.ok(!initial.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));const beforeExpand=calls.length;await initial.find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();assert.equal(calls.length,beforeExpand,'DeepSeek expand local only');const tree=render(),sec=tree.find(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号');assert.ok(sec)
       const within=expand(sec),pi=within.findIndex(n=>n?.type==='Picker'&&n.props.title===''),fi=within.findIndex(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'),bi=within.findIndex(n=>n?.type==='Button'&&n.props.title==='保存'),ri=within.findIndex(n=>n?.type==='HStack'&&n.props.trailingSwipeActions)
       assert.ok(pi>=0&&fi>pi&&bi>fi&&ri>bi,'provider then key then save then existing account rows')
       assert.ok(!tree.some(n=>n?.type==='TextField'&&n.props.title==='DeepSeek账号名称'));assert.ok(!tree.some(n=>n?.type==='Section'&&/添加DeepSeek/.test(n.props.header?.props?.children||'')))
@@ -2597,24 +2597,43 @@ async function main() {
       for(const src of ['parrot','sub2api']){api.saveSource(src);states.length=0;assert.ok(!render().some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))}
       api.saveSource('official');states.length=0;dsUI=render()
     }
-assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.children==='DeepSeek'));assert.ok(!dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));dsUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');dsUI=render();assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(dsUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key');assert.equal(dsUI.filter(n=>n?.type==='Button'&&n.props.title==='保存').length,1);assert.ok(!dsUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
+assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.children==='DeepSeek'));assert.ok(!dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));dsUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();dsUI=render();assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(dsUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key');assert.equal(dsUI.filter(n=>n?.type==='Button'&&n.props.title==='保存').length,1);assert.ok(!dsUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!dsUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.ok(dsUI.some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
     // Shared loader deduplicates active requests, and a late account response cannot undo local logout.
     hold=true;const p1=api.loadUsage(),p2=api.loadUsage();assert.equal(p1,p2)
     for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held)
     api.logoutOfficial(apiID);held();const late=await p1;assert.ok(!late.data.accounts.some(a=>a.id===apiID));assert.ok(!api.officialAccounts().some(a=>a.id===apiID));assert.ok(api.officialAccounts().some(a=>a.id===webID));assert.ok(!api.officialCached().accounts.some(a=>a.id===apiID))
     hold=false;api.logoutOfficial(webID);assert.equal(api.officialAccounts().length,0)
     // Drive actual App fields/add action, not only the exported storage helper.
-    states.length=0;let addUI=render();addUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');addUI=render();assert.ok(!addUI.some(n=>n?.type==='TextField'&&n.props.title==='DeepSeek账号名称'))
+    states.length=0;let addUI=render();addUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();addUI=render();assert.ok(!addUI.some(n=>n?.type==='TextField'&&n.props.title==='DeepSeek账号名称'))
     addUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('  DS-SYNTHETIC-API  ')
     addUI=render();await addUI.find(n=>n?.type==='Button'&&n.props.title==='保存').props.action()
-    const uiAccount=api.officialAccounts().find(a=>a.name==='DeepSeek');assert.ok(uiAccount);assert.equal(JSON.parse(kc.get(dsKey)).find(a=>a.id===uiAccount.id).mode,'api');assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'')
+    const uiAccount=api.officialAccounts().find(a=>a.name==='DeepSeek');assert.ok(uiAccount);assert.equal(JSON.parse(kc.get(dsKey)).find(a=>a.id===uiAccount.id).mode,'api');assert.ok(!render().some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));assert.ok(render().some(n=>n?.type==='Button'&&n.props.title==='添加账号'))
     api.saveWidgetName(uiAccount.id,'Keep DS Alias','official');const priorCount=api.officialAccounts().length
-    addUI=render();addUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('DS-SYNTHETIC-API');addUI=render();await addUI.find(n=>n?.type==='Button'&&n.props.title==='保存').props.action()
+    await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();addUI=render();addUI.find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('DS-SYNTHETIC-API');addUI=render();await addUI.find(n=>n?.type==='Button'&&n.props.title==='保存').props.action()
     assert.equal(api.officialAccounts().length,priorCount+1,'same key still adds independent account');assert.equal(api.officialAccounts().find(a=>a.id===uiAccount.id).name,'DeepSeek');assert.equal(api.getWidgetName(uiAccount.id,'official'),'Keep DS Alias');assert.equal(JSON.parse(kc.get(dsKey)).find(a=>a.id===uiAccount.id).token,'DS-SYNTHETIC-API','key trimmed')
     const extra=api.officialAccounts().find(a=>a.id!==uiAccount.id);assert.ok(extra);api.logoutOfficial(extra.id)
     console.log('PASS: DeepSeek form inside login section after provider before accounts; no name/standalone section; absent in Codex/Claude/Parrot/Sub2API; default name and trimmed key saved, field cleared, duplicate keys independently add with existing name/alias stable')
+    // Failed save retains local input; switching providers/source and reopening discard the draft.
+    await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action()
+    render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('SYNTHETIC-FAILED-DRAFT')
+    const savedSet=context.Keychain.set;context.Keychain.set=(k,v)=>k===dsKey?false:savedSet(k,v)
+    const preFailCalls=calls.length;await render().find(n=>n?.type==='Button'&&n.props.title==='保存').props.action();context.Keychain.set=savedSet
+    assert.equal(calls.length,preFailCalls);assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'SYNTHETIC-FAILED-DRAFT','failed save keeps draft')
+    for(const provider of ['codex','claude']){
+      render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged(provider);render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek')
+      assert.ok(!render().some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'));const c=calls.length
+      await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();assert.equal(calls.length,c)
+      assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'');render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('SYNTHETIC-SWITCH-DRAFT')
+    }
+    await render().find(n=>n?.type==='Picker'&&n.props.title==='账号来源').props.onChanged('parrot');await render().find(n=>n?.type==='Picker'&&n.props.title==='账号来源').props.onChanged('official')
+    render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
+    await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'')
+    render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.onChanged('SYNTHETIC-DISMISS-DRAFT');render().find(n=>n?.type==='Form').props.toolbar.cancellationAction.props.action()
+    states.length=0;render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据'))
+    await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.value,'')
+    console.log('PASS: DeepSeek select collapsed/Add local-only; save success clears/collapses, failure retains draft; provider/source/dismiss/reopen clear draft and require another Add')
     api.logoutOfficial(uiAccount.id)
-    let loginUI=render();assert.ok(!loginUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('codex');loginUI=render();assert.ok(loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!loginUI.some(n=>n?.type==='Button'&&n.props.title==='保存'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key')
+    let loginUI=render();assert.ok(!loginUI.some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('codex');loginUI=render();assert.ok(loginUI.some(n=>n?.type==='Button'&&n.props.title==='添加账号'));assert.ok(!loginUI.some(n=>n?.type==='Button'&&n.props.title==='保存'));loginUI.find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();assert.ok(!render().some(n=>n?.type==='Picker'&&n.props.title==='DeepSeek认证方式'));assert.equal(render().find(n=>n?.type==='SecureField'&&n.props.title==='DeepSeek凭据').props.prompt,'填入api key')
     // An official request may complete after switching source, but cannot populate another source's cache.
     const switchID=api.addDeepSeekAccount('switch','api','DS-SYNTHETIC-API');hold=true;held=null;const switched=api.loadUsage()
     for(let i=0;i<40&&!held;i++)await Promise.resolve();assert.ok(held);api.saveSource('parrot');held();await switched;assert.equal(storage.has('ai_usage_cache_v1'),false);api.logoutOfficial(switchID);hold=false
@@ -2799,7 +2818,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     const check=(label,expectButton)=>{const row=loginRow();assert.ok(row,label);const kids=Array.from(row.props.children).filter(Boolean)
       assert.deepEqual(kids.map(c=>c.type),[expectButton?'Button':'Text','Spacer','Picker'],label)
       if(expectButton)assert.equal(kids[0].props.title,'添加账号');else assert.ok(typeof kids[0].props.children==='string'&&kids[0].props.children.length>0,label+' placeholder text')}
-    for(const provider of ['codex','claude','deepseek']){states.length=0;render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged(provider);check(provider+' idle',provider!=='deepseek')}
+    for(const provider of ['codex','claude','deepseek']){states.length=0;render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged(provider);check(provider+' idle',true)}
     states.length=0;await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();check('codex device in progress',false)
     render().find(n=>n?.type==='Button'&&n.props.title==='取消登录').props.action();check('codex after cancel',true)
     await render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('claude');check('claude idle',true)
@@ -2871,7 +2890,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     assert.ok(row);assert.equal(row.props.frame.maxWidth,'infinity');assert.deepEqual(Array.from(row.props.children,n=>n.type),['Button','Spacer','Picker']);assert.equal(row.props.children[0].props.title,'添加账号');assert.equal(row.props.children[2].props.pickerStyle,'menu');assert.equal(row.props.children[2].props.value,'codex');assert.equal(row.props.children[2].props.disabled,false)
     assert.deepEqual(Array.from(row.props.children[2].props.children,n=>n.props.tag),['codex','claude','deepseek']);assert.ok(!tree.some(n=>n?.type==='Picker'&&n.props.title==='登录服务'))
     row.props.children[2].props.onChanged('claude');assert.equal(render().find(n=>n?.type==='Picker'&&n.props.title==='').props.value,'claude')
-    render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(render().some(n=>n?.type==='Button'&&n.props.title==='保存'))
+    render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='Button'&&n.props.title==='保存'));await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();assert.ok(render().some(n=>n?.type==='Button'&&n.props.title==='保存'))
     kc.set('ai_usage_official_oauth_v1',JSON.stringify([{id:'swipe-codex',accountId:'swipe-codex',name:'Swipe Codex',email:'swipe@codex.test',access:token('swipe-codex','swipe-user'),refresh:'SYNTHETIC-REFRESH',expiresAt:now+3600000}]))
     kc.set('ai_usage_claude_oauth_v1',JSON.stringify([{id:'claude:swipe:org',name:'Swipe Claude',email:'swipe@claude.test',organization:'org',access:'SYNTHETIC-CLAUDE',refresh:'SYNTHETIC-REFRESH',expiresAt:now+3600000}]))
     api.addDeepSeekAccount('Swipe DeepSeek','api','SYNTHETIC-DEEPSEEK')
