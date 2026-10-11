@@ -7,7 +7,7 @@ import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2API
 import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.32"
+const VERSION = "1.10.33"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -156,7 +156,6 @@ function SettingsView() {
     const timer = setTimeout(() => setCooldownTick(cooldownTick + 1), 1000)
     return () => clearTimeout(timer)
   }, [source, loginProvider, cooldownTick, claudeCooling])
-  const [dsName, setDSName] = useState("")
   const [dsToken, setDSToken] = useState("")
   const [logins, setLogins] = useState(officialAccounts())
   const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
@@ -402,6 +401,13 @@ function SettingsView() {
             <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text>
           </Picker>
         </HStack>
+        {loginProvider === "deepseek" ? <>
+          <SecureField title="DeepSeek凭据" value={dsToken} onChanged={setDSToken} prompt="填入api key" />
+          <Button title="保存" disabled={busy || !!device || !!claude} action={async () => {
+            try { addDeepSeekAccount("DeepSeek", "api", dsToken); setDSToken(""); setLogins(officialAccounts()); await test() }
+            catch { /* invalid input is not saved */ }
+          }} />
+        </> : null}
         {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
         {loginProvider === "claude" && claudeProgress && claudeProgress !== "等待Claude回调（尚未收到）" ? <Text>{claudeProgress}</Text> : null}
         {claude ? <>
@@ -436,14 +442,6 @@ function SettingsView() {
         {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}
-      </Section> : null}
-      {source === "official" && loginProvider === "deepseek" ? <Section header={<Text>添加DeepSeek</Text>}>
-        <TextField title="DeepSeek账号名称" value={dsName} onChanged={setDSName} />
-        <SecureField title="DeepSeek凭据" value={dsToken} onChanged={setDSToken} prompt="填入api key" />
-        <Button title="保存" disabled={busy || !!device || !!claude} action={async () => {
-          try { addDeepSeekAccount(dsName, "api", dsToken); setDSToken(""); setDSName(""); setLogins(officialAccounts()); await test() }
-          catch { /* invalid input is not saved */ }
-        }} />
       </Section> : null}
 
       {source !== "official" ? <Section header={<Text>目前账号</Text>}>
