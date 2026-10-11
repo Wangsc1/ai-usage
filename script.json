@@ -2,7 +2,7 @@
   "name": "AI Usage",
   "icon": "gauge.with.dots.needle.67percent",
   "color": "rgba(126, 217, 87,1)",
-  "version": "1.10.39",
+  "version": "1.10.40",
   "entry": "index.tsx",
   "runInApp": false,
   "description": "Codex / Claude 浏览器 OAuth 额度与 DeepSeek 余额小组件，支持 Parrot、Sub2API、独立用量统计、多账号排序和主屏／锁屏显示。",
