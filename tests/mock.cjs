@@ -25,7 +25,7 @@ function load(name) {
   let code = fs.readFileSync(name === 'renewal-fresh-api.ts' ? path.join(root,'api.ts') : name === 'background-baseline-api.ts' ? path.join(path.dirname(process.env.BACKGROUND_BASELINE_PATH),'api.ts') : name === 'background-baseline.tsx' ? process.env.BACKGROUND_BASELINE_PATH : name === 'gradient-baseline.tsx' ? process.env.GRADIENT_BASELINE_PATH : name === 'pre-accessory-widget.tsx' ? process.env.PRE_ACCESSORY_WIDGET_PATH : name === 'baseline-widget.tsx' ? process.env.BASELINE_WIDGET_PATH : path.join(root,name),'utf8')
   if (name === 'widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { ProviderIcon, Root, PeriodStats, statsWidthBudget, largeSegmentLayout, SegBar, Lcd, smallRegionLayout, AccountTitle, mediumTwoLayout, mediumThreeStatsLayout, BalanceRows, run as runWidget }')
   if (name === 'background-baseline.tsx' || name === 'baseline-widget.tsx' || name === 'gradient-baseline.tsx' || name === 'pre-accessory-widget.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
-  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, checkAfterBrowser, presentIsolatedAuthorization, AccountLine, run as runApp }')
+  if (name === 'index.tsx') code = code.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, WidgetNamePage, presentIsolatedAuthorization, AccountLine, run as runApp }')
   const out = ts.transpileModule(code, { fileName:name, compilerOptions: {target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}, reportDiagnostics:true })
   assert.equal((out.diagnostics || []).filter(x=>x.category===ts.DiagnosticCategory.Error).length,0,name+' syntax')
   const req = n => n === 'scripting' ? scripting : n === 'scripting/jsx-runtime' ? {jsx,jsxs:jsx,Fragment:'Fragment'} : name === 'background-baseline.tsx' && n === './api' ? load('background-baseline-api.ts') : load(n.replace('./','') + (fs.existsSync(path.join(root,n.replace('./','')+'.tsx'))?'.tsx':'.ts'))
@@ -41,13 +41,36 @@ function token(account='account-A',user='user-A',expires=now+3600000) {
 }
 function authFlow(account='account-A', user='user-A') {
   handler = async (u,o) => {
-    if(u.endsWith('/usercode')) return resp(200,{device_auth_id:'mock-device',usercode:'MOCK-CODE',interval:'5'})
-    if(u.endsWith('/deviceauth/token')) return resp(200,{authorization_code:'mock-code',code_verifier:'mock-verifier'})
-    if(u.endsWith('/oauth/token')) { assert.equal(o.headers['Content-Type'],'application/x-www-form-urlencoded'); assert.equal(new URLSearchParams(o.body).get('redirect_uri'),'https://auth.openai.com/deviceauth/callback'); return resp(200,{access_token:token(account,user),refresh_token:'mock-refresh'}) }
+    if(u.endsWith('/oauth/token')) { assert.equal(o.headers['Content-Type'],'application/x-www-form-urlencoded'); assert.equal(new URLSearchParams(o.body).get('redirect_uri'),'http://127.0.0.1:1455/auth/callback'); return resp(200,{access_token:token(account,user),refresh_token:'mock-refresh'}) }
     throw new Error('Unexpected URL')
   }
 }
+// Shared credential fixtures enter through the actual browser callback/exchange API.
+let fixtureTimerID=9000000
+async function withCodexGlobals(action) {
+  const keys=['Crypto','Data','HttpServer','HttpResponse','HttpResponseBody','setTimeout','clearTimeout','WebViewController'],previous=Object.fromEntries(keys.map(k=>[k,context[k]]))
+  const crypto=require('node:crypto'),data=b=>({bytes:Buffer.from(b),toBase64String:()=>Buffer.from(b).toString('base64')})
+  context.Data={...context.Data,fromRawString:s=>data(Buffer.from(s))}
+  context.Crypto={generateSymmetricKey:bits=>{assert.equal(bits,256);return data(crypto.randomBytes(bits/8))},sha256:d=>data(crypto.createHash('sha256').update(d.bytes).digest())}
+  context.HttpServer=class{constructor(){this.handlers={};this.port=null}registerHandler(p,h){this.handlers[p]=h}start(o){assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(o.forceIPv4,true);this.port=o.port;return null}stop(){this.port=null}}
+  context.HttpResponseBody={html:b=>b};context.HttpResponse={ok:body=>({statusCode:200,body})}
+  context.setTimeout=()=>fixtureTimerID++;context.clearTimeout=()=>{}
+  context.WebViewController=class{constructor(o){assert.equal(o.ephemeral,true)}loadURL(){return Promise.resolve(true)}present(){return Promise.resolve()}dispose(){}}
+  try { return await action() } finally {for(const k of keys)if(previous[k]===undefined)delete context[k];else context[k]=previous[k]}
+}
+async function loginBrowser() {
+  return withCodexGlobals(async()=>{
+    let exchanged
+    const d=api.beginCodexBrowserLogin(()=>{exchanged=api.finishCodexBrowserLogin(d,()=>true)},()=>{})
+    d.server.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:d.state},{key:'code',value:'SYNTHETIC-FIXTURE-CODE'}]})
+    await Promise.resolve();await exchanged
+  })
+}
+async function prepareCodexUI(tree) { await withCodexGlobals(()=>tree.find(x=>x?.type==='Button'&&x.props.title==='添加账号').props.action()) }
 async function main() {
+  const sourceUI=fs.readFileSync(path.join(root,'index.tsx'),'utf8'),sourceAPI=fs.readFileSync(path.join(root,'api.ts'),'utf8')
+  for(const word of ['DeviceLogin','beginDeviceLogin','checkDeviceLogin','cancelDeviceLogin','deviceFallback','checkAfterBrowser','DEVICE_URL','Pasteboard','复制代码','验证码登录'])assert.ok(!sourceUI.includes(word)&&!sourceAPI.includes(word),word+' removed, not hidden')
+  assert.ok(!sourceAPI.includes('/api/accounts/deviceauth/')&&!sourceAPI.includes('/deviceauth/callback'));assert.ok(!sourceUI.includes('浏览器登录已准备，无需输入验证码'))
   // Namespace isolation, numeric parameters and existing Parrot config preservation.
   kc.set('parrot_management_key','mock-management'); kc.set('parrot_base_url','mock-base')
   storage.set('ai_usage_selected_accounts_v1',['parrot-account']); api.saveRefreshMinutes(30)
@@ -75,23 +98,10 @@ async function main() {
   assert.deepEqual(Array.from(api.widgetAccounts(list).map(a=>a.id)),['c','a','b','d'])
   storage.set('ai_usage_selected_accounts_v1',['parrot-account'])
   api.saveSource('official')
-  authFlow(); const d = await official.beginDeviceLogin()
-  assert.equal(d.interval,5000)
-  handler=async()=>resp(403); assert.equal(await official.checkDeviceLogin(d),'pending')
-  const count=calls.length; assert.equal(await official.checkDeviceLogin(d),'pending'); assert.equal(calls.length,count)
-  now+=5000; handler=async()=>resp(404); assert.equal(await official.checkDeviceLogin(d),'pending')
-  d.expiresAt=now; await assert.rejects(()=>official.checkDeviceLogin(d),/过期/)
-  authFlow(); const cancelled=await official.beginDeviceLogin(); official.cancelDeviceLogin(cancelled)
-  await assert.rejects(()=>official.checkDeviceLogin(cancelled),/取消/)
-  authFlow(); const inflight=await official.beginDeviceLogin(); let resolve
-  handler=()=>new Promise(r=>resolve=r); const pending=official.checkDeviceLogin(inflight)
-  official.cancelDeviceLogin(inflight); resolve(resp(200,{authorization_code:'unused',code_verifier:'unused'}))
-  await assert.rejects(()=>pending,/取消/); assert.equal(official.officialAccounts().length,0)
-  authFlow(); const success=await official.beginDeviceLogin(); assert.equal(await official.checkDeviceLogin(success),'complete')
-  const first=official.officialAccounts()[0]; assert.equal(first.name,'账号 1（邮箱未提供）'); assert.ok(!JSON.stringify(storage).includes('mock-refresh'))
-  await assert.rejects(()=>official.checkDeviceLogin(success),/取消/)
-  authFlow(); await official.checkDeviceLogin(await official.beginDeviceLogin()); assert.equal(official.officialAccounts().length,1)
-  authFlow('account-B','user-B'); await official.checkDeviceLogin(await official.beginDeviceLogin()); assert.equal(official.officialAccounts().length,2)
+  authFlow();await loginBrowser()
+  const first=official.officialAccounts()[0];assert.equal(first.name,'账号 1（邮箱未提供）');assert.ok(!JSON.stringify(storage).includes('mock-refresh'))
+  authFlow();await loginBrowser();assert.equal(official.officialAccounts().length,1)
+  authFlow('account-B','user-B');await loginBrowser();assert.equal(official.officialAccounts().length,2)
   // Map by duration even when swapped; keep custom/monthly and missing metrics unknown.
   const usage={rate_limit:{primary_window:{used_percent:25,limit_window_seconds:604800,reset_at:now/1000+700},secondary_window:{used_percent:70,limit_window_seconds:18000,reset_after_seconds:100}},rate_limit_reset_credits:{available_count:12}}
   const mapped=official.mapOfficialUsage(usage); assert.equal(mapped.fiveHour.remainingPercent,30); assert.equal(mapped.sevenDay.remainingPercent,75); assert.equal(mapped.resetCredits,12)
@@ -702,7 +712,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.35')
+  assert.equal(api.VERSION,'1.10.36')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -760,25 +770,23 @@ async function main() {
   }
   const namedFlow=(nameClaims,account='named-A',idClaims=null)=>{
     handler=async (u,o)=>{
-      if(u.endsWith('/usercode'))return resp(200,{device_auth_id:'mock',user_code:'MOCK',interval:5})
-      if(u.endsWith('/deviceauth/token'))return resp(200,{authorization_code:'mock-code',code_verifier:'mock'})
       if(u.endsWith('/oauth/token'))return resp(200,{access_token:namedToken(nameClaims,account),id_token:idClaims?namedToken(idClaims,account):undefined,refresh_token:'mock-named-refresh'})
       if(u.endsWith('/usage'))return resp(200,{rate_limit:usage.rate_limit})
       return resp(404)
     }
   }
   api.saveSource('official');namedFlow({name:'测试名',preferred_username:'测试用户名',email:'mock@example.test'})
-  await api.checkDeviceLogin(await api.beginDeviceLogin())
+  await loginBrowser()
   const named=api.officialAccounts().find(a=>a.email==='mock@example.test');assert.ok(named)
   assert.equal(named.name,'mock@example.test');assert.equal(JSON.parse(kc.get('ai_usage_official_oauth_v1')).find(a=>a.id===named.id).name,'测试名')
   api.saveWidgetName(named.id,'保留别名','official');api.saveAccountOrder([named.id],'official')
   namedFlow({preferred_username:'更新用户名',email:'mock@example.test'})
-  await api.checkDeviceLogin(await api.beginDeviceLogin())
+  await loginBrowser()
   assert.equal(api.officialAccounts().find(a=>a.id===named.id).name,'mock@example.test');assert.equal(JSON.parse(kc.get('ai_usage_official_oauth_v1')).find(a=>a.id===named.id).name,'更新用户名');assert.equal(api.getWidgetName(named.id,'official'),'保留别名')
   assert.equal(api.officialAccounts().filter(a=>a.id===named.id).length,1)
-  namedFlow({email:'mock@example.test'},'named-B');await api.checkDeviceLogin(await api.beginDeviceLogin())
+  namedFlow({email:'mock@example.test'},'named-B');await loginBrowser()
   assert.ok(api.officialAccounts().some(a=>a.name==='mock@example.test'))
-  namedFlow({name:'访问令牌姓名'},'named-C',{email:'id@example.test'});await api.checkDeviceLogin(await api.beginDeviceLogin())
+  namedFlow({name:'访问令牌姓名'},'named-C',{email:'id@example.test'});await loginBrowser()
   assert.ok(api.officialAccounts().some(a=>a.name==='id@example.test'));assert.ok(JSON.parse(kc.get('ai_usage_official_oauth_v1')).some(a=>a.name==='访问令牌姓名')) // email separate from name
   const stored=JSON.parse(kc.get('ai_usage_official_oauth_v1'))
   const migrate=stored.find(a=>a.id===named.id);migrate.name='官方账号 9';delete migrate.email;migrate.access=namedToken({name:'迁移名称','https://api.openai.com/profile':{email:'migrated@example.test'}})
@@ -787,11 +795,11 @@ async function main() {
   storage.set('ai_usage_official_cache_v1',{...data,accounts:[{...accounts[0],id:named.id,name:'官方账号 9'}]})
   assert.equal(api.officialCached().accounts[0].name,'migrated@example.test')
   // Legacy access profile migration, nested ID profile, explicit missing-email fallback, full email App vs widget prefix.
-  namedFlow({name:'真实名字但无邮箱'},'missing-email');await api.checkDeviceLogin(await api.beginDeviceLogin())
+  namedFlow({name:'真实名字但无邮箱'},'missing-email');await loginBrowser()
   const noEmail=api.officialAccounts().find(a=>a.id===JSON.parse(kc.get('ai_usage_official_oauth_v1')).find(a=>a.name==='真实名字但无邮箱').id)
   assert.equal(noEmail.email,'');assert.match(noEmail.name,/邮箱未提供/);assert.ok(!noEmail.name.includes('真实名字'))
   namedFlow({name:'昵称'},'nested-email',{'https://api.openai.com/profile':{email:'nested@example.test'}})
-  await api.checkDeviceLogin(await api.beginDeviceLogin())
+  await loginBrowser()
   const nested=api.officialAccounts().find(a=>a.email==='nested@example.test');assert.ok(nested)
   assert.ok(!Object.keys(JSON.parse(kc.get('ai_usage_official_oauth_v1')).find(a=>a.id===nested.id)).includes('id_token'))
   api.saveAccountOrder([nested.id,named.id],'official')
@@ -832,74 +840,17 @@ async function main() {
   assert.equal(api.getWidgetName(nested.id,'parrot'),'另一来源保留')
   assert.deepEqual(Array.from(api.sortAccounts(api.officialCached().accounts,"official"),a=>a.id),beforeExitOrder.filter(id=>id!==nested.id))
   console.log('PASS: separate email/name; top+profile claims; legacy access migration; full-email App logout/list/order; status full email; widget prefix/alias priority; refresh email retention; scoped exit cleanup')
-  // In-app authorization browser closes before exactly one check. Early-close interval is respected with one bounded wait.
-  // context.Safari.present remains the test's close handle; the stub browser presents through it (Safari entry removed).
-  const earlySetTimeout=context.setTimeout,earlyClearTimeout=context.clearTimeout
-  context.setTimeout=(fn,ms)=>{if(ms===20000)return 0;now+=ms;Promise.resolve().then(fn);return 0};context.clearTimeout=()=>{}
-  context.WebViewController=class{async loadURL(){return true}present(){return context.Safari.present()}dispose(){}}
-  const {checkAfterBrowser}=load('index.tsx')
-  namedFlow({},'pending-test');let autoDevice=await api.beginDeviceLogin(),browserClose
-  context.Safari.present=()=>new Promise(r=>browserClose=r)
-  let active=true,before=calls.length
-  const afterClose=checkAfterBrowser(autoDevice,()=>active);await Promise.resolve();assert.equal(calls.length,before)
-  handler=async()=>resp(403);browserClose();assert.equal(await afterClose,'pending');assert.equal(autoDevice.cancelled,false)
-  before=calls.length;let waited=[]
-  context.Safari.present=async()=>{}
-  assert.equal(await checkAfterBrowser(autoDevice,()=>true,async ms=>{waited.push(ms);now+=ms}),'pending')
-  assert.deepEqual(waited,[5000]);assert.equal(calls.length,before+1)
-  for(const mode of ['cancel','source','dismiss']){
-    context.Safari.present=()=>new Promise(r=>browserClose=r);active=true
-    const promise=checkAfterBrowser(autoDevice,()=>active&&api.getSource()==='official')
-    await Promise.resolve();before=calls.length
-    if(mode==='cancel')api.cancelDeviceLogin(autoDevice)
-    else if(mode==='source')api.saveSource('parrot')
-    else active=false
-    browserClose();assert.equal(await promise,null);assert.equal(calls.length,before)
-    api.saveSource('official');namedFlow({},'pending-test');autoDevice=await api.beginDeviceLogin()
-  }
-  context.Safari.present=async()=>{};autoDevice.nextPoll=now+5000;before=calls.length
-  assert.equal(await checkAfterBrowser(autoDevice,()=>true,async ms=>{api.cancelDeviceLogin(autoDevice);now+=ms}),null)
-  assert.equal(calls.length,before)
-  namedFlow({},'expired-auto');autoDevice=await api.beginDeviceLogin();autoDevice.expiresAt=now
-  await assert.rejects(()=>checkAfterBrowser(autoDevice,()=>true),/过期/)
-  // Full Settings action: browser closes, check succeeds, quota cache/list and widget refresh follow.
-  states.length=0;context.Safari.present=async()=>{};namedFlow({name:'自动授权名称',email:'automatic@example.test'},'automatic-user')
-  let reloadCount=0;scripting.Widget.reloadAll=async()=>{reloadCount++}
-  let authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-  authUI=render();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('automatic@example.test')))
-  assert.ok(api.officialCached().accounts.some(a=>a.name==='automatic@example.test'));assert.ok(reloadCount>0)
-  assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
-  // Cancel/dismiss during open Safari makes the captured UI action inert, no token save or request.
-  for(const mode of ['cancel','dismiss','source']){
-    states.length=0;namedFlow({},'abandoned-'+mode);context.Safari.present=()=>new Promise(r=>browserClose=r)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-    authUI=render();const action=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-    await Promise.resolve();before=calls.length
-    await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();assert.equal(calls.length,before) // busy lock blocks competing checks
-    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
-    else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
-    else await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
-    browserClose();await action;assert.equal(calls.length,before);api.saveSource('official')
-  }
-  states.length=0;namedFlow({},'ui-pending');context.Safari.present=async()=>{}
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-  handler=async()=>resp(403)
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-  authUI=render();assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.ok(!authUI.some(x=>typeof x==='string'&&x.startsWith('等待授权')),'no status section text')
-  context.Safari.present=async()=>{throw new Error('mock failure')}
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-  authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
-  context.setTimeout=earlySetTimeout;context.clearTimeout=earlyClearTimeout;delete context.WebViewController
+  let authUI,before
   // Documented-shape WebViewController: each attempt has its own non-persistent store and finally disposal.
   const browserTimers=new Map();let timerId=0
   context.setTimeout=(fn,ms)=>{if(ms===20000){const id=++timerId;browserTimers.set(id,fn);return id}now+=ms;Promise.resolve().then(fn);return 0}
   context.clearTimeout=id=>browserTimers.delete(id)
   const instances=[];let presentBrowser=async()=>{},loadBrowser=async()=>true
   context.WebViewController=class {
-    constructor(options){this.options=options;this.disposed=0;this.urls=[];instances.push(this)}
+    constructor(options){this.options=options;this.disposed=0;this.dismissed=0;this.urls=[];instances.push(this)}
     async loadURL(url){this.urls.push(url);return loadBrowser(this)}
     async present(options){this.presentation=options;await presentBrowser(this)}
+    dismiss(){this.dismissed++}
     dispose(){this.disposed++}
   }
   assert.equal(scripting.WebViewController,undefined)
@@ -909,112 +860,34 @@ async function main() {
   vm.runInContext(`(function(require,module,exports){${legacy}})`,context)(()=>scripting,legacyModule,legacyModule.exports)
   assert.throws(()=>legacyModule.exports.open(),/not a constructor/);assert.equal(instances.length,0)
   const {presentIsolatedAuthorization}=load('index.tsx')
-  for(let i=0;i<2;i++)await presentIsolatedAuthorization()
+  for(let i=0;i<2;i++)await presentIsolatedAuthorization(undefined,'https://auth.openai.com/oauth/authorize?synthetic=1')
   assert.notEqual(instances[0],instances[1])
-  for(const b of instances){assert.equal(b.options.ephemeral,true);assert.deepEqual(b.urls,['https://auth.openai.com/codex/device']);assert.equal(b.disposed,1)}
+  for(const b of instances){assert.equal(b.options.ephemeral,true);assert.deepEqual(b.urls,['https://auth.openai.com/oauth/authorize?synthetic=1']);assert.equal(b.disposed,1)}
   for(const failure of ['loadFalse','loadThrow','presentThrow']){
     loadBrowser=async()=>{if(failure==='loadThrow')throw new Error('mock-load');return failure!=='loadFalse'}
     presentBrowser=async()=>{if(failure==='presentThrow')throw new Error('mock-present');await new Promise(()=>{})}
-    await assert.rejects(()=>presentIsolatedAuthorization());assert.equal(instances.at(-1).disposed,1)
+    await assert.rejects(()=>presentIsolatedAuthorization(undefined,'https://auth.openai.com/oauth/authorize?synthetic=1'));assert.equal(instances.at(-1).disposed,1)
   }
   // Real delayed navigation: the former await-load-before-present would NEVER invoke present in this test.
   let finishLoad,closeDelayed;loadBrowser=()=>new Promise(resolve=>finishLoad=resolve)
   presentBrowser=b=>{assert.equal(b.urls.length,0);return new Promise(resolve=>closeDelayed=resolve)}
   let settled=false
-  const delayed=presentIsolatedAuthorization().then(()=>{settled=true})
+  const delayed=presentIsolatedAuthorization(undefined,'https://auth.openai.com/oauth/authorize?synthetic=1').then(()=>{settled=true})
   assert.ok(closeDelayed);assert.ok(finishLoad);assert.equal(instances.at(-1).disposed,0)
   assert.equal(browserTimers.size,1)
   finishLoad(true);for(let i=0;i<8;i++)await Promise.resolve();assert.equal(settled,false);assert.equal(browserTimers.size,0)
   closeDelayed();await delayed;assert.equal(instances.at(-1).disposed,1)
   // Hung navigation has a bounded failure, not an invisible indefinitely-busy button.
   loadBrowser=()=>new Promise(()=>{});presentBrowser=()=>new Promise(()=>{})
-  const hung=presentIsolatedAuthorization();assert.equal(browserTimers.size,1)
+  const hung=presentIsolatedAuthorization(undefined,'https://auth.openai.com/oauth/authorize?synthetic=1');assert.equal(browserTimers.size,1)
   Array.from(browserTimers.values())[0]()
   await assert.rejects(()=>hung,/加载超时/);assert.equal(instances.at(-1).disposed,1);assert.equal(browserTimers.size,0)
   // Dismiss before load settles: no unhandled rejection/false-success from later navigation completion.
   let rejectLate,closeEarly
   loadBrowser=()=>new Promise((_,reject)=>rejectLate=reject);presentBrowser=()=>new Promise(resolve=>closeEarly=resolve)
-  const early=presentIsolatedAuthorization();closeEarly();await early;rejectLate(new Error('late navigation failure'))
+  const early=presentIsolatedAuthorization(undefined,'https://auth.openai.com/oauth/authorize?synthetic=1');closeEarly();await early;rejectLate(new Error('late navigation failure'))
   await Promise.resolve();assert.equal(instances.at(-1).disposed,1);assert.equal(browserTimers.size,0)
   loadBrowser=async()=>true;presentBrowser=async()=>{}
-  api.saveSource('official');namedFlow({},'isolated-interval')
-  const intervalDevice=await api.beginDeviceLogin();intervalDevice.nextPoll=now+3000
-  handler=async()=>resp(403);before=calls.length;waited=[]
-  assert.equal(await checkAfterBrowser(intervalDevice,()=>true,async ms=>{waited.push(ms);now+=ms},presentIsolatedAuthorization),'pending')
-  assert.deepEqual(waited,[3000]);assert.equal(calls.length,before+1);assert.equal(intervalDevice.cancelled,false);assert.equal(instances.at(-1).disposed,1)
-  api.saveSource('official');states.length=0;namedFlow({email:'isolated@example.test'},'isolated-user')
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-  authUI=render();assert.ok(!authUI.some(x=>x.type==='Button'&&/Safari/.test(x.props.title||'')));assert.ok(!authUI.some(x=>typeof x==='string'&&(x.includes('外部无痕授权网址')||x.includes('仅输入你自己'))))
-  const codeRow=authUI.find(x=>x.type==='HStack'&&Array.isArray(x.props.children)&&x.props.children[0]?.props?.contextMenu);assert.ok(codeRow);assert.deepEqual(Array.from(codeRow.props.children,c=>c.type),['Text','Spacer','Text']);assert.equal(typeof codeRow.props.children[0].props.children,'string');assert.equal(codeRow.props.children[0].props.children,'MOCK','real device user_code remains intact');assert.ok(!expand(codeRow).some(x=>typeof x==='string'&&x.includes('一次性代码')));assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.equal(codeRow.props.children[2].props.children,'有效期15分钟')
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-  assert.equal(instances.at(-1).disposed,1)
-  assert.ok(api.officialCached().accounts.some(a=>a.name==='isolated@example.test'))
-  // Default temporary-browser action remains inert after cancel, source change or settings dismissal.
-  for(const mode of ['cancel','source','dismiss']){
-    api.saveSource('official');states.length=0;namedFlow({},'isolated-abandoned-'+mode)
-    let closeBrowser;presentBrowser=()=>new Promise(resolve=>closeBrowser=resolve)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-    authUI=render();const pendingAction=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-    for(let i=0;i<8&&!closeBrowser;i++)await Promise.resolve()
-    assert.ok(closeBrowser);before=calls.length
-    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
-    else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
-    else await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
-    const afterControl=calls.length
-    await pendingAction;assert.equal(calls.length,afterControl);assert.equal(instances.at(-1).disposed,1)
-    assert.equal(browserTimers.size,0);closeBrowser() // native dismiss may settle later; cancellation already released and completed
-  }
-  api.saveSource('official');states.length=0;namedFlow({},'isolated-failure');presentBrowser=async()=>{throw new Error('blocked identity provider')}
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-  authUI=render();before=calls.length
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-  assert.equal(calls.length,before);assert.equal(instances.at(-1).disposed,1)
-  authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(!authUI.some(x=>x.type==='Button'&&/Safari/.test(x.props.title||'')))
-  states.length=0;api.saveSource('official');namedFlow({},'ui-navigation-hung')
-  loadBrowser=()=>new Promise(()=>{});presentBrowser=()=>new Promise(()=>{})
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-  authUI=render();before=calls.length
-  const hungUI=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-  assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.disabled,'busy while opening')
-  Array.from(browserTimers.values())[0]();await hungUI
-  authUI=render();assert.equal(calls.length,before)
-  assert.ok(authUI.some(x=>typeof x==='string'&&x.startsWith('授权页面加载超时')))
-  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.disabled,false,'timeout unlocks retry')
-  assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'))
-  assert.equal(instances.at(-1).disposed,1);assert.equal(browserTimers.size,0)
-  // Global absent: accurate error displayed adjacent to opening buttons, device remains retryable.
-  const supportedBrowser=context.WebViewController;delete context.WebViewController
-  states.length=0;api.saveSource('official');namedFlow({},'unsupported-global')
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-  authUI=render();before=calls.length
-  await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-  authUI=render();assert.equal(calls.length,before);assert.equal(browserTimers.size,0)
-  const unsupported=authUI.find(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed')
-  assert.ok(unsupported.props.children.startsWith('当前Scripting不支持WebViewController'))
-  const section=authUI.find(x=>x.type==='Section'&&(x.props.header?.props.children==='登录账号'||x.props.header?.props.children?.[0]?.props?.children==='登录账号'))
-  assert.ok(expand(section).includes(unsupported))
-  assert.equal(authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.disabled,false)
-  context.WebViewController=supportedBrowser
-  presentBrowser=async()=>{};loadBrowser=async()=>true // Copy success now uses the real login/close path, not a manual check.
-  // Long press uses official contextMenu and Pasteboard, copying ONLY this code value.
-  let copied=[];context.Pasteboard={setString:async value=>copied.push(value)}
-  for(const mode of ['cancel','source','dismiss','expired','success']){
-    states.length=0;api.saveSource('official');namedFlow({},'copy-'+mode)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
-    authUI=render();const codeText=authUI.find(x=>x.type==='Text'&&x.props.contextMenu)
-    assert.equal(typeof codeText.props.children,'string');assert.ok(codeText.props.children.length>0);assert.ok(!codeText.props.children.includes('一次性代码'))
-    const copy=expand(codeText.props.contextMenu.menuItems).find(x=>x.type==='Button'&&x.props.title==='复制代码')
-    const beforeCopies=copied.length, beforeStorage=storageWrites.length
-    await copy.props.action();assert.equal(copied.length,beforeCopies+1);assert.equal(copied.at(-1),codeText.props.children);assert.ok(!copied.at(-1).includes('一次性代码'));assert.equal(storageWrites.length,beforeStorage)
-    if(mode==='cancel')authUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
-    else if(mode==='source')await authUI.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot')
-    else if(mode==='dismiss')authUI.find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
-    else if(mode==='expired')now+=15*60*1000
-    else await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-    await copy.props.action();assert.equal(copied.length,beforeCopies+1,'stale copy blocked: '+mode)
-    if(mode!=='expired')assert.ok(!render().some(x=>x.type==='Text'&&x.props.contextMenu))
-    else assert.equal(expand(render().find(x=>x.type==='Text'&&x.props.contextMenu).props.contextMenu.menuItems).find(x=>x.type==='Button').props.disabled,true)
-  }
   // Real loadUsage + widget run + App refresh: aggregate is always Parrot; quota source stays independent.
   api.clearConfig();api.saveConfig('mock-base','mock-management');api.saveSource('official')
   const seed=JSON.parse(kc.get('ai_usage_official_oauth_v1'))[0]
@@ -1245,13 +1118,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.35')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.36')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.35');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.36');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1370,7 +1243,7 @@ async function main() {
   for(let i=0;i<50&&!render().some(x=>isLine(x)&&lineOf(x).icon==='claude'&&lineOf(x).name==='ui-auto@example.test');i++)await Promise.resolve()
   assert.ok(render().some(x=>isLine(x)&&lineOf(x).icon==='claude'&&lineOf(x).name==='ui-auto@example.test'))
   for(let i=0;i<50&&!api.officialCached()?.accounts.some(a=>a.id==='claude:ui-claude-auto:org-a');i++)await Promise.resolve()
-  assert.ok(api.officialCached().accounts.some(a=>a.id==='claude:ui-claude-auto:org-a'));assert.equal(instances.at(-1).disposed,1);assert.equal(uiServer.stops,1)
+  assert.ok(api.officialCached().accounts.some(a=>a.id==='claude:ui-claude-auto:org-a'));assert.equal(instances.at(-1).disposed,1);assert.equal(instances.at(-1).dismissed,1);assert.equal(uiServer.stops,1)
   assert.ok(!render().some(x=>x.type==='SecureField'&&x.props.title==='本次完整授权码'));assert.equal(claudeTimers.size,0)
   closeClaudeModal() // native dismissal settlement may occur later; already disposed/completed
   // No manual-switch entry: simulate an unavailable loopback server to test retained automatic fallback.
@@ -1436,8 +1309,8 @@ async function main() {
   longRows[0].email=longEmail;kc.set('ai_usage_official_oauth_v1',JSON.stringify(longRows));states.length=0
   exitUI=render();assert.deepEqual((()=>{const l=lineOf(expand(exitRow(exitUI,legacyCodex.id)).find(isLine));return [l.n,l.icon,l.name]})(),[(api.sortAccounts(api.officialAccounts(),'official').findIndex(r=>r.id===legacyCodex.id)+1)+'.','codex',longEmail])
   // Identical disabling rules during either login flow, plus a held busy refresh.
-  handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'row-disable-device',usercode:'MOCK-ROW',interval:'5'}):u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
-  await exitUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action();exitUI=render()
+  handler=async(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
+  await prepareCodexUI(exitUI);exitUI=render()
   assert.ok(exitUI.filter(x=>x.type==='HStack'&&x.props.trailingSwipeActions).every(x=>x.props.trailingSwipeActions.actions[0].props.disabled))
   exitUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
   exitUI=render();exitUI.find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('claude')
@@ -1464,7 +1337,7 @@ async function main() {
     assert.equal(JSON.stringify(storage.get('ai_usage_cache_v1')),parrotUntouched)
     assert.ok(!exitRow(render(),target.id))
   }
-  console.log('PASS: Codex/Claude provider from separate real record collections (legacy Codex supported); plain complete-email label/Spacer/native trailing swipe 删除; long-email wrapping; busy/device/Claude disables; each exact-ID swipe action preserves other providers/cache/credentials')
+  console.log('PASS: Codex/Claude provider from separate real record collections (legacy Codex supported); plain complete-email label/Spacer/native trailing swipe 删除; long-email wrapping; busy/browser/Claude disables; each exact-ID swipe action preserves other providers/cache/credentials')
   // Diagnostics expose only a fixed stage, never a native exception/URL/code/state.
   for(const stage of ['构造','地址配置','地址读回','注册handler','启动','端口','缺API']){
     diagnosticStage=stage;const savedServer=context.HttpServer
@@ -1751,11 +1624,11 @@ async function main() {
       states.length=0;api.saveSource('official');authUI=render();authUI.find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('claude')
       assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.disabled)
       now+=1000;assert.ok(render().some(x=>typeof x==='string'&&x.includes('剩余'+Math.ceil((wait-1000)/1000)+'秒')))
-      // Codex device flow is independent of Claude cooldown, and no existing credentials are removed.
+      // Codex browser flow is independent of Claude cooldown, and no existing credentials are removed.
       render().find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('codex')
       assert.equal(render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.disabled,false)
-      handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'rate-codex',usercode:'MOCK-COOLDOWN',interval:'5'}):combinedHandler(u,o)
-      await render().find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
+      handler=combinedHandler
+      await prepareCodexUI(render())
       assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
       assert.equal(storage.get(cooldownKey),baseRateNow+wait)
       now=baseRateNow+wait;assert.equal(api.claudeCooldownUntil(),0);const fresh=api.beginClaudeLogin();api.cancelClaudeLogin(fresh)
@@ -1774,7 +1647,7 @@ async function main() {
   assert.equal(calls.length,before+1);assert.equal(kc.get('ai_usage_claude_oauth_v1'),lateRateCredentials);assert.equal(lateRateServer.stops,1)
   assert.equal(api.claudeCooldownUntil(),now+30000);assert.ok(!render().includes('Claude账号已保存'))
   storage.delete(cooldownKey);handler=claudeHandler
-  console.log('PASS: Retry-After seconds/date/invalid/past/zero; JSON/HTML/other safe whitelist/no body secrets; persisted deadline disables fresh Claude attempts/re-render and expires; Codex device unaffected; one exchange/flow cleanup; cancelled late429 only records nonsecret cooldown')
+  console.log('PASS: Retry-After seconds/date/invalid/past/zero; JSON/HTML/other safe whitelist/no body secrets; persisted deadline disables fresh Claude attempts/re-render and expires; Codex browser unaffected; one exchange/flow cleanup; cancelled late429 only records nonsecret cooldown')
   // Exercise the actual countdown effect (normally effects are suppressed by the UI harness).
   storage.set(cooldownKey,now+3000);const effectBefore=scripting.useEffect,rateEffects=[]
   scripting.useEffect=(fn,deps)=>rateEffects.push({fn,deps})
@@ -1796,17 +1669,25 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.35')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.36')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
-  assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
+  assert.equal(headerBrowser.disposed,0);assert.equal(headerBrowser.dismissed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
   releaseClaudeRequest();holdToken=false;await headerBrowserAction
   for(let i=0;i<100;i++)await Promise.resolve()
-  assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
+  assert.equal(headerBrowser.disposed,1);assert.equal(headerBrowser.dismissed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
+
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.35 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.36 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  // Failed Claude exchange keeps the presented page open; only saved success triggers auto-return.
+  const oldPresentBrowser=presentBrowser;let closeFailedClaude;presentBrowser=()=>new Promise(resolve=>closeFailedClaude=resolve)
+  authUI=await startClaudeUI();const failedClaude=uiAttempt(),failedClaudeServer=claudeServers.at(-1),failedClaudeKC=kc.get('ai_usage_claude_oauth_v1')
+  const failedClaudeOpen=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action(),failedClaudeView=instances.at(-1)
+  claudePostFailure=true;failedClaudeServer.handlers['/callback'](callback(failedClaude.state,'mock-failed-claude'))
+  for(let i=0;i<45;i++)await Promise.resolve();assert.equal(failedClaudeView.disposed,0);assert.equal(failedClaudeView.dismissed,0);assert.equal(kc.get('ai_usage_claude_oauth_v1'),failedClaudeKC);assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'))
+  closeFailedClaude();await failedClaudeOpen;assert.equal(failedClaudeView.disposed,1);assert.equal(failedClaudeView.dismissed,1);claudePostFailure=false;presentBrowser=oldPresentBrowser
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2332,7 +2213,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.35');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.36');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2813,13 +2694,13 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
   // Login row structure is stable for every provider/state: left item always present, Picker always right (never Spacer+Picker only).
   {
     const oldStore=[...storage],oldKC=[...kc],oldHandler=handler
-    api.saveSource('official');handler=async(u)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'ROW-SYNTH',usercode:'ROW-CODE',interval:'5'}):resp(503,{})
+    api.saveSource('official');handler=async()=>resp(503,{})
     const loginRow=()=>render().find(n=>n?.type==='HStack'&&Array.isArray(n.props.children)&&n.props.children.some(c=>c?.type==='Picker'&&c.props.title===''))
     const check=(label,expectButton)=>{const row=loginRow();assert.ok(row,label);const kids=Array.from(row.props.children).filter(Boolean)
       assert.deepEqual(kids.map(c=>c.type),[expectButton?'Button':'Text','Spacer','Picker'],label)
       if(expectButton)assert.equal(kids[0].props.title,'添加账号');else assert.ok(typeof kids[0].props.children==='string'&&kids[0].props.children.length>0,label+' placeholder text')}
     for(const provider of ['codex','claude','deepseek']){states.length=0;render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged(provider);check(provider+' idle',true)}
-    states.length=0;await render().find(n=>n?.type==='Button'&&n.props.title==='验证码登录').props.action();check('codex device in progress',false)
+    states.length=0;await prepareCodexUI(render());check('codex browser in progress',false)
     render().find(n=>n?.type==='Button'&&n.props.title==='取消登录').props.action();check('codex after cancel',true)
     await render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('claude');check('claude idle',true)
     await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();if(render().some(n=>n?.type==='Button'&&n.props.title==='取消登录')){check('claude in progress',false);render().find(n=>n?.type==='Button'&&n.props.title==='取消登录').props.action()}
@@ -2862,13 +2743,13 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     context.HttpResponseBody={html:html=>html};context.HttpResponse={ok:body=>({statusCode:200,body})}
     context.HttpServer=class{constructor(){this.port=null;this.stops=0;this.handlers={};servers.push(this)}registerHandler(p,h){this.handlers[p]=h}start(o){assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(o.forceIPv4,true);assert.ok([1455,1457].includes(o.port));this.options=o;this.port=bindMode==='wrong'?7777:o.port;return bindMode==='fail'||bindMode==='fallback'&&o.port===1455?'in use':null}stop(){this.stops++;this.port=null}}
     let closeView,holdView=false
-    context.WebViewController=class{constructor(o){assert.deepEqual({...o},{ephemeral:true});this.disposed=0;views.push(this)}loadURL(url){this.url=url;return Promise.resolve(true)}present(){return holdView?new Promise(r=>closeView=r):Promise.resolve()}dispose(){this.disposed++}}
+    context.WebViewController=class{constructor(o){assert.deepEqual({...o},{ephemeral:true});this.disposed=0;this.dismissed=0;views.push(this)}loadURL(url){this.url=url;return Promise.resolve(true)}present(){return holdView?new Promise(r=>closeView=r):Promise.resolve()}dismiss(){this.dismissed++}dispose(){this.disposed++}}
     const req=(d,extra=[])=>({method:'GET',queryParams:[{key:'state',value:d.state},{key:'code',value:'SYNTHETIC-CODE'},...extra]})
     const callback=d=>servers.find(s=>s.port===Number(d.redirect.split(':')[2].split('/')[0])).handlers['/auth/callback']
     const secretFree=(response,secrets)=>{assert.equal(response.statusCode,200);assert.equal(response.then,undefined);for(const v of secrets)if(v)assert.ok(!response.body.includes(v));assert.ok(!/code=|state=|token=/.test(response.body))}
     const tokenBody={access_token:namedToken({email:'browser@codex.test',name:'Browser Name'},'browser-account'),id_token:namedToken({email:'browser@codex.test',name:'Browser Name'},'browser-account'),refresh_token:'SYNTHETIC-BROWSER-REFRESH'}
     let posts=0,lastForm,releaseExchange=null,exchangeMode='ok'
-    handler=async(u,o)=>{if(u.endsWith('/oauth/token')){posts++;lastForm=new URLSearchParams(o.body);assert.equal(new Headers(o.headers).get('content-type'),'application/x-www-form-urlencoded');assert.equal(new Headers(o.headers).get('user-agent'),null,'same as existing Codex exchange, not Claude spoofed headers');if(exchangeMode==='hold')await new Promise(r=>releaseExchange=r);if(exchangeMode==='fail')return resp(503);if(exchangeMode==='network')throw Error('synthetic indeterminate transport');return resp(200,tokenBody)}if(u.endsWith('/usercode'))return resp(200,{device_auth_id:'browser-fallback',user_code:'MOCK-FALLBACK',interval:5});if(u.endsWith('/usage'))return resp(200,{rate_limit:usage.rate_limit});return resp(404)}
+    handler=async(u,o)=>{if(u.endsWith('/oauth/token')){posts++;lastForm=new URLSearchParams(o.body);assert.equal(new Headers(o.headers).get('content-type'),'application/x-www-form-urlencoded');assert.equal(new Headers(o.headers).get('user-agent'),null,'same as existing Codex exchange, not Claude spoofed headers');if(exchangeMode==='hold')await new Promise(r=>releaseExchange=r);if(exchangeMode==='fail')return resp(503);if(exchangeMode==='network')throw Error('synthetic indeterminate transport');return resp(200,tokenBody)}if(u.endsWith('/usage'))return resp(200,{rate_limit:usage.rate_limit});return resp(404)}
     for(const mode of ['ok','fallback']){bindMode=mode;let d=api.beginCodexBrowserLogin(()=>{},()=>{});const u=new URL(d.url);assert.equal(u.origin+u.pathname,'https://auth.openai.com/oauth/authorize');assert.equal(u.searchParams.get('client_id'),'app_EMoamEEZ73f0CkXaXp7hrann');assert.equal(u.searchParams.get('response_type'),'code');assert.equal(u.searchParams.get('scope'),'openid profile email offline_access api.connectors.read api.connectors.invoke');assert.equal(u.searchParams.get('state'),d.state);assert.equal(u.searchParams.get('code_challenge'),nodeCrypto.createHash('sha256').update(d.verifier).digest('base64url'));assert.equal(u.searchParams.get('code_challenge_method'),'S256');assert.equal(d.redirect,`http://127.0.0.1:${mode==='ok'?1455:1457}/auth/callback`);api.cancelCodexBrowserLogin(d)}
     for(const mode of ['fail','wrong']){bindMode=mode;assert.throws(()=>api.beginCodexBrowserLogin(()=>{},()=>{}),/1455.*1457/);assert.ok(servers.slice(-2).every(s=>s.stops===1))}bindMode='ok'
     const nativeServer=context.HttpServer;delete context.HttpServer;assert.throws(()=>api.beginCodexBrowserLogin(()=>{},()=>{}),/回调能力/);context.HttpServer=nativeServer
@@ -2887,31 +2768,37 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     exchangeMode='fail';d=api.beginCodexBrowserLogin(()=>{},()=>{});d.code='FAIL';await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true),/503/);const failedPosts=posts;await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true));assert.equal(posts,failedPosts);exchangeMode='network';d=api.beginCodexBrowserLogin(()=>{},()=>{});d.code='UNKNOWN';await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true),/网络/);const unknownPosts=posts;await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true));assert.equal(posts,unknownPosts);assert.equal(d.cancelled,true);exchangeMode='ok'
     // Real App: default prepares locally, close-before-callback keeps attempt retryable.
     api.saveSource('official');states.length=0;const n=calls.length,ns=servers.length
-    await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.equal(calls.length,n);assert.equal(servers.length,ns+1);assert.ok(!render().some(x=>x?.type==='Text'&&x.props.contextMenu));assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='验证码登录'))
+    await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.equal(calls.length,n);assert.equal(servers.length,ns+1);assert.ok(!render().some(x=>x?.type==='Text'&&x.props.contextMenu));assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='验证码登录'))
     await render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();assert.equal(views.at(-1).disposed,1);assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='点击登录'));assert.equal(calls.length,n)
     // Browser closes while exchange is in flight: busy remains locked until completion, then saved/refreshed.
-    holdView=true;exchangeMode='hold';const open=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();const server=servers.at(-1),u=new URL(views.at(-1).url);server.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:u.searchParams.get('state')},{key:'code',value:'UI-CODE'}]});for(let i=0;i<30&&!releaseExchange;i++)await Promise.resolve();assert.ok(releaseExchange);closeView();await open;assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.disabled);releaseExchange();for(let i=0;i<100&&render().some(x=>x.type==='Button'&&x.props.title==='取消登录');i++)await Promise.resolve();assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));assert.equal(server.stops,1);assert.equal(views.at(-1).disposed,1);holdView=false;exchangeMode='ok'
+    holdView=true;exchangeMode='hold';const open=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();const server=servers.at(-1),u=new URL(views.at(-1).url);server.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:u.searchParams.get('state')},{key:'code',value:'UI-CODE'}]});for(let i=0;i<30&&!releaseExchange;i++)await Promise.resolve();assert.ok(releaseExchange);assert.equal(views.at(-1).dismissed,0);assert.equal(views.at(-1).disposed,0);closeView();await open;assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.disabled);releaseExchange();for(let i=0;i<100&&render().some(x=>x.type==='Button'&&x.props.title==='取消登录');i++)await Promise.resolve();assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));assert.equal(server.stops,1);assert.equal(views.at(-1).disposed,1);assert.equal(views.at(-1).dismissed,1);holdView=false;exchangeMode='ok'
     // In-flight late tokens cannot save after cancel/provider/source/dismiss controls.
     for(const mode of ['cancel','provider','source','dismiss']){states.length=0;api.saveSource('official');await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();const srv=servers.at(-1);const opened=render().find(x=>x.type==='Button'&&x.props.title==='点击登录');holdView=true;exchangeMode='hold';releaseExchange=null;const p=opened.props.action();await Promise.resolve();const url=new URL(views.at(-1).url);srv.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:url.searchParams.get('state')},{key:'code',value:'LATE-CODE'}]});for(let i=0;i<30&&!releaseExchange;i++)await Promise.resolve();assert.ok(releaseExchange)
       if(mode==='cancel')render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action();else if(mode==='provider')render().find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('deepseek');else if(mode==='source')await render().find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot');else render().find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
-      const before=kc.get('ai_usage_official_oauth_v1');releaseExchange();await p;for(let i=0;i<35;i++)await Promise.resolve();assert.equal(kc.get('ai_usage_official_oauth_v1'),before);assert.equal(srv.stops,1);assert.equal(views.at(-1).disposed,1);holdView=false;exchangeMode='ok'
+      const before=kc.get('ai_usage_official_oauth_v1');releaseExchange();await p;for(let i=0;i<35;i++)await Promise.resolve();assert.equal(kc.get('ai_usage_official_oauth_v1'),before);assert.equal(srv.stops,1);assert.equal(views.at(-1).disposed,1);assert.equal(views.at(-1).dismissed,1);holdView=false;exchangeMode='ok'
     }
     // Success while the modal is still open releases it automatically (no need to close first).
     api.saveSource('official');states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();holdView=true;exchangeMode='ok'
     const successOpen=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();let liveServer=servers.at(-1),liveURL=new URL(views.at(-1).url)
-    liveServer.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:liveURL.searchParams.get('state')},{key:'code',value:'OPEN-SUCCESS'}]});await successOpen;assert.ok(api.officialCached().accounts.some(a=>a.name==='browser@codex.test'),'browser callback success refreshes quota cache');assert.equal(liveServer.stops,1);assert.equal(views.at(-1).disposed,1)
+    liveServer.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:liveURL.searchParams.get('state')},{key:'code',value:'OPEN-SUCCESS'}]});await successOpen;assert.equal(views.at(-1).dismissed,1);for(let i=0;i<50;i++)await Promise.resolve();assert.ok(api.officialCached().accounts.some(a=>a.name==='browser@codex.test'),'browser callback success refreshes quota cache');assert.equal(liveServer.stops,1);assert.equal(views.at(-1).disposed,1)
     for(let i=0;i<40;i++)await Promise.resolve();assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));holdView=false
-    // Local expiry closes both listener and an open view and unlocks retry/fallback.
+    // Failed exchange does not auto-dismiss as if successful; closing manually reveals the retry error.
+    states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();holdView=true;exchangeMode='fail'
+    const failOpen=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();const failServer=servers.at(-1),failView=views.at(-1),failURL=new URL(failView.url),beforeFailureKC=kc.get('ai_usage_official_oauth_v1')
+    failServer.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:failURL.searchParams.get('state')},{key:'code',value:'UI-FAIL'}]})
+    for(let i=0;i<40;i++)await Promise.resolve();assert.equal(failView.dismissed,0);assert.equal(failView.disposed,0);assert.equal(failServer.stops,1);assert.equal(kc.get('ai_usage_official_oauth_v1'),beforeFailureKC);assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children.includes('503')))
+    closeView();await failOpen;assert.equal(failView.dismissed,1);assert.equal(failView.disposed,1);holdView=false;exchangeMode='ok'
+    // Local expiry closes both listener and an open view and unlocks retry.
     states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();holdView=true
     const expiryOpen=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();liveServer=servers.at(-1)
     const expiryTimer=[...timers.values()].find(t=>t.ms===15*60000);assert.ok(expiryTimer);expiryTimer.fn();await expiryOpen;assert.equal(liveServer.stops,1);assert.equal(views.at(-1).disposed,1);assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children.includes('本机登录等待超时')));holdView=false
     const browserAPI=context.WebViewController;delete context.WebViewController;states.length=0;const beforeMissing=servers.length;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.equal(servers.length,beforeMissing);assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children.includes('WebViewController')));context.WebViewController=browserAPI
-    // Capability/port failures remain visible, then explicit fallback abandons listener and starts device flow.
-    for(const mode of ['missing','fail','wrong']){states.length=0;api.saveSource('official');bindMode=mode==='missing'?'ok':mode;if(mode==='missing')delete context.HttpServer;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children.includes('验证码登录')));context.HttpServer=nativeServer;await render().find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action();assert.ok(render().some(x=>x.type==='Text'&&x.props.contextMenu&&x.props.children==='MOCK-FALLBACK'));render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()}
-    bindMode='ok';states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();const fallbackServer=servers.at(-1);await render().find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action();assert.equal(fallbackServer.stops,1);assert.ok(render().some(x=>x.type==='Text'&&x.props.contextMenu));render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+    // Capability/port failures remain visible and retryable, with no alternate code flow.
+    for(const mode of ['missing','fail','wrong']){states.length=0;api.saveSource('official');bindMode=mode==='missing'?'ok':mode;if(mode==='missing')delete context.HttpServer;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children.includes('重新登录')));assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='验证码登录'));context.HttpServer=nativeServer}
+    bindMode='ok';states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
     assert.equal(timers.size,0);assert.ok(servers.every(s=>s.stops===1))
     for(const[k,v]of Object.entries(saved))if(k!=='handler')context[k]=v;handler=saved.handler;kc.clear();for(const[k,v]of savedKC)kc.set(k,v);storage.clear();for(const[k,v]of savedStorage)storage.set(k,v);states.length=0
-    console.log('PASS: Codex official browser OAuth PKCE/exact 1455+1457 redirect; missing API/bind/wrong-port fallback; secret-free invalid/duplicate/expired/cancel/error callbacks; exact form single exchange/shared identity alias order; default local preparation; before/inflight close; cancel/provider/source/dismiss late response isolation; listener+ephemeral disposal; visible device fallback')
+    console.log('PASS: Codex official browser OAuth PKCE/exact 1455+1457 redirect; missing API/bind/wrong-port retry; secret-free invalid/duplicate/expired/cancel/error callbacks; exact form single exchange/shared identity alias order; default local preparation; before/inflight close; cancel/provider/source/dismiss late response isolation; listener+ephemeral disposal; browser-only UI')
   }
   // Saved key display and actual editing are separate: never bind a saved full key or submit a mask.
   {
@@ -3000,6 +2887,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
         let runApp;try{runApp=load('index.tsx').runApp}finally{missing.forEach(k=>missingExports.delete(k))}
         states.length=0;effects=[];cleanups=[];await runApp()
         assert.ok(mounted.some(n=>n?.type==='Form'),opening+' first render non-blank')
+        assert.ok(!mounted.some(n=>n?.type==='Button'&&/验证码|复制代码/.test(n.props.title||'')));assert.ok(!mounted.some(n=>n?.type==='Text'&&/一次性代码|有效期|浏览器登录已准备/.test(String(n.props.children||''))))
         if(source==='official'){assert.equal(mounted.some(n=>n?.type==='ForEach'),!missing.length);assert.equal(mounted.some(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage'),!!missing.length)}
         assert.equal(calls.length,beforeCalls,source+'/'+statsSource+'/'+cacheMode+'/'+opening+' zero network including expiry renewal')
         assert.equal(reloads,beforeReload,'entry does not reload widgets');assert.equal(JSON.stringify([...kc]),beforeKC);assert.equal(JSON.stringify([...storage]),beforeStore)
@@ -3016,11 +2904,10 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     kc.clear();for(const[k,v]of oldKC)kc.set(k,v);storage.clear();for(const[k,v]of oldStore)storage.set(k,v);handler=oldHandler;scripting.useEffect=oldEffect;scripting.Navigation=oldNavigation;scripting.Script=oldScript;scripting.Widget.reloadAll=oldReload;states.length=0
     console.log('PASS: real runApp/Navigation.present all mount effects; three quota x two stats sources, full/quota-only/stats-only/no-cache first+reopen x native-exports present/missing 96 runs ZERO fetch or renewal/reload, non-blank first render; cached accounts shown, no status section, manual actions available; Storage/Keychain untouched including expired Codex/Claude credentials')
   }
-  console.log('PASS: module explicitly has no WebViewController; legacy import fails/global succeeds; absent global accurate inline UI; code-only long-press copy with cancel/source/dismiss/expiry/success stale guards')
+  assert.ok(!calls.some(c=>/deviceauth|\/usercode/.test(c.url)));console.log('PASS: production device-only symbols/endpoints/UI removed; 96 App opening trees no code/expiry/preparation text; all credential fixtures via browser callback; no device endpoint ever requested; Codex+Claude success dismiss once, in-flight stays open, exchange failure waits for manual close')
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks retry; close-before-load late rejection handled; timers cleared and dispose once')
-  console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; default close auto-refresh; cancel/source/dismiss guards; retryable embedded failure; Safari fallback entries removed')
-  console.log('PASS: in-app browser dismissal pending/success/one interval wait/cancel/source/dismiss; UI auto cache+list+reload; claims names/fallback/duplicate IDs/alias preservation/local migration')
+  console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; callback auto-refresh; cancel/source/dismiss guards; retryable embedded failure; Safari fallback entries removed')
   console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
-  console.log('PASS: device pending/throttle/expired/cancel/in-flight cancel/success/dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/native-update metadata; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude exact-zero account gray title+SVG/LCD/percent/lit bars; enabled/available/stale not gray triggers; App foreground unchanged')
+  console.log('PASS: browser-established credential dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/native-update metadata; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude exact-zero account gray title+SVG/LCD/percent/lit bars; enabled/available/stale not gray triggers; App foreground unchanged')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

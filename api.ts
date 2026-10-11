@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.10.35"
+export const VERSION = "1.10.36"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -552,14 +552,13 @@ export function fmtTime(ts: number): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-// OpenAI Codex public device-auth protocol. No Parrot credentials are accessed here.
+// OpenAI Codex browser OAuth protocol. No Parrot credentials are accessed here.
 const AUTH = "https://auth.openai.com"
 const CLIENT = "app_EMoamEEZ73f0CkXaXp7hrann"
 const WHAM = "https://chatgpt.com/backend-api/wham"
 const KEY = "ai_usage_official_oauth_v1"
 const CACHE = "ai_usage_official_cache_v1"
 type Credential = { id: string; accountId: string; subject: string; name: string; email?: string; access: string; refresh: string; expiresAt: number }
-export type DeviceLogin = { deviceId: string; code: string; interval: number; expiresAt: number; nextPoll: number; cancelled: boolean }
 
 function credentials(): Credential[] {
   const raw = Keychain.get(KEY)
@@ -628,19 +627,6 @@ async function json(resp: any) {
 async function post(path: string, body: any) {
   return request(AUTH + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
 }
-export async function beginDeviceLogin(): Promise<DeviceLogin> {
-  const r = await post("/api/accounts/deviceauth/usercode", { client_id: CLIENT })
-  if (r.status !== 200) throw new Error(r.status === 404 ? "官方设备授权不可用；不支持以自定义回调替代" : `设备授权申请失败（HTTP ${r.status}）`)
-  const b = await json(r)
-  const code = b.user_code ?? b.usercode
-  if (!b.device_auth_id || typeof code !== "string") throw new Error("官方设备授权响应不完整")
-  return { deviceId: b.device_auth_id, code, interval: Math.max(1, Number(b.interval) || 5) * 1000, expiresAt: Date.now() + 15 * 60 * 1000, nextPoll: 0, cancelled: false }
-}
-export function cancelDeviceLogin(d: DeviceLogin) { d.cancelled = true }
-function checkDevice(d: DeviceLogin) {
-  if (d.cancelled) throw new Error("已取消登录")
-  if (Date.now() >= d.expiresAt) throw new Error("设备授权已过期，请重新开始")
-}
 function claims(token: string): any {
   try {
     let base = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
@@ -677,35 +663,7 @@ function credential(b: any, previous?: Credential): Credential {
   return { id: previous?.id ?? "", accountId, subject, name: officialName(c, a) || previous?.name || "", email: officialEmail(c, a) || previous?.email || "", access: b.access_token, refresh,
     expiresAt: typeof exp === "number" && Number.isFinite(exp) && exp > 0 ? exp * 1000 : Date.now() + (Number.isFinite(Number(b.expires_in)) && Number(b.expires_in) > 0 ? Number(b.expires_in) : 3600) * 1000 }
 }
-// Explicit foreground checks avoid losing a polling loop when iOS suspends the browser/app.
-export async function checkDeviceLogin(d: DeviceLogin): Promise<"pending" | "complete"> {
-  checkDevice(d)
-  if (Date.now() < d.nextPoll) return "pending"
-  d.nextPoll = Date.now() + d.interval
-  const r = await post("/api/accounts/deviceauth/token", { device_auth_id: d.deviceId, user_code: d.code })
-  checkDevice(d)
-  if (r.status === 403 || r.status === 404) return "pending"
-  if (r.status !== 200) throw new Error(`设备授权失败（HTTP ${r.status}），请重新开始`)
-  const b = await json(r)
-  if (!b.authorization_code || !b.code_verifier) throw new Error("设备授权响应不完整")
-  const form = Object.entries({ grant_type: "authorization_code", client_id: CLIENT, code: b.authorization_code,
-    redirect_uri: AUTH + "/deviceauth/callback", code_verifier: b.code_verifier })
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")
-  let t: any
-  try {
-    t = await request(AUTH + "/oauth/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form })
-  } catch (e) { d.cancelled = true; throw e }
-  checkDevice(d)
-  if (t.status !== 200) { d.cancelled = true; throw new Error(`官方令牌交换失败（HTTP ${t.status}），请重新开始`) }
-  // Once exchanged, never reuse the code even if Keychain persistence fails.
-  const body = await json(t).catch(e => { d.cancelled = true; throw e })
-  checkDevice(d)
-  d.cancelled = true
-  saveOfficialCredential(body)
-  d.cancelled = true // One-time authorization codes must not be exchanged twice.
-  return "complete"
-}
-// Both official login methods share account identity/dedup and local Keychain semantics.
+// Browser login preserves the existing account identity/dedup and local Keychain semantics.
 function saveOfficialCredential(body: any) {
   const item = credential(body)
   const items = credentials()
@@ -728,13 +686,13 @@ export function cancelCodexBrowserLogin(d: CodexBrowserLogin) {
 }
 export function beginCodexBrowserLogin(onCode: () => void, onExpire: () => void, onFailure: () => void = onExpire): CodexBrowserLogin {
   if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function" || typeof Crypto.sha256 !== "function")
-    throw new Error("Codex浏览器登录缺少PKCE能力，请使用验证码登录")
+    throw new Error("Codex浏览器登录缺少PKCE能力，请重新登录")
   if (typeof HttpServer !== "function" || typeof HttpResponse === "undefined" || typeof HttpResponseBody === "undefined" || typeof HttpResponse.ok !== "function" || typeof HttpResponseBody.html !== "function")
-    throw new Error("Codex浏览器登录缺少本机回调能力，请使用验证码登录")
+    throw new Error("Codex浏览器登录缺少本机回调能力，请重新登录")
   const base = (data: any) => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
   const verifier = base(Crypto.generateSymmetricKey(256)), state = base(Crypto.generateSymmetricKey(256))
   const input = Data.fromRawString(verifier)
-  if (!input) throw new Error("Codex PKCE生成失败，请使用验证码登录")
+  if (!input) throw new Error("Codex PKCE生成失败，请重新登录")
   const challenge = base(Crypto.sha256(input))
   const d: CodexBrowserLogin = { url: "", redirect: "", verifier, state, expiresAt: Date.now() + 15 * 60000,
     cancelled: false, consumed: false, code: null, server: null, timer: null }
@@ -765,7 +723,7 @@ export function beginCodexBrowserLogin(onCode: () => void, onExpire: () => void,
       d.server = server; d.redirect = `http://127.0.0.1:${port}/auth/callback`; break
     } catch { try { server?.stop() } catch {} }
   }
-  if (!d.server) { cancelCodexBrowserLogin(d); throw new Error("Codex本机回调无法绑定127.0.0.1:1455或1457，请使用验证码登录") }
+  if (!d.server) { cancelCodexBrowserLogin(d); throw new Error("Codex本机回调无法绑定127.0.0.1:1455或1457，请重新登录") }
   const params = { response_type: "code", client_id: CLIENT, redirect_uri: d.redirect,
     scope: "openid profile email offline_access api.connectors.read api.connectors.invoke", code_challenge: challenge,
     code_challenge_method: "S256", state, id_token_add_organizations: "true", codex_cli_simplified_flow: "true", originator: "codex_cli_rs" }
@@ -781,7 +739,7 @@ export async function finishCodexBrowserLogin(d: CodexBrowserLogin, active: () =
     redirect_uri: d.redirect, code_verifier: d.verifier }).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&")
   try {
     const r = await request(AUTH + "/oauth/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body })
-    if (r.status !== 200) throw new Error(`Codex浏览器令牌交换失败（HTTP ${r.status}），请重新登录或使用验证码登录`)
+    if (r.status !== 200) throw new Error(`Codex浏览器令牌交换失败（HTTP ${r.status}），请重新登录`)
     const tokens = await json(r)
     if (d.cancelled || !active() || Date.now() >= d.expiresAt) throw new Error("Codex本次浏览器授权已失效，请重新登录")
     saveOfficialCredential(tokens)

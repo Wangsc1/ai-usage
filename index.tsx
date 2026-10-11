@@ -1,13 +1,13 @@
 import {
-  Button, EditButton, ForEach, Form, Group, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
 import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
-import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
+import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.35"
+const VERSION = "1.10.36"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -92,9 +92,8 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
   </Form>
 }
 
-const DEVICE_URL = "https://auth.openai.com/codex/device"
 const UNSUPPORTED_BROWSER = "当前Scripting不支持WebViewController临时浏览器，请更新Scripting"
-async function presentIsolatedAuthorization(register?: (release: (() => void) | null) => void, url = DEVICE_URL) {
+async function presentIsolatedAuthorization(register: ((release: (() => void) | null) => void) | undefined, url: string) {
   // loadURL resolves on navigation completion, not on initiating the load. Present BEFORE waiting
   // for a login/redirect page, otherwise its pending navigation can hide the modal indefinitely.
   // WebViewController is a GLOBAL API in the official WebView example, not a scripting module export.
@@ -104,7 +103,12 @@ async function presentIsolatedAuthorization(register?: (release: (() => void) | 
   let timer: ReturnType<typeof setTimeout> | undefined
   let stop!: () => void
   const cancelled = new Promise<void>(resolve => { stop = resolve })
-  const release = () => { if (!released) { released = true; stop(); browser.dispose() } }
+  const release = () => { if (!released) {
+    released = true; stop()
+    // Documented dismiss(): void closes presentation; dispose() also dismisses if still shown.
+    // Guard for older runtimes and always release resources exactly once.
+    try { if (typeof browser.dismiss === "function") browser.dismiss() } finally { browser.dispose() }
+  } }
   register?.(release)
   try {
     const failure = new Promise<never>((_, reject) => {
@@ -123,20 +127,6 @@ async function presentIsolatedAuthorization(register?: (release: (() => void) | 
     register?.(null)
   }
 }
-// One foreground check after the authorization browser closes, no polling loop.
-async function checkAfterBrowser(d: DeviceLogin, active: () => boolean,
-  wait: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  present: () => Promise<void> = () => presentIsolatedAuthorization()) {
-  try { await present() }
-  catch (e: any) {
-    throw new Error((e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载")) ? e.message : "无法打开官方授权页，请稍后重试")
-  }
-  if (!active() || d.cancelled) return null
-  const remaining = Math.max(0, d.nextPoll - Date.now())
-  if (remaining) await wait(Math.min(remaining, Math.max(0, d.expiresAt - Date.now())))
-  if (!active() || d.cancelled) return null
-  return checkDeviceLogin(d)
-}
 function maskedKey(value: string): string {
   const chars = Array.from(value)
   return chars.length > 4 ? chars.slice(0, 4).join("") + "*".repeat(chars.length - 4) : "*".repeat(chars.length)
@@ -144,7 +134,6 @@ function maskedKey(value: string): string {
 function SettingsView() {
   const close = Navigation.useDismiss()
   const [source, setSource] = useState<DataSource>(getSource())
-  const [device, setDevice] = useState<DeviceLogin | null>(null)
   const [loginProvider, setLoginProvider] = useState("codex")
   const [claude, setClaude] = useState<ClaudeLogin | null>(null)
   const [claudeCode, setClaudeCode] = useState("")
@@ -160,8 +149,8 @@ function SettingsView() {
   const [dsToken, setDSToken] = useState("")
   const [dsAdding, setDSAdding] = useState(false)
   const [logins, setLogins] = useState(officialAccounts())
-  const [auth] = useState({ codex: null as CodexBrowserLogin | null, device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
-  const stopAuth = () => { if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; setCodexBrowser(null); setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
+  const [auth] = useState({ codex: null as CodexBrowserLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
+  const stopAuth = () => { if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; setCodexBrowser(null); setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const [statisticsSource, setStatisticsSource] = useState<StatisticsSource>(getStatisticsSource())
   const subCur = getSub2APIConfig()
@@ -178,7 +167,7 @@ function SettingsView() {
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
-  useEffect(() => () => { if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
+  useEffect(() => () => { if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
     stopAuth()
@@ -191,35 +180,20 @@ function SettingsView() {
 
   async function addOfficial() {
     if (loginProvider === "deepseek") {
-      if (!auth.alive || auth.running || busy || auth.device || auth.claude || getSource() !== "official") return
+      if (!auth.alive || auth.running || busy || auth.claude || getSource() !== "official") return
       setDSToken(""); setDSAdding(true); return
     }
     if (loginProvider === "claude") { startClaude(); return }
     if (auth.running || busy) return
     stopAuth(); setBrowserError("")
-    if (typeof WebViewController !== "function") { setBrowserError("Codex浏览器登录缺少WebViewController，请使用验证码登录"); return }
+    if (typeof WebViewController !== "function") { setBrowserError("Codex浏览器登录缺少WebViewController，请重新登录"); return }
     try {
       const d = beginCodexBrowserLogin(() => { if (auth.codex === d) void completeCodex(d) }, () => {
-        if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex本次本机登录等待超时，请重新登录或使用验证码登录") }
-      }, () => { if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex官方授权未完成，请重新登录或使用验证码登录") } })
+        if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex本次本机登录等待超时，请重新登录") }
+      }, () => { if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex官方授权未完成，请重新登录") } })
       auth.codex = d; setCodexBrowser(d)
     } catch (e: any) { setBrowserError(e.message) }
   }
-  async function deviceFallback() {
-    if (busy || auth.running) return
-    stopAuth(); setBrowserError("")
-    auth.running = true
-    const epoch = auth.epoch
-    setBusy(true)
-    try {
-      const d = await beginDeviceLogin()
-      if (!auth.alive || epoch !== auth.epoch || getSource() !== "official") { cancelDeviceLogin(d); return }
-      auth.device = d
-      setDevice(d)
-    } catch { /* begin failure leaves the add button available for retry */ }
-    finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
-  }
-
   async function completeCodex(d: CodexBrowserLogin) {
     const epoch = auth.epoch
     const valid = () => auth.alive && auth.codex === d && auth.epoch === epoch && getSource() === "official"
@@ -228,9 +202,9 @@ function SettingsView() {
     try {
       await finishCodexBrowserLogin(d, valid)
       if (!valid()) return
-      auth.codex = null; setCodexBrowser(null); setLogins(officialAccounts()); await test()
-    } catch (e: any) { if (valid()) { auth.codex = null; setCodexBrowser(null); setBrowserError(e.message || "Codex浏览器登录失败，请重新登录或使用验证码登录") } }
-    finally { if (auth.alive && epoch === auth.epoch) { auth.releaseBrowser?.(); auth.releaseBrowser = null; auth.running = false; setBusy(false) } }
+      auth.codex = null; setCodexBrowser(null); setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null; await test()
+    } catch (e: any) { if (valid()) { auth.codex = null; setCodexBrowser(null); setBrowserError(e.message || "Codex浏览器登录失败，请重新登录") } }
+    finally { if (auth.alive && epoch === auth.epoch) { auth.running = false; setBusy(false) } }
   }
   async function openCodex() {
     const d = auth.codex
@@ -239,7 +213,7 @@ function SettingsView() {
     const valid = () => auth.alive && auth.codex === d && auth.epoch === epoch
     auth.running = true; setBusy(true); setBrowserError("")
     try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url) }
-    catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Codex授权页") + "，可使用验证码登录") }
+    catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Codex授权页") + "，请重试登录") }
     finally { if (auth.alive && epoch === auth.epoch && !d.consumed) { auth.running = false; setBusy(false) } }
   }
   function startClaude(manual = false) {
@@ -276,7 +250,7 @@ function SettingsView() {
           : "Claude授权未完成，请查看错误提示")
         if (attempt.consumed || attempt.cancelled) {
           setClaudeCode("")
-          auth.claude = null; setClaude(null); auth.releaseBrowser?.(); auth.releaseBrowser = null
+          auth.claude = null; setClaude(null)
         }
       }
     } finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
@@ -302,38 +276,6 @@ function SettingsView() {
     }
   }
 
-  async function checkOfficial() {
-    const d = auth.device
-    if (!d || auth.running) return
-    auth.running = true
-    setBusy(true)
-    const epoch = auth.epoch
-    const active = () => auth.alive && auth.device === d && auth.epoch === epoch && getSource() === "official"
-    setBrowserError("")
-    try {
-      const result = await checkAfterBrowser(d, active, undefined,
-        () => presentIsolatedAuthorization(release => { auth.releaseBrowser = release }))
-      if (!active() || result == null) return
-      if (result !== "pending") {
-        auth.device = null
-        setDevice(null)
-        setLogins(officialAccounts())
-        await test()
-      }
-    } catch (e: any) {
-      if (active()) {
-        // A browser presentation failure is retryable; it says nothing about the device authorization.
-        const presentationFailed = e.message === UNSUPPORTED_BROWSER || e.message === "无法打开官方授权页，请稍后重试" || e.message.startsWith("授权页面加载")
-        if (presentationFailed) setBrowserError(e.message)
-        if (!presentationFailed) {
-          cancelDeviceLogin(d)
-          auth.device = null
-          setDevice(null)
-        }
-      }
-    } finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
-  }
-
   async function test() {
     const requestSource = getSource(), requestStats = getStatisticsSource()
     setBusy(true)
@@ -351,7 +293,7 @@ function SettingsView() {
 
   // Same remove-then-insert contract as the official editable_list onMove example; persisted by stable ID.
   function moveLogins(indices: number[], newOffset: number) {
-    if (busy || device || claude || codexBrowser || getSource() !== "official") return
+    if (busy || claude || codexBrowser || getSource() !== "official") return
     const current = sortAccounts(logins, "official")
     if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
     const moving = indices.map(i => current[i])
@@ -376,7 +318,7 @@ function SettingsView() {
   }
 
   const loginRow = (a: ReturnType<typeof officialAccounts>[number], i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
-          <Button title="删除" role="destructive" disabled={busy || !!device || !!claude || !!codexBrowser} action={async () => {
+          <Button title="删除" role="destructive" disabled={busy || !!claude || !!codexBrowser} action={async () => {
           try {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
@@ -432,7 +374,7 @@ function SettingsView() {
 
       {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
-          {!dsAdding && !device && !claude && !codexBrowser
+          {!dsAdding && !claude && !codexBrowser
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
             : <Text foregroundStyle="secondaryLabel">{loginProvider === "deepseek" ? "API Key" : "授权进行中"}</Text>}
           <Spacer />
@@ -442,8 +384,8 @@ function SettingsView() {
         </HStack>
         {loginProvider === "deepseek" && dsAdding ? <>
           <SecureField title="DeepSeek凭据" value={dsToken} onChanged={setDSToken} prompt="填入api key" />
-          <Button title="保存" disabled={busy || !!device || !!claude} action={async () => {
-            if (!auth.alive || busy || auth.running || auth.device || auth.claude || getSource() !== "official" || loginProvider !== "deepseek" || !dsAdding) return
+          <Button title="保存" disabled={busy || !!claude} action={async () => {
+            if (!auth.alive || busy || auth.running || auth.claude || getSource() !== "official" || loginProvider !== "deepseek" || !dsAdding) return
             try { addDeepSeekAccount("DeepSeek", "api", dsToken); setDSAdding(false); setDSToken(""); setLogins(officialAccounts()); await test() }
             catch { /* invalid input is not saved */ }
           }} />
@@ -451,12 +393,10 @@ function SettingsView() {
         {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
         {loginProvider === "claude" && claudeProgress && claudeProgress !== "等待Claude回调（尚未收到）" ? <Text>{claudeProgress}</Text> : null}
         {codexBrowser ? <>
-          <Text font={12} foregroundStyle="secondaryLabel">浏览器登录已准备，无需输入验证码。本机等待15分钟；关闭网页不代表成功，未收到回调可重开。</Text>
           <Button title="点击登录" action={openCodex} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
           <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
-        {source === "official" && loginProvider === "codex" && !device ? <Button title="验证码登录" action={deviceFallback} disabled={busy} /> : null}
         {claude ? <>
           {claude.fallback ? <Text font={12} foregroundStyle="secondaryLabel">{claude.fallback}</Text> : null}
           <Button title="点击登录" action={() => openClaude()} disabled={busy} />
@@ -467,23 +407,7 @@ function SettingsView() {
           </> : null}
           <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
-        {device ? <>
-          <HStack frame={{ maxWidth: "infinity" }}>
-          <Text contextMenu={{ menuItems: <Group>
-            <Button title="复制代码" action={async () => {
-              // A retained menu action must not copy an old, cancelled or expired attempt.
-              if (!auth.alive || auth.device !== device || device.cancelled || Date.now() >= device.expiresAt || getSource() !== "official") return
-              await Pasteboard.setString(device.code)
-            }} disabled={device.cancelled || Date.now() >= device.expiresAt} />
-          </Group> }}>{device.code}</Text>
-          <Spacer />
-          <Text foregroundStyle="secondaryLabel">{`有效期${Math.max(0, Math.ceil((device.expiresAt - Date.now()) / 60000))}分钟`}</Text>
-          </HStack>
-          <Button title={"点击登录"} action={() => checkOfficial()} disabled={busy} />
-          {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-          <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false) }} />
-        </> : null}
-        {!device && !claude && !codexBrowser && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
+        {!claude && !codexBrowser && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
         {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortAccounts(logins, "official")[i], i)} />
           : sortAccounts(logins, "official").map(loginRow)}
         {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
