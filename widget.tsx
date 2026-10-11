@@ -190,7 +190,7 @@ function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
 type Win = { muted?: boolean; label: string; w: QuotaWindow; fmt: (iso: string | null) => string }
 const windowsOf = (a: Account): Win[] => [
   { label: "5 h", w: a.fiveHour, muted: isQuotaExhausted(a), fmt: fmtReset },
-  { label: "每周", w: a.sevenDay, muted: isQuotaExhausted(a), fmt: fmtResetDays },
+  { label: "7d", w: a.sevenDay, muted: isQuotaExhausted(a), fmt: fmtResetDays },
 ]
 
 // Each intrinsic column owns BOTH periods: no Grid flexible-column compression or spanning headings.
@@ -282,7 +282,7 @@ function SmallStats({ data, medium = false }: { data: UsageData; medium?: boolea
   return <VStack offset={{ x: 0, y: layout.valueFont * VALUE_DIGIT_DESCENT_EM }}>{stats}</VStack>
 }
 
-// ---------- 小号：上下两个账号，各自5 h在上、每周在下 ----------
+// ---------- 小号：上下两个账号，各自5 h在上、7d在下 ----------
 // Shared single/double geometry: 1.7.13 moved up 3pt, 1.7.14 another 2pt; lower account retains its 4pt inset.
 function smallRegionLayout(height: number) {
   const dividerY = Math.max(74, Math.min(height * 0.56, height - 57)) - 5
@@ -313,18 +313,18 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   </GeometryReader>
 }
 
-// ---------- 四宫格：每格一个账号，5小时在上、每周在下 ----------
+// ---------- 四宫格：每格一个账号，5小时在上、7d在下 ----------
 type Scale = { title: number; label: number; lcd: number; bar: number; segs: number; gap: number }
 const MEDIUM_SCALE: Scale = { title: 12, label: 9, lcd: 11, bar: 4, segs: 10, gap: 2 }
 
-// "5 h/每周" label and countdown use the Small two-account baseline in Small and Medium:
+// "5 h/7d" label and countdown use the Small two-account baseline in Small and Medium:
 // 8pt, fixed label width 8*2.1, monospaced digits, NO per-text scaling (the time never shrinks alone).
 const QUOTA_TEXT_FONT = 8
 function QuadWindow({ label, w, fmt, s, muted = false, fixedLcd = false, rowToBarGap = s.gap }: Win & { s: Scale; fixedLcd?: boolean; rowToBarGap?: number }) {
   const lcd = <Lcd value={w.remainingPercent} height={s.lcd} muted={muted} />
   return <VStack alignment="leading" spacing={rowToBarGap}>
     <HStack alignment="bottom" spacing={2}>
-      {/* 标签固定宽度（约两个汉字），“5 h”与“每周”对齐，后面的倒计时也对齐 */}
+      {/* 标签固定宽度（约两个汉字），“5 h”与“7d”对齐，后面的倒计时也对齐 */}
       <Text font={QUOTA_TEXT_FONT} foregroundStyle={SUB} lineLimit={1} frame={{ width: QUOTA_TEXT_FONT * 2.1, alignment: "leading" as any }}>{label}</Text>
       <Text font={QUOTA_TEXT_FONT} monospacedDigit foregroundStyle={SUB} lineLimit={1}>
         · {fmt(w.resetsAt)}
