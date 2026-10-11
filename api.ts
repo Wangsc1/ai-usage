@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.10.34"
+export const VERSION = "1.10.35"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -701,6 +701,12 @@ export async function checkDeviceLogin(d: DeviceLogin): Promise<"pending" | "com
   const body = await json(t).catch(e => { d.cancelled = true; throw e })
   checkDevice(d)
   d.cancelled = true
+  saveOfficialCredential(body)
+  d.cancelled = true // One-time authorization codes must not be exchanged twice.
+  return "complete"
+}
+// Both official login methods share account identity/dedup and local Keychain semantics.
+function saveOfficialCredential(body: any) {
   const item = credential(body)
   const items = credentials()
   const old = items.find(x => x.accountId === item.accountId && x.subject === item.subject)
@@ -708,8 +714,78 @@ export async function checkDeviceLogin(d: DeviceLogin): Promise<"pending" | "com
   item.id = old?.id ?? `official-${Date.now()}-${Math.random().toString(36).slice(2)}`
   item.name = item.name || old?.name || `账号 ${Math.max(0, ...items.map(x => Number(x.name.match(/\d+$/)?.[0]) || 0)) + 1}`
   persist(old ? items.map(x => x.id === item.id ? item : x) : [...items, item])
-  d.cancelled = true // One-time authorization codes must not be exchanged twice.
-  return "complete"
+}
+export type CodexBrowserLogin = {
+  url: string; redirect: string; verifier: string; state: string; expiresAt: number;
+  cancelled: boolean; consumed: boolean; code: string | null; server: any; timer: any;
+}
+function closeCodexListener(d: CodexBrowserLogin) {
+  if (d.timer != null) { clearTimeout(d.timer); d.timer = null }
+  if (d.server) { try { d.server.stop() } catch {} d.server = null }
+}
+export function cancelCodexBrowserLogin(d: CodexBrowserLogin) {
+  d.cancelled = true; closeCodexListener(d); d.verifier = ""; d.state = ""; d.code = null; d.url = ""
+}
+export function beginCodexBrowserLogin(onCode: () => void, onExpire: () => void, onFailure: () => void = onExpire): CodexBrowserLogin {
+  if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function" || typeof Crypto.sha256 !== "function")
+    throw new Error("Codex浏览器登录缺少PKCE能力，请使用验证码登录")
+  if (typeof HttpServer !== "function" || typeof HttpResponse === "undefined" || typeof HttpResponseBody === "undefined" || typeof HttpResponse.ok !== "function" || typeof HttpResponseBody.html !== "function")
+    throw new Error("Codex浏览器登录缺少本机回调能力，请使用验证码登录")
+  const base = (data: any) => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+  const verifier = base(Crypto.generateSymmetricKey(256)), state = base(Crypto.generateSymmetricKey(256))
+  const input = Data.fromRawString(verifier)
+  if (!input) throw new Error("Codex PKCE生成失败，请使用验证码登录")
+  const challenge = base(Crypto.sha256(input))
+  const d: CodexBrowserLogin = { url: "", redirect: "", verifier, state, expiresAt: Date.now() + 15 * 60000,
+    cancelled: false, consumed: false, code: null, server: null, timer: null }
+  const reply = (ok: boolean) => HttpResponse.ok(HttpResponseBody.html(ok
+    ? '<!doctype html><meta charset="utf-8"><p>已收到授权回调，请返回脚本等待保存。此页面不代表登录成功。</p>'
+    : '<!doctype html><meta charset="utf-8"><p>本次回调无效或已失效，请返回脚本重新登录。</p>'))
+  for (const port of [1455, 1457]) {
+    let server: any = null
+    try {
+      server = new HttpServer(); server.listenAddressIPv4 = "127.0.0.1"
+      if (server.listenAddressIPv4 !== "127.0.0.1") throw new Error()
+      server.registerHandler("/auth/callback", (req: any) => {
+        const values = (key: string) => (req.queryParams ?? []).filter((x: any) => x.key === key).map((x: any) => x.value)
+        const codes = values("code"), states = values("state")
+        if (!d.cancelled && Date.now() >= d.expiresAt) { cancelCodexBrowserLogin(d); Promise.resolve().then(onExpire); return reply(false) }
+        if (req.method === "GET" && !d.cancelled && !d.consumed && states.length === 1 && states[0] === d.state && values("error").length > 0) {
+          cancelCodexBrowserLogin(d); Promise.resolve().then(onFailure); return reply(false)
+        }
+        const valid = req.method === "GET" && !d.cancelled && !d.consumed && !d.code && Date.now() < d.expiresAt &&
+          values("error").length === 0 && states.length === 1 && states[0] === d.state && codes.length === 1 && typeof codes[0] === "string" && !!codes[0]
+        if (!valid) return reply(false)
+        d.code = codes[0]
+        Promise.resolve().then(onCode)
+        return reply(true)
+      })
+      const error = server.start({ port, forceIPv4: true })
+      if (error || server.port !== port) throw new Error()
+      d.server = server; d.redirect = `http://127.0.0.1:${port}/auth/callback`; break
+    } catch { try { server?.stop() } catch {} }
+  }
+  if (!d.server) { cancelCodexBrowserLogin(d); throw new Error("Codex本机回调无法绑定127.0.0.1:1455或1457，请使用验证码登录") }
+  const params = { response_type: "code", client_id: CLIENT, redirect_uri: d.redirect,
+    scope: "openid profile email offline_access api.connectors.read api.connectors.invoke", code_challenge: challenge,
+    code_challenge_method: "S256", state, id_token_add_organizations: "true", codex_cli_simplified_flow: "true", originator: "codex_cli_rs" }
+  d.url = AUTH + "/oauth/authorize?" + Object.entries(params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&")
+  d.timer = setTimeout(() => { if (!d.cancelled) { cancelCodexBrowserLogin(d); onExpire() } }, 15 * 60000)
+  return d
+}
+export async function finishCodexBrowserLogin(d: CodexBrowserLogin, active: () => boolean): Promise<void> {
+  if (Date.now() >= d.expiresAt || !active()) cancelCodexBrowserLogin(d)
+  if (d.cancelled || d.consumed || !d.code) throw new Error("Codex本次浏览器授权已失效，请重新登录")
+  d.consumed = true
+  const body = Object.entries({ grant_type: "authorization_code", client_id: CLIENT, code: d.code,
+    redirect_uri: d.redirect, code_verifier: d.verifier }).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&")
+  try {
+    const r = await request(AUTH + "/oauth/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body })
+    if (r.status !== 200) throw new Error(`Codex浏览器令牌交换失败（HTTP ${r.status}），请重新登录或使用验证码登录`)
+    const tokens = await json(r)
+    if (d.cancelled || !active() || Date.now() >= d.expiresAt) throw new Error("Codex本次浏览器授权已失效，请重新登录")
+    saveOfficialCredential(tokens)
+  } finally { cancelCodexBrowserLogin(d) }
 }
 // Renewal cooldowns contain only provider/account-ID deadlines, never tokens. No timer or automatic retry.
 const RENEWAL_LIMIT = "ai_usage_oauth_renewal_cooldown_v1"

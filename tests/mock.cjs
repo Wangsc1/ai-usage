@@ -702,7 +702,7 @@ async function main() {
   }
   assert.ok(!statusUI.some(x=>typeof x==='string'&&x.includes('已停用')))
   for(const [n,s] of [[1.15,'$1.2'],[12.34,'$12.3'],[12.35,'$12.4'],[0.05,'$0.1'],[0,'$0.0'],[1234.56,'$1234.6']])assert.equal(api.fmtUsd(n),s)
-  assert.equal(api.VERSION,'1.10.34')
+  assert.equal(api.VERSION,'1.10.35')
   assert.ok(storageWrites.every(k=>!['ai_usage_selected_accounts_v1','ai_usage_official_selected_v1'].includes(k)))
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
@@ -865,7 +865,7 @@ async function main() {
   // Full Settings action: browser closes, check succeeds, quota cache/list and widget refresh follow.
   states.length=0;context.Safari.present=async()=>{};namedFlow({name:'自动授权名称',email:'automatic@example.test'},'automatic-user')
   let reloadCount=0;scripting.Widget.reloadAll=async()=>{reloadCount++}
-  let authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+  let authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
   authUI=render();assert.ok(authUI.some(x=>typeof x==='string'&&x.includes('automatic@example.test')))
   assert.ok(api.officialCached().accounts.some(a=>a.name==='automatic@example.test'));assert.ok(reloadCount>0)
@@ -873,7 +873,7 @@ async function main() {
   // Cancel/dismiss during open Safari makes the captured UI action inert, no token save or request.
   for(const mode of ['cancel','dismiss','source']){
     states.length=0;namedFlow({},'abandoned-'+mode);context.Safari.present=()=>new Promise(r=>browserClose=r)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
     authUI=render();const action=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
     await Promise.resolve();before=calls.length
     await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();assert.equal(calls.length,before) // busy lock blocks competing checks
@@ -883,7 +883,7 @@ async function main() {
     browserClose();await action;assert.equal(calls.length,before);api.saveSource('official')
   }
   states.length=0;namedFlow({},'ui-pending');context.Safari.present=async()=>{}
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
   handler=async()=>resp(403)
   authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
   authUI=render();assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.ok(!authUI.some(x=>typeof x==='string'&&x.startsWith('等待授权')),'no status section text')
@@ -943,7 +943,7 @@ async function main() {
   assert.equal(await checkAfterBrowser(intervalDevice,()=>true,async ms=>{waited.push(ms);now+=ms},presentIsolatedAuthorization),'pending')
   assert.deepEqual(waited,[3000]);assert.equal(calls.length,before+1);assert.equal(intervalDevice.cancelled,false);assert.equal(instances.at(-1).disposed,1)
   api.saveSource('official');states.length=0;namedFlow({email:'isolated@example.test'},'isolated-user')
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
   authUI=render();assert.ok(!authUI.some(x=>x.type==='Button'&&/Safari/.test(x.props.title||'')));assert.ok(!authUI.some(x=>typeof x==='string'&&(x.includes('外部无痕授权网址')||x.includes('仅输入你自己'))))
   const codeRow=authUI.find(x=>x.type==='HStack'&&Array.isArray(x.props.children)&&x.props.children[0]?.props?.contextMenu);assert.ok(codeRow);assert.deepEqual(Array.from(codeRow.props.children,c=>c.type),['Text','Spacer','Text']);assert.equal(typeof codeRow.props.children[0].props.children,'string');assert.equal(codeRow.props.children[0].props.children,'MOCK','real device user_code remains intact');assert.ok(!expand(codeRow).some(x=>typeof x==='string'&&x.includes('一次性代码')));assert.ok(!authUI.some(x=>x.type==='Button'&&x.props.title==='检查授权'));assert.equal(codeRow.props.children[2].props.children,'有效期15分钟')
   await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
@@ -953,7 +953,7 @@ async function main() {
   for(const mode of ['cancel','source','dismiss']){
     api.saveSource('official');states.length=0;namedFlow({},'isolated-abandoned-'+mode)
     let closeBrowser;presentBrowser=()=>new Promise(resolve=>closeBrowser=resolve)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
     authUI=render();const pendingAction=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
     for(let i=0;i<8&&!closeBrowser;i++)await Promise.resolve()
     assert.ok(closeBrowser);before=calls.length
@@ -965,14 +965,14 @@ async function main() {
     assert.equal(browserTimers.size,0);closeBrowser() // native dismiss may settle later; cancellation already released and completed
   }
   api.saveSource('official');states.length=0;namedFlow({},'isolated-failure');presentBrowser=async()=>{throw new Error('blocked identity provider')}
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
   authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
   assert.equal(calls.length,before);assert.equal(instances.at(-1).disposed,1)
   authUI=render();assert.ok(authUI.includes('无法打开官方授权页，请稍后重试'));assert.ok(!authUI.some(x=>x.type==='Button'&&/Safari/.test(x.props.title||'')))
   states.length=0;api.saveSource('official');namedFlow({},'ui-navigation-hung')
   loadBrowser=()=>new Promise(()=>{});presentBrowser=()=>new Promise(()=>{})
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
   authUI=render();before=calls.length
   const hungUI=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
   assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.disabled,'busy while opening')
@@ -985,7 +985,7 @@ async function main() {
   // Global absent: accurate error displayed adjacent to opening buttons, device remains retryable.
   const supportedBrowser=context.WebViewController;delete context.WebViewController
   states.length=0;api.saveSource('official');namedFlow({},'unsupported-global')
-  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+  authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
   authUI=render();before=calls.length
   await authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
   authUI=render();assert.equal(calls.length,before);assert.equal(browserTimers.size,0)
@@ -1000,7 +1000,7 @@ async function main() {
   let copied=[];context.Pasteboard={setString:async value=>copied.push(value)}
   for(const mode of ['cancel','source','dismiss','expired','success']){
     states.length=0;api.saveSource('official');namedFlow({},'copy-'+mode)
-    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+    authUI=render();await authUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
     authUI=render();const codeText=authUI.find(x=>x.type==='Text'&&x.props.contextMenu)
     assert.equal(typeof codeText.props.children,'string');assert.ok(codeText.props.children.length>0);assert.ok(!codeText.props.children.includes('一次性代码'))
     const copy=expand(codeText.props.contextMenu.menuItems).find(x=>x.type==='Button'&&x.props.title==='复制代码')
@@ -1245,13 +1245,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.34')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.35')
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.34');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.10.35');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1437,7 +1437,7 @@ async function main() {
   exitUI=render();assert.deepEqual((()=>{const l=lineOf(expand(exitRow(exitUI,legacyCodex.id)).find(isLine));return [l.n,l.icon,l.name]})(),[(api.sortAccounts(api.officialAccounts(),'official').findIndex(r=>r.id===legacyCodex.id)+1)+'.','codex',longEmail])
   // Identical disabling rules during either login flow, plus a held busy refresh.
   handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'row-disable-device',usercode:'MOCK-ROW',interval:'5'}):u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
-  await exitUI.find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();exitUI=render()
+  await exitUI.find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action();exitUI=render()
   assert.ok(exitUI.filter(x=>x.type==='HStack'&&x.props.trailingSwipeActions).every(x=>x.props.trailingSwipeActions.actions[0].props.disabled))
   exitUI.find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
   exitUI=render();exitUI.find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('claude')
@@ -1755,7 +1755,7 @@ async function main() {
       render().find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('codex')
       assert.equal(render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.disabled,false)
       handler=async(u,o)=>u.endsWith('/usercode')?resp(200,{device_auth_id:'rate-codex',usercode:'MOCK-COOLDOWN',interval:'5'}):combinedHandler(u,o)
-      await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
+      await render().find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action()
       assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
       assert.equal(storage.get(cooldownKey),baseRateNow+wait)
       now=baseRateNow+wait;assert.equal(api.claudeCooldownUntil(),0);const fresh=api.beginClaudeLogin();api.cancelClaudeLogin(fresh)
@@ -1796,7 +1796,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.34')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.10.35')
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1806,7 +1806,7 @@ async function main() {
   assert.equal(headerBrowser.disposed,1);assert.equal(headerServer.stops,1)
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.34 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.10.35 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Success is ONLY the unified provider/email account row: no duplicate progress text or new exit logic.
   handler=(u,o)=>u.startsWith('https://api.anthropic.com/')||u.startsWith('https://platform.claude.com/')?claudeHandler(u,o):combinedHandler(u,o)
   storage.delete(cooldownKey)
@@ -2332,7 +2332,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.34');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.10.35');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2819,7 +2819,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
       assert.deepEqual(kids.map(c=>c.type),[expectButton?'Button':'Text','Spacer','Picker'],label)
       if(expectButton)assert.equal(kids[0].props.title,'添加账号');else assert.ok(typeof kids[0].props.children==='string'&&kids[0].props.children.length>0,label+' placeholder text')}
     for(const provider of ['codex','claude','deepseek']){states.length=0;render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged(provider);check(provider+' idle',true)}
-    states.length=0;await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();check('codex device in progress',false)
+    states.length=0;await render().find(n=>n?.type==='Button'&&n.props.title==='验证码登录').props.action();check('codex device in progress',false)
     render().find(n=>n?.type==='Button'&&n.props.title==='取消登录').props.action();check('codex after cancel',true)
     await render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('claude');check('claude idle',true)
     await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();if(render().some(n=>n?.type==='Button'&&n.props.title==='取消登录')){check('claude in progress',false);render().find(n=>n?.type==='Button'&&n.props.title==='取消登录').props.action()}
@@ -2852,6 +2852,66 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     for(const muted of [false,true]){const n=NewIcon({provider:'deepseek',size:13,muted}),o=OldIcon({provider:'deepseek',size:13,muted});assert.equal(n.props.code.includes('#4D6BFE'),true);assert.equal(n.props.code.includes('#3c3c43'),false);assert.equal(n.props.code,o.props.code.replace('#3c3c43','#4D6BFE'),'only the fill colour differs');assert.deepEqual(n.props.frame,o.props.frame)}
     assert.equal(api.DEEPSEEK_SVG.includes('fill="#4D6BFE"'),true);assert.equal(expand(AccountLine({index:0,provider:'deepseek',name:'X'})).find(n=>n?.type==='SVG').props.code,api.DEEPSEEK_SVG,'settings list uses the same blue icon')
     console.log('PASS: settings account line = number + shared brand SVG(17pt resizable) + name for codex(OpenAI light/dark)/claude/deepseek in official and Parrot/Sub2API lists; unknown provider falls back to text; widget ProviderIcon JSON output identical to pre-change for all providers x muted')
+  }
+  // Official Codex browser PKCE: only documented global APIs, never real sockets/network.
+  {
+    const saved={Crypto:context.Crypto,HttpServer:context.HttpServer,WebViewController:context.WebViewController,setTimeout:context.setTimeout,clearTimeout:context.clearTimeout,HttpResponse:context.HttpResponse,HttpResponseBody:context.HttpResponseBody,handler}
+    const savedKC=[...kc],savedStorage=[...storage];kc.delete('ai_usage_official_oauth_v1');kc.delete('ai_usage_claude_oauth_v1');kc.delete('ai_usage_deepseek_credentials_v1');let timers=new Map(),timerID=1,servers=[],views=[],bindMode='ok',callbackCount=0,finishPromise
+    context.Crypto={generateSymmetricKey:bits=>binary(nodeCrypto.randomBytes(bits/8)),sha256:data=>binary(nodeCrypto.createHash('sha256').update(data.bytes).digest())}
+    context.setTimeout=(fn,ms)=>{const id=timerID++;timers.set(id,{fn,ms});return id};context.clearTimeout=id=>timers.delete(id)
+    context.HttpResponseBody={html:html=>html};context.HttpResponse={ok:body=>({statusCode:200,body})}
+    context.HttpServer=class{constructor(){this.port=null;this.stops=0;this.handlers={};servers.push(this)}registerHandler(p,h){this.handlers[p]=h}start(o){assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(o.forceIPv4,true);assert.ok([1455,1457].includes(o.port));this.options=o;this.port=bindMode==='wrong'?7777:o.port;return bindMode==='fail'||bindMode==='fallback'&&o.port===1455?'in use':null}stop(){this.stops++;this.port=null}}
+    let closeView,holdView=false
+    context.WebViewController=class{constructor(o){assert.deepEqual({...o},{ephemeral:true});this.disposed=0;views.push(this)}loadURL(url){this.url=url;return Promise.resolve(true)}present(){return holdView?new Promise(r=>closeView=r):Promise.resolve()}dispose(){this.disposed++}}
+    const req=(d,extra=[])=>({method:'GET',queryParams:[{key:'state',value:d.state},{key:'code',value:'SYNTHETIC-CODE'},...extra]})
+    const callback=d=>servers.find(s=>s.port===Number(d.redirect.split(':')[2].split('/')[0])).handlers['/auth/callback']
+    const secretFree=(response,secrets)=>{assert.equal(response.statusCode,200);assert.equal(response.then,undefined);for(const v of secrets)if(v)assert.ok(!response.body.includes(v));assert.ok(!/code=|state=|token=/.test(response.body))}
+    const tokenBody={access_token:namedToken({email:'browser@codex.test',name:'Browser Name'},'browser-account'),id_token:namedToken({email:'browser@codex.test',name:'Browser Name'},'browser-account'),refresh_token:'SYNTHETIC-BROWSER-REFRESH'}
+    let posts=0,lastForm,releaseExchange=null,exchangeMode='ok'
+    handler=async(u,o)=>{if(u.endsWith('/oauth/token')){posts++;lastForm=new URLSearchParams(o.body);assert.equal(new Headers(o.headers).get('content-type'),'application/x-www-form-urlencoded');assert.equal(new Headers(o.headers).get('user-agent'),null,'same as existing Codex exchange, not Claude spoofed headers');if(exchangeMode==='hold')await new Promise(r=>releaseExchange=r);if(exchangeMode==='fail')return resp(503);if(exchangeMode==='network')throw Error('synthetic indeterminate transport');return resp(200,tokenBody)}if(u.endsWith('/usercode'))return resp(200,{device_auth_id:'browser-fallback',user_code:'MOCK-FALLBACK',interval:5});if(u.endsWith('/usage'))return resp(200,{rate_limit:usage.rate_limit});return resp(404)}
+    for(const mode of ['ok','fallback']){bindMode=mode;let d=api.beginCodexBrowserLogin(()=>{},()=>{});const u=new URL(d.url);assert.equal(u.origin+u.pathname,'https://auth.openai.com/oauth/authorize');assert.equal(u.searchParams.get('client_id'),'app_EMoamEEZ73f0CkXaXp7hrann');assert.equal(u.searchParams.get('response_type'),'code');assert.equal(u.searchParams.get('scope'),'openid profile email offline_access api.connectors.read api.connectors.invoke');assert.equal(u.searchParams.get('state'),d.state);assert.equal(u.searchParams.get('code_challenge'),nodeCrypto.createHash('sha256').update(d.verifier).digest('base64url'));assert.equal(u.searchParams.get('code_challenge_method'),'S256');assert.equal(d.redirect,`http://127.0.0.1:${mode==='ok'?1455:1457}/auth/callback`);api.cancelCodexBrowserLogin(d)}
+    for(const mode of ['fail','wrong']){bindMode=mode;assert.throws(()=>api.beginCodexBrowserLogin(()=>{},()=>{}),/1455.*1457/);assert.ok(servers.slice(-2).every(s=>s.stops===1))}bindMode='ok'
+    const nativeServer=context.HttpServer;delete context.HttpServer;assert.throws(()=>api.beginCodexBrowserLogin(()=>{},()=>{}),/回调能力/);context.HttpServer=nativeServer
+    // Invalid queries never schedule an exchange and never leak secrets.
+    let d=api.beginCodexBrowserLogin(()=>{callbackCount++},()=>{}),cb=callback(d),oldState=d.state
+    for(const query of [[{key:'state',value:d.state}],[{key:'code',value:'SECRET'}],[{key:'state',value:'WRONG'},{key:'code',value:'SECRET'}],[...req(d).queryParams,{key:'state',value:d.state}],[...req(d).queryParams,{key:'code',value:'SECRET'}]])secretFree(cb({method:'GET',queryParams:query}),[d.state,d.verifier,'SECRET']);await Promise.resolve();assert.equal(callbackCount,0)
+    api.cancelCodexBrowserLogin(d);secretFree(cb({method:'GET',queryParams:[{key:'state',value:oldState},{key:'code',value:'SECRET'}]}),[oldState,'SECRET']);assert.equal(callbackCount,0)
+    d=api.beginCodexBrowserLogin(()=>{callbackCount++},()=>{});cb=callback(d);d.expiresAt=now;secretFree(cb(req(d)),['SYNTHETIC-CODE']);assert.equal(d.cancelled,true)
+    d=api.beginCodexBrowserLogin(()=>{callbackCount++},()=>{});cb=callback(d);secretFree(cb({method:'GET',queryParams:[{key:'state',value:d.state},{key:'error',value:'SECRET-ERROR'}]}),[d.state,'SECRET-ERROR']);assert.equal(d.cancelled,true)
+    // Shared identity save, stable ID/alias/order, and exactly one code exchange.
+    d=api.beginCodexBrowserLogin(()=>{finishPromise=api.finishCodexBrowserLogin(d,()=>true)},()=>{});cb=callback(d);const redirect=d.redirect,verifier=d.verifier,state=d.state;secretFree(cb(req(d)),[state,verifier,'SYNTHETIC-CODE']);cb(req(d));await Promise.resolve();await finishPromise
+    assert.equal(posts,1,'duplicate callback never exchanges twice');assert.equal(lastForm.get('redirect_uri'),redirect);assert.equal(lastForm.get('code_verifier'),verifier);assert.equal(lastForm.get('code'),'SYNTHETIC-CODE');assert.equal(lastForm.get('client_id'),'app_EMoamEEZ73f0CkXaXp7hrann');assert.equal(lastForm.get('grant_type'),'authorization_code');assert.equal(d.cancelled,true);assert.ok(servers.at(-1).stops===1)
+    const account=api.officialAccounts().find(a=>a.email==='browser@codex.test');assert.ok(account);api.saveWidgetName(account.id,'Browser Alias','official');api.saveAccountOrder([account.id],'official');const prior=posts
+    d=api.beginCodexBrowserLogin(()=>{finishPromise=api.finishCodexBrowserLogin(d,()=>true)},()=>{});callback(d)(req(d));await Promise.resolve();await finishPromise;assert.equal(posts,prior+1);assert.equal(api.officialAccounts().filter(a=>a.email==='browser@codex.test').length,1);assert.equal(api.getWidgetName(account.id,'official'),'Browser Alias');assert.equal(storage.get('ai_usage_official_order_v1')[0],account.id)
+    // Unknown network outcome is terminal, not automatically retried.
+    exchangeMode='fail';d=api.beginCodexBrowserLogin(()=>{},()=>{});d.code='FAIL';await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true),/503/);const failedPosts=posts;await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true));assert.equal(posts,failedPosts);exchangeMode='network';d=api.beginCodexBrowserLogin(()=>{},()=>{});d.code='UNKNOWN';await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true),/网络/);const unknownPosts=posts;await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true));assert.equal(posts,unknownPosts);assert.equal(d.cancelled,true);exchangeMode='ok'
+    // Real App: default prepares locally, close-before-callback keeps attempt retryable.
+    api.saveSource('official');states.length=0;const n=calls.length,ns=servers.length
+    await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.equal(calls.length,n);assert.equal(servers.length,ns+1);assert.ok(!render().some(x=>x?.type==='Text'&&x.props.contextMenu));assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='验证码登录'))
+    await render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();assert.equal(views.at(-1).disposed,1);assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='点击登录'));assert.equal(calls.length,n)
+    // Browser closes while exchange is in flight: busy remains locked until completion, then saved/refreshed.
+    holdView=true;exchangeMode='hold';const open=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();const server=servers.at(-1),u=new URL(views.at(-1).url);server.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:u.searchParams.get('state')},{key:'code',value:'UI-CODE'}]});for(let i=0;i<30&&!releaseExchange;i++)await Promise.resolve();assert.ok(releaseExchange);closeView();await open;assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.disabled);releaseExchange();for(let i=0;i<100&&render().some(x=>x.type==='Button'&&x.props.title==='取消登录');i++)await Promise.resolve();assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));assert.equal(server.stops,1);assert.equal(views.at(-1).disposed,1);holdView=false;exchangeMode='ok'
+    // In-flight late tokens cannot save after cancel/provider/source/dismiss controls.
+    for(const mode of ['cancel','provider','source','dismiss']){states.length=0;api.saveSource('official');await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();const srv=servers.at(-1);const opened=render().find(x=>x.type==='Button'&&x.props.title==='点击登录');holdView=true;exchangeMode='hold';releaseExchange=null;const p=opened.props.action();await Promise.resolve();const url=new URL(views.at(-1).url);srv.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:url.searchParams.get('state')},{key:'code',value:'LATE-CODE'}]});for(let i=0;i<30&&!releaseExchange;i++)await Promise.resolve();assert.ok(releaseExchange)
+      if(mode==='cancel')render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action();else if(mode==='provider')render().find(x=>x.type==='Picker'&&x.props.title==='').props.onChanged('deepseek');else if(mode==='source')await render().find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.onChanged('parrot');else render().find(x=>x.type==='Form').props.toolbar.cancellationAction.props.action()
+      const before=kc.get('ai_usage_official_oauth_v1');releaseExchange();await p;for(let i=0;i<35;i++)await Promise.resolve();assert.equal(kc.get('ai_usage_official_oauth_v1'),before);assert.equal(srv.stops,1);assert.equal(views.at(-1).disposed,1);holdView=false;exchangeMode='ok'
+    }
+    // Success while the modal is still open releases it automatically (no need to close first).
+    api.saveSource('official');states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();holdView=true;exchangeMode='ok'
+    const successOpen=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();let liveServer=servers.at(-1),liveURL=new URL(views.at(-1).url)
+    liveServer.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:liveURL.searchParams.get('state')},{key:'code',value:'OPEN-SUCCESS'}]});await successOpen;assert.ok(api.officialCached().accounts.some(a=>a.name==='browser@codex.test'),'browser callback success refreshes quota cache');assert.equal(liveServer.stops,1);assert.equal(views.at(-1).disposed,1)
+    for(let i=0;i<40;i++)await Promise.resolve();assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));holdView=false
+    // Local expiry closes both listener and an open view and unlocks retry/fallback.
+    states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();holdView=true
+    const expiryOpen=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();liveServer=servers.at(-1)
+    const expiryTimer=[...timers.values()].find(t=>t.ms===15*60000);assert.ok(expiryTimer);expiryTimer.fn();await expiryOpen;assert.equal(liveServer.stops,1);assert.equal(views.at(-1).disposed,1);assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children.includes('本机登录等待超时')));holdView=false
+    const browserAPI=context.WebViewController;delete context.WebViewController;states.length=0;const beforeMissing=servers.length;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.equal(servers.length,beforeMissing);assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children.includes('WebViewController')));context.WebViewController=browserAPI
+    // Capability/port failures remain visible, then explicit fallback abandons listener and starts device flow.
+    for(const mode of ['missing','fail','wrong']){states.length=0;api.saveSource('official');bindMode=mode==='missing'?'ok':mode;if(mode==='missing')delete context.HttpServer;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.ok(render().some(x=>x.type==='Text'&&x.props.foregroundStyle==='systemRed'&&x.props.children.includes('验证码登录')));context.HttpServer=nativeServer;await render().find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action();assert.ok(render().some(x=>x.type==='Text'&&x.props.contextMenu&&x.props.children==='MOCK-FALLBACK'));render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()}
+    bindMode='ok';states.length=0;await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();const fallbackServer=servers.at(-1);await render().find(x=>x.type==='Button'&&x.props.title==='验证码登录').props.action();assert.equal(fallbackServer.stops,1);assert.ok(render().some(x=>x.type==='Text'&&x.props.contextMenu));render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+    assert.equal(timers.size,0);assert.ok(servers.every(s=>s.stops===1))
+    for(const[k,v]of Object.entries(saved))if(k!=='handler')context[k]=v;handler=saved.handler;kc.clear();for(const[k,v]of savedKC)kc.set(k,v);storage.clear();for(const[k,v]of savedStorage)storage.set(k,v);states.length=0
+    console.log('PASS: Codex official browser OAuth PKCE/exact 1455+1457 redirect; missing API/bind/wrong-port fallback; secret-free invalid/duplicate/expired/cancel/error callbacks; exact form single exchange/shared identity alias order; default local preparation; before/inflight close; cancel/provider/source/dismiss late response isolation; listener+ephemeral disposal; visible device fallback')
   }
   // Saved key display and actual editing are separate: never bind a saved full key or submit a mask.
   {
@@ -2909,6 +2969,8 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
   // Execute the real App run/Navigation.present entry and ALL mount effects (normal UI harness suppresses them).
   {
     const oldKC=[...kc.entries()],oldStore=[...storage.entries()],oldHandler=handler,oldEffect=scripting.useEffect,oldNavigation=scripting.Navigation,oldScript=scripting.Script,oldReload=scripting.Widget.reloadAll
+    const entryServer=context.HttpServer;let entryListenerConstructions=0
+    context.HttpServer=class{constructor(){entryListenerConstructions++;throw Error('entry must not create listener')}}
     kc.clear();storage.clear();let exits=0,reloads=0,mounted=[],effects=[],cleanups=[]
     scripting.Script={exit:()=>exits++};scripting.Widget.reloadAll=async()=>{reloads++}
     scripting.useEffect=(fn,deps)=>effects.push(fn)
@@ -2949,7 +3011,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
         for(const cleanup of cleanups)cleanup()
       }
     }
-    assert.equal(exits,96)
+    assert.equal(exits,96);assert.equal(entryListenerConstructions,0,'first/reopen all sources never starts listener');context.HttpServer=entryServer
     delete modules['index.tsx'];load('index.tsx')
     kc.clear();for(const[k,v]of oldKC)kc.set(k,v);storage.clear();for(const[k,v]of oldStore)storage.set(k,v);handler=oldHandler;scripting.useEffect=oldEffect;scripting.Navigation=oldNavigation;scripting.Script=oldScript;scripting.Widget.reloadAll=oldReload;states.length=0
     console.log('PASS: real runApp/Navigation.present all mount effects; three quota x two stats sources, full/quota-only/stats-only/no-cache first+reopen x native-exports present/missing 96 runs ZERO fetch or renewal/reload, non-blank first render; cached accounts shown, no status section, manual actions available; Storage/Keychain untouched including expired Codex/Claude credentials')

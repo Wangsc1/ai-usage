@@ -4,10 +4,10 @@ import {
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
 import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
-import { beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
+import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, beginDeviceLogin, checkDeviceLogin, cancelDeviceLogin, DeviceLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.34"
+const VERSION = "1.10.35"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -156,11 +156,12 @@ function SettingsView() {
     const timer = setTimeout(() => setCooldownTick(cooldownTick + 1), 1000)
     return () => clearTimeout(timer)
   }, [source, loginProvider, cooldownTick, claudeCooling])
+  const [codexBrowser, setCodexBrowser] = useState<CodexBrowserLogin | null>(null)
   const [dsToken, setDSToken] = useState("")
   const [dsAdding, setDSAdding] = useState(false)
   const [logins, setLogins] = useState(officialAccounts())
-  const [auth] = useState({ device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
-  const stopAuth = () => { setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
+  const [auth] = useState({ codex: null as CodexBrowserLogin | null, device: null as DeviceLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
+  const stopAuth = () => { if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; setCodexBrowser(null); setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; setDevice(null); if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const [statisticsSource, setStatisticsSource] = useState<StatisticsSource>(getStatisticsSource())
   const subCur = getSub2APIConfig()
@@ -177,7 +178,7 @@ function SettingsView() {
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
-  useEffect(() => () => { auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
+  useEffect(() => () => { if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.device) cancelDeviceLogin(auth.device); auth.device = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
     stopAuth()
@@ -194,8 +195,19 @@ function SettingsView() {
       setDSToken(""); setDSAdding(true); return
     }
     if (loginProvider === "claude") { startClaude(); return }
-    if (auth.running) return
-    setBrowserError("")
+    if (auth.running || busy) return
+    stopAuth(); setBrowserError("")
+    if (typeof WebViewController !== "function") { setBrowserError("Codex浏览器登录缺少WebViewController，请使用验证码登录"); return }
+    try {
+      const d = beginCodexBrowserLogin(() => { if (auth.codex === d) void completeCodex(d) }, () => {
+        if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex本次本机登录等待超时，请重新登录或使用验证码登录") }
+      }, () => { if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex官方授权未完成，请重新登录或使用验证码登录") } })
+      auth.codex = d; setCodexBrowser(d)
+    } catch (e: any) { setBrowserError(e.message) }
+  }
+  async function deviceFallback() {
+    if (busy || auth.running) return
+    stopAuth(); setBrowserError("")
     auth.running = true
     const epoch = auth.epoch
     setBusy(true)
@@ -208,6 +220,28 @@ function SettingsView() {
     finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
   }
 
+  async function completeCodex(d: CodexBrowserLogin) {
+    const epoch = auth.epoch
+    const valid = () => auth.alive && auth.codex === d && auth.epoch === epoch && getSource() === "official"
+    if (!valid() || d.consumed) return
+    auth.running = true; setBusy(true)
+    try {
+      await finishCodexBrowserLogin(d, valid)
+      if (!valid()) return
+      auth.codex = null; setCodexBrowser(null); setLogins(officialAccounts()); await test()
+    } catch (e: any) { if (valid()) { auth.codex = null; setCodexBrowser(null); setBrowserError(e.message || "Codex浏览器登录失败，请重新登录或使用验证码登录") } }
+    finally { if (auth.alive && epoch === auth.epoch) { auth.releaseBrowser?.(); auth.releaseBrowser = null; auth.running = false; setBusy(false) } }
+  }
+  async function openCodex() {
+    const d = auth.codex
+    if (!d || auth.running) return
+    const epoch = auth.epoch
+    const valid = () => auth.alive && auth.codex === d && auth.epoch === epoch
+    auth.running = true; setBusy(true); setBrowserError("")
+    try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url) }
+    catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Codex授权页") + "，可使用验证码登录") }
+    finally { if (auth.alive && epoch === auth.epoch && !d.consumed) { auth.running = false; setBusy(false) } }
+  }
   function startClaude(manual = false) {
     if (auth.running) return
     if (claudeCooldownUntil()) return
@@ -317,7 +351,7 @@ function SettingsView() {
 
   // Same remove-then-insert contract as the official editable_list onMove example; persisted by stable ID.
   function moveLogins(indices: number[], newOffset: number) {
-    if (busy || device || claude || getSource() !== "official") return
+    if (busy || device || claude || codexBrowser || getSource() !== "official") return
     const current = sortAccounts(logins, "official")
     if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
     const moving = indices.map(i => current[i])
@@ -342,7 +376,7 @@ function SettingsView() {
   }
 
   const loginRow = (a: ReturnType<typeof officialAccounts>[number], i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
-          <Button title="删除" role="destructive" disabled={busy || !!device || !!claude} action={async () => {
+          <Button title="删除" role="destructive" disabled={busy || !!device || !!claude || !!codexBrowser} action={async () => {
           try {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
@@ -398,7 +432,7 @@ function SettingsView() {
 
       {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
-          {!dsAdding && !device && !claude
+          {!dsAdding && !device && !claude && !codexBrowser
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
             : <Text foregroundStyle="secondaryLabel">{loginProvider === "deepseek" ? "API Key" : "授权进行中"}</Text>}
           <Spacer />
@@ -416,6 +450,13 @@ function SettingsView() {
         </> : null}
         {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
         {loginProvider === "claude" && claudeProgress && claudeProgress !== "等待Claude回调（尚未收到）" ? <Text>{claudeProgress}</Text> : null}
+        {codexBrowser ? <>
+          <Text font={12} foregroundStyle="secondaryLabel">浏览器登录已准备，无需输入验证码。本机等待15分钟；关闭网页不代表成功，未收到回调可重开。</Text>
+          <Button title="点击登录" action={openCodex} disabled={busy} />
+          {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
+          <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
+        </> : null}
+        {source === "official" && loginProvider === "codex" && !device ? <Button title="验证码登录" action={deviceFallback} disabled={busy} /> : null}
         {claude ? <>
           {claude.fallback ? <Text font={12} foregroundStyle="secondaryLabel">{claude.fallback}</Text> : null}
           <Button title="点击登录" action={() => openClaude()} disabled={busy} />
@@ -442,7 +483,7 @@ function SettingsView() {
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
           <Button title={"取消登录"} action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
-        {!device && !claude && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
+        {!device && !claude && !codexBrowser && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
         {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortAccounts(logins, "official")[i], i)} />
           : sortAccounts(logins, "official").map(loginRow)}
         {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
