@@ -5,10 +5,10 @@ import {
 } from "scripting"
 import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
-import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
+import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.5"
+const VERSION = "1.11.6"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -102,13 +102,13 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
   if (account.provider === "workbuddy") return <>
           <Section header={<Text>WorkBuddy个人积分</Text>}>
             <Text>{account.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(account.credits.remaining)}` : "积分未可靠提供"}</Text>
-            <Text>{`已用 ${fmtWorkBuddyNumber(account.credits?.used)} / 总量 ${fmtWorkBuddyNumber(account.credits?.capacity)}`}</Text>
+            <Text>{fmtWorkBuddyUsed(account.credits?.used, account.credits?.capacity)}</Text>
             <Text>{fmtWorkBuddyCheckin(account.credits?.checkin)}</Text>
             <Text>{`真实采集时间 ${iso(account.credits?.fetchedAt)}`}</Text>
             {account.credits?.error || account.readError ? <Text>{account.credits?.error || account.readError}</Text> : null}
           </Section>
           {(account.credits?.packages ?? []).map((p, i) => <Section key={String(i)} header={<Text>{p.name}</Text>}>
-            <Text>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · 已用 ${fmtWorkBuddyNumber(p.used)} / 总量 ${fmtWorkBuddyNumber(p.capacity)}`}</Text>
+            <Text>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · ${fmtWorkBuddyUsed(p.used, p.capacity)}`}</Text>
             <Text>{`资源到期 ${p.expiresAt ?? "未提供"}`}</Text>
             <Text>{`周期结束 ${p.cycleEnd ?? "未提供"}（不等同资源到期）`}</Text>
           </Section>)}

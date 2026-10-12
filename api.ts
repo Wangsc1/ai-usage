@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.11.5"
+export const VERSION = "1.11.6"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -1472,6 +1472,13 @@ export type WorkBuddyCredits = {
 }
 export type WorkBuddyLogin = WorkBuddyCN.Login
 export const fmtWorkBuddyNumber = (n: number | null | undefined): string => typeof n === "number" && Number.isFinite(n) ? String(n) : "未提供"
+export function fmtWorkBuddyUsed(used: number | null | undefined, capacity: number | null | undefined): string {
+  const valid = (n: number | null | undefined): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0
+  const amount = (n: number | null | undefined) => valid(n) ? n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "未提供"
+  const pct = valid(used) && valid(capacity) && capacity > 0 ? (used / capacity * 100).toFixed(2) + "%" : "未提供"
+  return `已用 ${pct}（${amount(used)} / ${amount(capacity)}）`
+}
+
 namespace WorkBuddyCN {
 const KEY = "ai_usage_workbuddy_cn_cli_v1"
 const AUTH = "https://copilot.tencent.com"

@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -173,7 +173,7 @@ function CreditsRows({ acc, font = 8, compact = false }: { acc: Account; font?: 
   const status = c?.error?.includes("重新登录") ? "登录失效/请重新登录" : c?.error ? c.reliable ? "读取失败/此前快照" : "读取失败/积分未知" : c?.reliable ? "" : c?.status === "partial" ? "积分明细不完整" : "积分未可靠提供"
   return <VStack alignment="leading" spacing={compact ? 1 : 3}>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`剩余积分 ${remaining}`}</Text>
-    <Text font={font} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{`已用 ${fmtWorkBuddyNumber(c?.used)} / 总量 ${fmtWorkBuddyNumber(c?.capacity)}`}</Text>
+    <Text font={font} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{fmtWorkBuddyUsed(c?.used, c?.capacity)}</Text>
     <Text font={font - 1} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
     {status ? <Text font={font - 1} foregroundStyle={c?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.6}>{status}</Text> : null}
     <Text font={font - 1} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.6}>{fmtWorkBuddyCheckin(c?.checkin)}</Text>
