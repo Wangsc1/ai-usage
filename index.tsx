@@ -8,7 +8,7 @@ import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogi
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.9"
+const VERSION = "1.11.10"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -140,12 +140,19 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
     </>
   }
   const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${v}%` : "未提供"
+  const cnTime = (v: string | null | undefined) => {
+    if (!v) return "未提供"
+    const at = Date.parse(v)
+    if (!Number.isFinite(at)) return v
+    const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+  }
   return <>
     {account.readError ? <Section><Text>{account.readError}</Text></Section> : null}
     {([["5 h", account.fiveHour], ["7 d", account.sevenDay]] as const).map(([label, w]) => <Section key={label} header={<Text>{label}</Text>}>
       <Text>{`剩余额度 ${percent(w?.remainingPercent)}`}</Text>
       <Text>{`已用额度 ${percent(w?.usedPercent)}`}</Text>
-      <Text>{`重置时间 ${w?.resetsAt || "未提供"}`}</Text>
+      <Text>{`重置时间 ${cnTime(w?.resetsAt)}`}</Text>
     </Section>)}
     <Section header={<Text>重置卡</Text>}>
       <Text>{typeof account.resetCredits === "number" && Number.isFinite(account.resetCredits) && account.resetCredits >= 0 ? `可用重置卡 ${account.resetCredits}` : "可用重置卡 未提供"}</Text>
