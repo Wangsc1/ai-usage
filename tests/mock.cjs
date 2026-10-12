@@ -322,8 +322,8 @@ async function main() {
   const double=expand(Root({data:singleData,stale:false,error:null}))
   assert.ok(!double.some(x=>x.type==='GeometryReader'&&x.props.frame?.height!=null));assert.ok(!double.some(x=>x==='今日'||x==='本月'))
   assert.equal(double.filter(x=>x==='Codex').length,2)
-  // Small double (baseline), Small single and Medium: identical 8pt label/time, fixed label width, no per-text scaling.
-  function quotaHeaders(tree){return tree.filter(x=>x.type==='HStack'&&x.props.alignment==='bottom'&&x.props.spacing===2&&x.props.children?.[1]?.props?.monospacedDigit)}
+  // Small double (baseline), Small single and Medium: identical 8pt label/time, literal single-space separator, no per-text scaling.
+  function quotaHeaders(tree){return tree.filter(x=>x.type==='HStack'&&x.props.alignment==='bottom'&&x.props.spacing===0&&x.props.children?.[1]?.props?.monospacedDigit)}
   const headerStyle=h=>{const [label,time]=h.props.children;return JSON.stringify([label.props.font,label.props.frame,label.props.foregroundStyle,label.props.lineLimit,label.props.minScaleFactor,time.props.font,time.props.monospacedDigit,time.props.foregroundStyle,time.props.lineLimit,time.props.minScaleFactor,time.props.frame])}
   let baselineStyle=null
   for(const days of [5,15,365]){
@@ -336,13 +336,13 @@ async function main() {
       const headers=quotaHeaders(tree);assert.equal(headers.length,count)
       for(const h of headers){
         const [label,time]=h.props.children
-        assert.equal(label.props.monospaced,true);assert.equal(label.props.font,8);assert.equal(time.props.font,8);assert.equal(label.props.frame.width,8*2.1)
+        assert.equal(label.props.monospaced,true);assert.equal(label.props.font,8);assert.equal(time.props.font,8);assert.equal(label.props.frame,undefined);assert.equal(time.props.monospaced,true)
         assert.equal(label.props.minScaleFactor,undefined);assert.equal(time.props.minScaleFactor,undefined)
         assert.equal(time.props.monospacedDigit,true)
         baselineStyle??=headerStyle(h);assert.equal(headerStyle(h),baselineStyle,family+parameter)
         const text=Array.from(time.props.children).join('')
-        if(label.props.children==='7d')assert.equal(text,`· ${days}d 15:33`)
-        else assert.equal(text,'· '+api.fmtReset(longData.accounts[0].fiveHour.resetsAt))
+        if(label.props.children==='7d')assert.equal(text,` · ${days}d 15:33`)
+        else assert.equal(text,' · '+api.fmtReset(longData.accounts[0].fiveHour.resetsAt))
       }
     }
   }

@@ -342,15 +342,14 @@ type Scale = { title: number; label: number; lcd: number; bar: number; segs: num
 const MEDIUM_SCALE: Scale = { title: 12, label: 9, lcd: 11, bar: 4, segs: 10, gap: 2 }
 
 // "5h/7d" label and countdown use the Small two-account baseline in Small and Medium:
-// 8pt, fixed label width 8*2.1, monospaced digits, NO per-text scaling (the time never shrinks alone).
+// 8pt monospaced text, zero layout gap; the separator supplies exactly one space on either side.
 const QUOTA_TEXT_FONT = 8
 function QuadWindow({ label, w, fmt, s, muted = false, fixedLcd = false, rowToBarGap = s.gap }: Win & { s: Scale; fixedLcd?: boolean; rowToBarGap?: number }) {
   const lcd = <Lcd value={w.remainingPercent} height={s.lcd} muted={muted} />
   return <VStack alignment="leading" spacing={rowToBarGap}>
-    <HStack alignment="bottom" spacing={2}>
-      {/* 标签固定宽度（约两个汉字），“5h”与“7d”对齐，后面的倒计时也对齐 */}
-      <Text font={QUOTA_TEXT_FONT} monospaced foregroundStyle={SUB} lineLimit={1} frame={{ width: QUOTA_TEXT_FONT * 2.1, alignment: "leading" as any }}>{label}</Text>
-      <Text font={QUOTA_TEXT_FONT} monospaced monospacedDigit foregroundStyle={SUB} lineLimit={1}>{`· ${fmt(w.resetsAt)}`}</Text>
+    <HStack alignment="bottom" spacing={0}>
+      <Text font={QUOTA_TEXT_FONT} monospaced foregroundStyle={SUB} lineLimit={1}>{label}</Text>
+      <Text font={QUOTA_TEXT_FONT} monospaced monospacedDigit foregroundStyle={SUB} lineLimit={1}>{` · ${fmt(w.resetsAt)}`}</Text>
       <Spacer />
       {fixedLcd ? <HStack spacing={0} fixedSize={{ horizontal: true, vertical: false }}>{lcd}</HStack> : lcd}
     </HStack>
@@ -448,10 +447,9 @@ function LargeQuota({ label, w, fmt, muted = false }: Win) {
   return <VStack alignment="leading" spacing={MEDIUM_SCALE.gap}
     modifiers={modifiers().fixedSize({ horizontal: false, vertical: true }).frame({ minHeight: 19, maxWidth: "infinity" })}>
     <HStack alignment="bottom" spacing={5} frame={{ maxWidth: "infinity" }}>
-      <HStack spacing={1}>
-        <Text font={9} monospaced foregroundStyle={SUB} frame={{ width: 20, alignment: "leading" as any }}>{label}</Text>
-        <Text font={9} monospaced monospacedDigit foregroundStyle={SUB} lineLimit={1}
-          frame={{ width: 65, alignment: "leading" as any }}>{`· ${fmt(w.resetsAt)}`}</Text>
+      <HStack spacing={0}>
+        <Text font={9} monospaced foregroundStyle={SUB} lineLimit={1}>{label}</Text>
+        <Text font={9} monospaced monospacedDigit foregroundStyle={SUB} lineLimit={1}>{` · ${fmt(w.resetsAt)}`}</Text>
       </HStack>
       <Spacer />
       <Lcd value={w.remainingPercent} height={12} muted={muted} />
