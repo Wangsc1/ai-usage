@@ -136,7 +136,7 @@ async function main(){
   states=[];effects=[];hook=0;const home=app.SettingsView();const mainForm=home.props.children;assert.equal(mainForm.type,'Form');const sections=mainForm.props.children.flat().filter(x=>x?.type==='Section');assert.ok(!sections.some(x=>walk(x.props.header).includes('WorkBuddy个人积分')),'no separate homepage credit group');assert.equal(calls.length,before);
   if(source!=='official'){const route=walk(home).find(x=>x?.type==='NavigationLink'&&x.props.destination?.type?.name==='WidgetNamePage'&&x.props.destination.props.account.id===account.id);assert.ok(route,'account row routes to shared detail');assert.equal(route.props.destination.props.source,source);assert.equal(calls.length,before);}
  }
- console.log('PASS 1.11.4 unified detail four providers x three sources x known/missing/failed/old; name section first; real cache; save/blank/source isolation/reload/dismiss; zero network; no duplicate homepage group')
+ console.log('PASS 1.11.5 unified detail four providers x three sources x known/missing/failed/old; name section first; real cache; save/blank/source isolation/reload/dismiss; zero network; no duplicate homepage group')
 console.log('PASS WorkBuddy offline suite complete; no real service/credentials and no side-effect endpoint')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
