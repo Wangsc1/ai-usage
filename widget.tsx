@@ -177,7 +177,8 @@ function CreditsRows({ acc, font = 8, compact = false, fullWidth = false, alignE
   return <VStack alignment="leading" spacing={compact ? 3 : 6}
     frame={fullWidth ? { maxWidth: "infinity", alignment: "leading" as any } : undefined}>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`账户: 个人 · 中国区 | ${checkin}`}</Text>
-    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`积分：已用 ${usedPct}（${capacity}/${remaining}）`}</Text>
+    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}
+      offset={alignExpiryBottom ? { x: 0, y: 1 } : undefined}>{`积分：已用 ${usedPct}（${capacity}/${remaining}）`}</Text>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}
       offset={alignExpiryBottom ? { x: 0, y: 2 } : undefined}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
     {status ? <Text font={font - 1} foregroundStyle={c?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.6}>{status}</Text> : null}
