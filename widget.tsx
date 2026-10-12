@@ -555,22 +555,17 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />
   }
-  // Credits add a third text row: reserve a real footer, never overlay it on growing content.
-  if (largeCredits && data) return <VStack alignment="leading" spacing={0}
-    padding={{ horizontal: 14, vertical: 12 }}
-    frame={{ maxWidth: "infinity", maxHeight: "infinity" }} widgetBackground={BG}>
-    <VStack alignment="leading" spacing={0}
-      frame={{ height: Math.max(1, Widget.displaySize.height - 24 - 18), maxWidth: "infinity", alignment: "topLeading" as any }}>{body}</VStack>
-    <HStack spacing={0} frame={{ height: 18, maxWidth: "infinity", alignment: "trailing" as any }}>
-      <Spacer /><RefreshTime data={data} stale={stale} />
-    </HStack>
-  </VStack>
   return <ZStack
     padding={{ horizontal: 14, vertical: 12 }}
     frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
     widgetBackground={BG}
   >
-    <ZStack padding={{ bottom: data ? 14 : 0 }} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>{body}</ZStack>
+    {largeCredits ? <VStack alignment="leading" spacing={0}
+      frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" as any }}>
+      <VStack alignment="leading" spacing={0}
+        frame={{ height: Math.max(1, Widget.displaySize.height - 24 - 18), maxWidth: "infinity", alignment: "topLeading" as any }}>{body}</VStack>
+      <Spacer />
+    </VStack> : <ZStack padding={{ bottom: data ? 14 : 0 }} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>{body}</ZStack>}
     {data ? <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
       <Spacer />
       <HStack offset={{ x: 3, y: 6 }}><Spacer /><RefreshTime data={data} stale={stale} /></HStack>
