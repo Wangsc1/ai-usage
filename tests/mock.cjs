@@ -314,7 +314,7 @@ async function main() {
   assert.deepEqual(Array.from(smallRows[0].props.children,x=>x.props.children[1].props.children),['70','17.6%','370','$0.1'])
   assert.equal(smallRows[1].props.children[3].props.children[1].props.children,'$1234.6')
   const singleTexts=single.filter(x=>typeof x==='string')
-  assert.equal(singleTexts.filter(x=>x==='Codex').length,1);assert.ok(singleTexts.includes('5 h'));assert.ok(singleTexts.includes('7 d'))
+  assert.equal(singleTexts.filter(x=>x==='Codex').length,1);assert.ok(singleTexts.includes('5h'));assert.ok(singleTexts.includes('7d'))
   assert.ok(single.some(x=>x.type==='Image'&&x.props.systemName==='arrow.triangle.2.circlepath'))
   const missing=expand(Root({data:{...singleData,today:null,month:null},stale:false,error:null}))
   assert.ok(missing.some(x=>x==='今日/本月统计未提供'));assert.ok(!missing.some(x=>x.type==='GeometryReader'&&x.props.frame?.height!=null));assert.ok(!missing.some(x=>x==='$0.0'))
@@ -341,7 +341,7 @@ async function main() {
         assert.equal(time.props.monospacedDigit,true)
         baselineStyle??=headerStyle(h);assert.equal(headerStyle(h),baselineStyle,family+parameter)
         const text=Array.from(time.props.children).join('')
-        if(label.props.children==='7 d')assert.equal(text,`· ${days}d 15:33`)
+        if(label.props.children==='7d')assert.equal(text,`· ${days}d 15:33`)
         else assert.equal(text,'· '+api.fmtReset(longData.accounts[0].fiveHour.resetsAt))
       }
     }
@@ -1915,15 +1915,15 @@ async function main() {
           const titles=titlesOf(tree);assert.equal(titles.length,1)
           assert.equal(titles[0].props.children[0].props.provider,expected.provider)
           const shown=api.getWidgetName(expected.id)||expected.name.replace(/@.*$/,'');assert.ok(strings.includes(shown),shown+' '+JSON.stringify(strings))
-          assert.equal(tree.filter(x=>x.type==='SVG'&&x.props.frame?.height===10).length,2) // 5 h + 7 d LCDs
-          assert.ok(strings.includes('5 h'));assert.ok(strings.includes('7 d'))
+          assert.equal(tree.filter(x=>x.type==='SVG'&&x.props.frame?.height===10).length,2) // 5h + 7d LCDs
+          assert.ok(strings.includes('5h'));assert.ok(strings.includes('7d'))
           // Title name/provider text never forced to a narrow fixed width (the old "C..." cause was grid cell width).
           assert.ok(tree.filter(x=>x.type==='Text').every(x=>x.props.frame?.width==null||x.props.frame.width<=8*2.1+1e-9))
         }else if(family==='accessoryCircular'){
           const gauge=tree.find(x=>x.type==='Gauge');assert.ok(gauge);assert.equal(tree.filter(x=>x.type==='Gauge').length,1)
           assert.equal(gauge.props.gaugeStyle,'accessoryCircularCapacity')
           const v=expected.fiveHour.remainingPercent;assert.equal(gauge.props.value,v==null?0:Math.max(0,Math.min(100,v))/100)
-          assert.equal(gauge.props.currentValueLabel.props.children,api.fmtPct(v));assert.equal(gauge.props.label.props.children,'5 h')
+          assert.equal(gauge.props.currentValueLabel.props.children,api.fmtPct(v));assert.equal(gauge.props.label.props.children,'5h')
         }else{
           const texts=tree.filter(x=>x.type==='Text');assert.equal(texts.length,1);assert.equal(texts[0].props.lineLimit,1)
           assert.equal(texts[0].props.children,(expected.provider==='claude'?'Claude':expected.provider==='openai'?'Codex':expected.provider)+' 5h '+api.fmtPct(expected.fiveHour.remainingPercent)+' · 周 '+api.fmtPct(expected.sevenDay.remainingPercent))
@@ -1954,7 +1954,7 @@ async function main() {
     }else console.log('NOTE: PRE_ACCESSORY_WIDGET_PATH unset; home-screen identity comparison skipped')
     scripting.Widget.family='systemLarge';scripting.Widget.parameter='';scripting.Widget.displaySize={width:358,height:376}
   }
-  console.log('PASS: accessoryRectangular/Circular/Inline render exactly the first account after parameter/sort (one title, 5 h/7 d rows; one gauge; one inline line); no grid/divider/stats/background/footer button; empty/no-data/bad-parameter compact; systemSmall/Medium/Large/ExtraLarge trees identical except requested refresh icon/font/hit frame to baseline for all selections')
+  console.log('PASS: accessoryRectangular/Circular/Inline render exactly the first account after parameter/sort (one title, 5h/7d rows; one gauge; one inline line); no grid/divider/stats/background/footer button; empty/no-data/bad-parameter compact; systemSmall/Medium/Large/ExtraLarge trees identical except requested refresh icon/font/hit frame to baseline for all selections')
   // Sub2API admin contracts: all-site stats, calendar dates, pagination, GET-only + x-api-key, no user-key/JWT.
   {
     const fixture=JSON.parse(fs.readFileSync(path.join(root,'tests/fixtures/sub2api-admin.json'),'utf8'))
@@ -2463,7 +2463,7 @@ async function main() {
       }
       const cachedAccount={...a,balance:{...a.balance,stale:true,weekStale:true}}
       assert.equal(expand(Root({data:{...first.data,accounts:[cachedAccount]},stale:false,error:null})).filter(x=>typeof x==='string').join(' '),text,family+' no visible DeepSeek cache marker; flags retained')
-      assert.equal(cachedAccount.balance.stale,true);assert.ok(!text.includes('5 h')&&!text.includes('5h')&&!text.includes('RE:'),family+' no fabricated quota')
+      assert.equal(cachedAccount.balance.stale,true);assert.ok(!text.includes('5h')&&!text.includes('7d')&&!text.includes('RE:'),family+' no fabricated quota')
       assert.ok(!nodes.some(n=>n?.type==='Gauge'),family+' no fabricated percentage gauge')
       expand(Root({data:mixed,stale:false,error:null}))
     }
