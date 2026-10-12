@@ -317,7 +317,7 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   const accounts = data.accounts.slice(0, 2), single = accounts.length === 1
   const account = (acc: Account) => <VStack alignment="leading" spacing={acc.provider === "deepseek" ? 6 : 3}>
     <AccountTitle acc={acc} font={s.title} />
-    {acc.provider === "workbuddy" ? <CreditsRows acc={acc} font={7} compact /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
+    {acc.provider === "workbuddy" ? <CreditsRows acc={acc} font={7} compact alignExpiryBottom={!single} /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
   return <GeometryReader>
     {proxy => {
