@@ -8,7 +8,7 @@ import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogi
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.10"
+const VERSION = "1.11.11"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -103,6 +103,13 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
     const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
     return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
   }
+  const cnTime = (v: string | null | undefined) => {
+    if (!v) return "未提供"
+    const at = Date.parse(v)
+    if (!Number.isFinite(at)) return v
+    const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+  }
   if (account.provider === "workbuddy") return <>
           <Section header={<Text>WorkBuddy个人积分</Text>}>
             <Text>{account.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(account.credits.remaining)}` : "积分未可靠提供"}</Text>
@@ -112,8 +119,8 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
           </Section>
           {(account.credits?.packages ?? []).map((p, i) => <Section key={String(i)} header={<Text>{p.name}</Text>}>
             <Text>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · ${fmtWorkBuddyUsed(p.used, p.capacity)}`}</Text>
-            <Text>{`资源到期 ${p.expiresAt ?? "未提供"}`}</Text>
-            <Text>{`周期结束 ${p.cycleEnd ?? "未提供"}（不等同资源到期）`}</Text>
+            <Text>{`资源到期 ${cnTime(p.expiresAt)}`}</Text>
+            <Text>{`周期结束 ${cnTime(p.cycleEnd)}（不等同资源到期）`}</Text>
           </Section>)}
   </>
   if (account.provider === "deepseek") {
@@ -140,13 +147,6 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
     </>
   }
   const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${v}%` : "未提供"
-  const cnTime = (v: string | null | undefined) => {
-    if (!v) return "未提供"
-    const at = Date.parse(v)
-    if (!Number.isFinite(at)) return v
-    const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
-    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
-  }
   return <>
     {account.readError ? <Section><Text>{account.readError}</Text></Section> : null}
     {([["5 h", account.fiveHour], ["7 d", account.sevenDay]] as const).map(([label, w]) => <Section key={label} header={<Text>{label}</Text>}>
