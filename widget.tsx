@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, WORKBUDDY_SVG, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -130,10 +130,7 @@ function LargeSegBar({ remaining, muted = false }: { remaining: number | null; m
 function ProviderIcon({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
   // SVG paths have explicit fills; changing only the parent's foregroundStyle cannot gray them.
   const graySvg = (path: string) => ({ light: iconSvg(path, SUB.light), dark: iconSvg(path, SUB.dark) })
-  if (provider === "workbuddy") {
-    const gray = (color: string) => WORKBUDDY_SVG.replace(/#(?:01C886|0EC8A9|FFE355)/gi, color).replace(/color\(display-p3[^)]*\)/g, color)
-    return <SVG code={muted ? { light: gray(SUB.light), dark: gray(SUB.dark) } : WORKBUDDY_SVG} resizable frame={{ width: size, height: size }} />
-  }
+  if (provider === "workbuddy") return <Image image={workBuddyBrandImage(muted)} renderingMode="original" resizable frame={{ width: size, height: size }} />
   if (provider === "deepseek") return <SVG code={DEEPSEEK_SVG} resizable frame={{ width: size, height: size }} />
   if (provider === "claude") return <SVG code={muted ? graySvg(CLAUDE_PATH) : CLAUDE_SVG} resizable frame={{ width: size, height: size }} />
   if (provider === "openai") return <SVG code={muted ? graySvg(OPENAI_PATH) : OPENAI_SVG} resizable frame={{ width: size, height: size }} />
@@ -178,7 +175,7 @@ function CreditsRows({ acc, font = 8, compact = false }: { acc: Account; font?: 
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`剩余积分 ${remaining}`}</Text>
     <Text font={font} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{`已用 ${fmtWorkBuddyNumber(c?.used)} / 总量 ${fmtWorkBuddyNumber(c?.capacity)}`}</Text>
     <Text font={font - 1} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
-    <Text font={font - 1} foregroundStyle={c?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.6}>{`${status}${c?.fetchedAt ? `${status ? " · " : ""}采集 ${stamp(new Date(c.fetchedAt).toISOString())}` : " · 采集时间未提供"}`}</Text>
+    {status ? <Text font={font - 1} foregroundStyle={c?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.6}>{status}</Text> : null}
   </VStack>
 }
 

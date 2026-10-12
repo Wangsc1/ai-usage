@@ -1,31 +1,33 @@
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
-  SecureField, SVG, Text, TextField, Widget, VStack, useState, useEffect,
+  SecureField, SVG, Image, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
 import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
-import { WORKBUDDY_SVG, fmtWorkBuddyNumber, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
+import { workBuddyBrandImage, fmtWorkBuddyNumber, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.0"
+const VERSION = "1.11.1"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
 // Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
 const ICON_SIZE = 17
 function providerIconCode(provider: string) {
-  return provider === "workbuddy" ? WORKBUDDY_SVG : provider === "claude" ? CLAUDE_SVG : provider === "deepseek" ? DEEPSEEK_SVG : provider === "codex" || provider === "openai" ? OPENAI_SVG : null
+  return provider === "claude" ? CLAUDE_SVG : provider === "deepseek" ? DEEPSEEK_SVG : provider === "codex" || provider === "openai" ? OPENAI_SVG : null
 }
 function providerWord(provider: string) { return provider === "workbuddy" ? "WorkBuddy" : provider === "deepseek" ? "DeepSeek" : provider === "claude" ? "Claude" : "Codex" }
 // "1. [icon] name"; unknown icon falls back to the original text label.
 function AccountLine({ index, provider, name, fixed = false }: { index: number; provider: string; name: string; fixed?: boolean }) {
   const code = providerIconCode(provider)
   const nameText = <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{name}</Text>
-  if (!code) return <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{`${index + 1}. ${providerWord(provider)} ${name}`}</Text>
+  if (!code && provider !== "workbuddy") return <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{`${index + 1}. ${providerWord(provider)} ${name}`}</Text>
   return <HStack spacing={4}>
     <Text>{`${index + 1}.`}</Text>
-    <SVG code={code} resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} />
+    {provider === "workbuddy"
+      ? <Image image={workBuddyBrandImage()} renderingMode="original" resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} />
+      : <SVG code={code!} resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} />}
     {nameText}
   </HStack>
 }
@@ -66,7 +68,7 @@ function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (n
                 fill={active.value?.id === a.id ? "tertiarySystemFill" : "secondarySystemGroupedBackground"} />)
               .contentShape({ kind: "dragPreview", shape: { type: "rect", cornerRadius: 12 } })}
           >
-            <Text>{accountLabel(a, i)}</Text>
+            {a.provider === "workbuddy" ? <AccountLine index={i} provider={a.provider} name={`WorkBuddy · ${a.name}`} /> : <Text>{accountLabel(a, i)}</Text>}
           </VStack>}
           onMove={onMove}
         />
