@@ -350,9 +350,7 @@ function QuadWindow({ label, w, fmt, s, muted = false, fixedLcd = false, rowToBa
     <HStack alignment="bottom" spacing={2}>
       {/* 标签固定宽度（约两个汉字），“5h”与“7d”对齐，后面的倒计时也对齐 */}
       <Text font={QUOTA_TEXT_FONT} monospaced foregroundStyle={SUB} lineLimit={1} frame={{ width: QUOTA_TEXT_FONT * 2.1, alignment: "leading" as any }}>{label}</Text>
-      <Text font={QUOTA_TEXT_FONT} monospacedDigit foregroundStyle={SUB} lineLimit={1}>
-        · {fmt(w.resetsAt)}
-      </Text>
+      <Text font={QUOTA_TEXT_FONT} monospaced monospacedDigit foregroundStyle={SUB} lineLimit={1}>{`· ${fmt(w.resetsAt)}`}</Text>
       <Spacer />
       {fixedLcd ? <HStack spacing={0} fixedSize={{ horizontal: true, vertical: false }}>{lcd}</HStack> : lcd}
     </HStack>
@@ -452,8 +450,8 @@ function LargeQuota({ label, w, fmt, muted = false }: Win) {
     <HStack alignment="bottom" spacing={5} frame={{ maxWidth: "infinity" }}>
       <HStack spacing={1}>
         <Text font={9} monospaced foregroundStyle={SUB} frame={{ width: 20, alignment: "leading" as any }}>{label}</Text>
-        <Text font={9} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.8}
-          frame={{ width: 65, alignment: "leading" as any }}>· {fmt(w.resetsAt)}</Text>
+        <Text font={9} monospaced monospacedDigit foregroundStyle={SUB} lineLimit={1}
+          frame={{ width: 65, alignment: "leading" as any }}>{`· ${fmt(w.resetsAt)}`}</Text>
       </HStack>
       <Spacer />
       <Lcd value={w.remainingPercent} height={12} muted={muted} />
