@@ -8,7 +8,7 @@ import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogi
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.3"
+const VERSION = "1.11.4"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -100,7 +100,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
 function AccountCacheSections({ account, source }: { account: Account; source: DataSource }) {
   const iso = (at: number | null | undefined) => typeof at === "number" && Number.isFinite(at) && at > 0 && at <= 8640000000000000 ? new Date(at).toISOString() : "未提供"
   if (account.provider === "workbuddy") return <>
-          <Section header={<Text>WorkBuddy个人积分（缓存）</Text>}>
+          <Section header={<Text>WorkBuddy个人积分</Text>}>
             <Text>{account.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(account.credits.remaining)}` : "积分未可靠提供"}</Text>
             <Text>{`已用 ${fmtWorkBuddyNumber(account.credits?.used)} / 总量 ${fmtWorkBuddyNumber(account.credits?.capacity)}`}</Text>
             <Text>{fmtWorkBuddyCheckin(account.credits?.checkin)}</Text>
@@ -116,7 +116,7 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
   if (account.provider === "deepseek") {
     const b = account.balance
     return <>
-      <Section header={<Text>DeepSeek余额（缓存）</Text>}>
+      <Section header={<Text>DeepSeek余额</Text>}>
         <Text>{`认证方式 ${b?.auth || "未提供"}`}</Text>
         <Text>{`可用状态 ${b?.available == null ? "未提供" : b.available ? "可用" : "不可用"}`}</Text>
         <Text>{`余额采集时间 ${iso(b?.fetchedAt)}`}</Text>
@@ -139,7 +139,7 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
   const cache = Storage.get<{ fetchedAt?: number }>(source === "official" ? "ai_usage_official_cache_v1" : source === "sub2api" ? "ai_usage_sub2api_quota_v1" : "ai_usage_cache_v1")
   const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${v}%` : "未提供"
   return <>
-    <Section header={<Text>{`${providerWord(account.provider)}额度（缓存）`}</Text>}>
+    <Section header={<Text>{`${providerWord(account.provider)}额度`}</Text>}>
       <Text>{`采集时间 ${iso(cache?.fetchedAt)}`}</Text>
       <Text>只读本机缓存，不自动刷新。</Text>
       {account.readError ? <Text>{account.readError}</Text> : null}
@@ -149,7 +149,7 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
       <Text>{`已用额度 ${percent(w?.usedPercent)}`}</Text>
       <Text>{`重置时间 ${w?.resetsAt || "未提供"}`}</Text>
     </Section>)}
-    <Section header={<Text>重置卡（缓存）</Text>}>
+    <Section header={<Text>重置卡</Text>}>
       <Text>{typeof account.resetCredits === "number" && Number.isFinite(account.resetCredits) && account.resetCredits >= 0 ? `可用重置卡 ${account.resetCredits}` : "可用重置卡 未提供"}</Text>
     </Section>
   </>
