@@ -8,7 +8,7 @@ import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogi
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.8"
+const VERSION = "1.11.9"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -98,7 +98,11 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
 
 // Shared detail content consumes only the passed cached account and source-local cache timestamps.
 function AccountCacheSections({ account, source }: { account: Account; source: DataSource }) {
-  const iso = (at: number | null | undefined) => typeof at === "number" && Number.isFinite(at) && at > 0 && at <= 8640000000000000 ? new Date(at).toISOString() : "未提供"
+  const iso = (at: number | null | undefined) => {
+    if (typeof at !== "number" || !Number.isFinite(at) || at <= 0 || at > 8640000000000000) return "未提供"
+    const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
+    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+  }
   if (account.provider === "workbuddy") return <>
           <Section header={<Text>WorkBuddy个人积分</Text>}>
             <Text>{account.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(account.credits.remaining)}` : "积分未可靠提供"}</Text>
