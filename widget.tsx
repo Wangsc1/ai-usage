@@ -164,7 +164,7 @@ function BalanceRows({ acc, font = 9, compact = false }: { acc: Account; font?: 
 }
 
 // Credits retain their own observation time and expiry; never label package expiry as quota reset.
-function CreditsRows({ acc, font = 8, compact = false }: { acc: Account; font?: number; compact?: boolean }) {
+function CreditsRows({ acc, font = 8, compact = false, fullWidth = false }: { acc: Account; font?: number; compact?: boolean; fullWidth?: boolean }) {
   const c = acc.credits, muted = isQuotaExhausted(acc)
   const amount = (n: number | null | undefined) => c?.reliable && typeof n === "number" && Number.isFinite(n) && n >= 0 ? n.toFixed(2) : "未提供"
   const remaining = amount(c?.remaining), capacity = amount(c?.capacity)
@@ -174,7 +174,8 @@ function CreditsRows({ acc, font = 8, compact = false }: { acc: Account; font?: 
   const stamp = (iso: string) => new Date(Date.parse(iso) + 8 * 3600000).toISOString().slice(2,16).replace("T", " ")
   const status = c?.error?.includes("重新登录") ? "登录失效/请重新登录" : c?.error ? c.reliable ? "读取失败/此前快照" : "读取失败/积分未知" : c?.reliable ? "" : c?.status === "partial" ? "积分明细不完整" : "积分未可靠提供"
   const checkin = fmtWorkBuddyCheckin(c?.checkin)
-  return <VStack alignment="leading" spacing={compact ? 3 : 6}>
+  return <VStack alignment="leading" spacing={compact ? 3 : 6}
+    frame={fullWidth ? { maxWidth: "infinity", alignment: "leading" as any } : undefined}>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`账户: 个人 · 中国区 | ${checkin}`}</Text>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`积分：已用 ${usedPct}（${capacity}/${remaining}）`}</Text>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
@@ -464,13 +465,15 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
   const month = data.month
   const contentWidth = Widget.displaySize.width - 28 // Root's 14pt horizontal inset on each side.
   const columns = summaryColumns(data)
-  return <VStack alignment="leading" spacing={3}
-    modifiers={modifiers().fixedSize({ horizontal: false, vertical: true })
+  const hasCredits = data.accounts.slice(0, 4).some(acc => acc.provider === "workbuddy")
+  const denseCredits = hasCredits && data.accounts.length >= 4
+  return <VStack alignment="leading" spacing={denseCredits ? 1 : 3}
+    modifiers={modifiers().fixedSize({ horizontal: false, vertical: !hasCredits })
       .frame({ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" })}>
-    {m && month ? <PeriodStats labelFont={9} valueFont={11} sizingValueFont={12} gap={4} verticalGap={3} contentWidth={contentWidth}
+    {m && month ? <PeriodStats labelFont={9} valueFont={11} sizingValueFont={12} gap={4} verticalGap={denseCredits ? 1 : 3} contentWidth={contentWidth}
       columns={columns!} /> : <Text font={10} foregroundStyle={SUB}>Parrot今日/本月统计未提供</Text>}
     <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} />
-    <VStack alignment="leading" spacing={2} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
+    <VStack alignment="leading" spacing={denseCredits ? 1 : 2} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
       {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={1}
         fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
         {/* Outer account-list gap 2 + this inset 1 => weekly bar to next divider 3 (formerly 2).
@@ -479,7 +482,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
           modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" }).padding({ top: 1 })} /> : null}
         <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}><AccountTitle acc={acc} font={12} /></VStack>
         <VStack alignment="leading" spacing={3} padding={acc.provider === "deepseek" ? { top: 3 } : undefined} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
-          {acc.provider === "workbuddy" ? <CreditsRows acc={acc} /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} />)}
+          {acc.provider === "workbuddy" ? <CreditsRows acc={acc} compact fullWidth /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} />)}
         </VStack>
       </VStack>)}
     </VStack>
@@ -539,17 +542,29 @@ function AccessoryRoot({ data, error, family }: { data: UsageData | null; error:
 function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; error: string | null }) {
   if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} />
   let body: VirtualNode
+  let largeCredits = false
   if (!data) body = <Message text={accountEmptyText(error)} />
   else if (data.accounts.length === 0) body = <Message text="账号未配置" />
   else {
     const selected = widgetAccounts(data.accounts, Widget.parameter ?? "")
     const sorted = { ...data, accounts: selected }
     const f = Widget.family
+    largeCredits = (f === "systemLarge" || f === "systemExtraLarge") && selected.slice(0, 4).some(acc => acc.provider === "workbuddy")
     if (!selected.length) body = <Message text="请按脚本账号列表检查小组件参数中的账号序号" />
     else if (f === "systemSmall") body = <Small data={sorted} stale={stale} />
     else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
     else body = <Medium data={sorted} />
   }
+  // Credits add a third text row: reserve a real footer, never overlay it on growing content.
+  if (largeCredits && data) return <VStack alignment="leading" spacing={0}
+    padding={{ horizontal: 14, vertical: 12 }}
+    frame={{ maxWidth: "infinity", maxHeight: "infinity" }} widgetBackground={BG}>
+    <VStack alignment="leading" spacing={0}
+      frame={{ height: Math.max(1, Widget.displaySize.height - 24 - 18), maxWidth: "infinity", alignment: "topLeading" as any }}>{body}</VStack>
+    <HStack spacing={0} frame={{ height: 18, maxWidth: "infinity", alignment: "trailing" as any }}>
+      <Spacer /><RefreshTime data={data} stale={stale} />
+    </HStack>
+  </VStack>
   return <ZStack
     padding={{ horizontal: 14, vertical: 12 }}
     frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
