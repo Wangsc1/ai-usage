@@ -164,7 +164,7 @@ function BalanceRows({ acc, font = 9, compact = false }: { acc: Account; font?: 
 }
 
 // Credits retain their own observation time and expiry; never label package expiry as quota reset.
-function CreditsRows({ acc, font = 8, compact = false, fullWidth = false }: { acc: Account; font?: number; compact?: boolean; fullWidth?: boolean }) {
+function CreditsRows({ acc, font = 8, compact = false, fullWidth = false, alignExpiryBottom = false }: { acc: Account; font?: number; compact?: boolean; fullWidth?: boolean; alignExpiryBottom?: boolean }) {
   const c = acc.credits, muted = isQuotaExhausted(acc)
   const amount = (n: number | null | undefined) => c?.reliable && typeof n === "number" && Number.isFinite(n) && n >= 0 ? n.toFixed(2) : "未提供"
   const remaining = amount(c?.remaining), capacity = amount(c?.capacity)
@@ -178,7 +178,8 @@ function CreditsRows({ acc, font = 8, compact = false, fullWidth = false }: { ac
     frame={fullWidth ? { maxWidth: "infinity", alignment: "leading" as any } : undefined}>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`账户: 个人 · 中国区 | ${checkin}`}</Text>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`积分：已用 ${usedPct}（${capacity}/${remaining}）`}</Text>
-    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
+    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}
+      offset={alignExpiryBottom ? { x: 0, y: 2 } : undefined}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
     {status ? <Text font={font - 1} foregroundStyle={c?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.6}>{status}</Text> : null}
   </VStack>
 }
@@ -358,13 +359,13 @@ function QuadWindow({ label, w, fmt, s, muted = false, fixedLcd = false, rowToBa
   </VStack>
 }
 
-function Quad({ acc, s, fixedLcd = false, intrinsic = false }: { acc?: Account; s: Scale; fixedLcd?: boolean; intrinsic?: boolean }) {
+function Quad({ acc, s, fixedLcd = false, intrinsic = false, alignCreditsBottom = false }: { acc?: Account; s: Scale; fixedLcd?: boolean; intrinsic?: boolean; alignCreditsBottom?: boolean }) {
   if (!acc) return <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}><Spacer /></VStack>
   return <VStack alignment="leading" spacing={s.gap + (acc.provider === "deepseek" ? 4 : 1)}
     fixedSize={intrinsic ? { horizontal: false, vertical: true } : undefined}
     frame={intrinsic ? { maxWidth: "infinity", alignment: "leading" as any } : { maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {acc.provider === "workbuddy" ? <CreditsRows acc={acc} font={7} compact /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd={fixedLcd} />)}
+    {acc.provider === "workbuddy" ? <CreditsRows acc={acc} font={7} compact alignExpiryBottom={alignCreditsBottom} /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd={fixedLcd} />)}
   </VStack>
 }
 
@@ -378,7 +379,7 @@ function QuadGrid({ accounts, s, fixedLcd = false, statsData }: { accounts: Acco
       frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: statsData && top ? "bottomLeading" as any : "topLeading" as any }}
     >
       {statistics && statsData ? <SmallStats data={statsData} medium />
-        : statsData && top ? <Quad acc={acc} s={s} fixedLcd={fixedLcd} intrinsic /> : <Quad acc={acc} s={s} fixedLcd={fixedLcd} />}
+        : statsData && top ? <Quad acc={acc} s={s} fixedLcd={fixedLcd} intrinsic alignCreditsBottom /> : <Quad acc={acc} s={s} fixedLcd={fixedLcd} alignCreditsBottom />}
     </VStack>
   return <ZStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
     <Rectangle fill={DIVIDER} frame={{ width: 1, maxHeight: "infinity" }} />

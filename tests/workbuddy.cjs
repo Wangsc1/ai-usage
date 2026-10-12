@@ -122,6 +122,12 @@ async function main(){
   const footer=root.props.children[1];for(const other of ['systemSmall','systemMedium']){scripting.Widget.family=other;const otherRoot=widget.Root({data:{accounts,fetchedAt:now},stale:false,error:null});assert.deepEqual(JSON.parse(JSON.stringify(otherRoot.props.children[1])),JSON.parse(JSON.stringify(footer)));}scripting.Widget.family=family;
  }
  console.log('PASS Large/ExtraLarge mixed four-account WorkBuddy full-width leading rows, preserved font, 18pt content reservation + footer tree identical to Small/Medium; non-WorkBuddy unchanged; NOT native pixel proof');
+ for(const [family,count,shift] of [['systemMedium',4,2],['systemMedium',3,2],['systemMedium',2,0],['systemSmall',2,0],['systemLarge',4,0]]) {
+  scripting.Widget.family=family;scripting.Widget.parameter='';scripting.Widget.displaySize={width:358,height:family==='systemLarge'?376:170};
+  const accounts=[...Array.from({length:count-1},(_,i)=>({...shape,id:'align-'+i,provider:'claude'})),shape];const tree=walk(widget.Root({data:{accounts,fetchedAt:now},stale:false,error:null}));
+  const expiry=tree.find(x=>x?.type==='Text'&&x.props.children==='有效期未提供');assert.ok(expiry);assert.equal(expiry.props.offset?.y??0,shift);assert.equal(expiry.props.offset?.x??0,0);assert.equal(expiry.props.font,family==='systemLarge'?11:10);assert.equal(tree.filter(x=>x?.type==='Button'&&x.props.intent).length,1);
+ }
+ console.log('PASS Medium grid expiry-only 2pt optical shift; text font/content, Small/Large/MediumTwo and footer preserved; NOT native pixel proof');
  for(const family of ['accessoryCircular','accessoryInline']){scripting.Widget.family=family;const text=walk(widget.Root({data:{accounts:[shape],fetchedAt:now},stale:false,error:null})).filter(x=>typeof x==='string').join(' ');assert.ok(text.includes('积分'));assert.ok(!text.includes('签到'),'single-line/circular preserve primary value without pretending multiple rows');}
  console.log('PASS 1.11.2 read-only status yes/no/unknown/failure/401/404 fallback/midnight; Parrot GET snapshots/old server/errors; observation day; final standalone row; App zero network; no actions')
  assert.ok(calls.every(c=>!/(?:refresh-status|trial|claim)/i.test(c.u))); // Unified detail editor: username section always first, only local cache below.
