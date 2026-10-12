@@ -8,7 +8,7 @@ import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogi
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.7"
+const VERSION = "1.11.8"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -104,7 +104,6 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
             <Text>{account.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(account.credits.remaining)}` : "积分未可靠提供"}</Text>
             <Text>{fmtWorkBuddyUsed(account.credits?.used, account.credits?.capacity)}</Text>
             <Text>{fmtWorkBuddyCheckin(account.credits?.checkin)}</Text>
-            <Text>{`真实采集时间 ${iso(account.credits?.fetchedAt)}`}</Text>
             {account.credits?.error || account.readError ? <Text>{account.credits?.error || account.readError}</Text> : null}
           </Section>
           {(account.credits?.packages ?? []).map((p, i) => <Section key={String(i)} header={<Text>{p.name}</Text>}>
@@ -136,14 +135,9 @@ function AccountCacheSections({ account, source }: { account: Account; source: D
       </Section>)}
     </>
   }
-  const cache = Storage.get<{ fetchedAt?: number }>(source === "official" ? "ai_usage_official_cache_v1" : source === "sub2api" ? "ai_usage_sub2api_quota_v1" : "ai_usage_cache_v1")
   const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${v}%` : "未提供"
   return <>
-    <Section header={<Text>{`${providerWord(account.provider)}额度`}</Text>}>
-      <Text>{`采集时间 ${iso(cache?.fetchedAt)}`}</Text>
-      <Text>只读本机缓存，不自动刷新。</Text>
-      {account.readError ? <Text>{account.readError}</Text> : null}
-    </Section>
+    {account.readError ? <Section><Text>{account.readError}</Text></Section> : null}
     {([["5 h", account.fiveHour], ["7 d", account.sevenDay]] as const).map(([label, w]) => <Section key={label} header={<Text>{label}</Text>}>
       <Text>{`剩余额度 ${percent(w?.remainingPercent)}`}</Text>
       <Text>{`已用额度 ${percent(w?.usedPercent)}`}</Text>
