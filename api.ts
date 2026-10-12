@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.10.40"
+export const VERSION = "1.11.0"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -66,6 +66,7 @@ export type QuotaWindow = {
 export type Account = {
   readError?: string
   balance?: DeepSeekBalance
+  credits?: WorkBuddyCredits
   id: string
   enabled: boolean
   provider: string // "claude" | "openai" | ...
@@ -262,18 +263,25 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
   }
   const accounts: Account[] = await Promise.all(
     all.map(async (a: any) => {
-      const d = await apiGet(baseUrl, `/oauth/accounts/${encodeURIComponent(a.accountId)}`, cred)
+      let d: any
+      try { d = await apiGet(baseUrl, `/oauth/accounts/${encodeURIComponent(a.accountId)}`, cred) }
+      catch (e) {
+        if (a.provider !== "workbuddy" || e instanceof HttpError && e.status === 401) throw e
+        const old = Storage.get<UsageData>(KEY_CACHE)?.accounts.find(x => x.id === a.accountId)
+        return { ...(old ?? { fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null }), id: a.accountId, enabled: !!a.enabled, available: !!a.available, provider: a.provider, name: String(a.displayName ?? a.identity ?? a.accountId), fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null, credits: { ...(old?.credits ?? WorkBuddyCN.unknown()), error: "Parrot WorkBuddy详情读取失败，显示此前快照" }, readError: "Parrot WorkBuddy详情读取失败" }
+      }
       // 重置卡：Parrot 管理接口暂未提供只读字段；若日后账号详情返回 resetCreditCount 则自动显示
       const rc = d?.resetCreditCount ?? d?.openai?.resetCreditCount
       return {
         id: a.accountId,
         enabled: !!a.enabled,
-        resetCredits: typeof rc === "number" ? rc : null,
+        resetCredits: a.provider === "workbuddy" ? null : typeof rc === "number" ? rc : null,
         provider: a.provider,
         name: String(a.displayName ?? a.identity ?? a.accountId),
         available: !!a.available,
-        fiveHour: toWindow(d?.usageWindows, "fiveHour"),
-        sevenDay: toWindow(d?.usageWindows, "sevenDay"),
+        fiveHour: a.provider === "workbuddy" ? emptyWindow() : toWindow(d?.usageWindows, "fiveHour"),
+        sevenDay: a.provider === "workbuddy" ? emptyWindow() : toWindow(d?.usageWindows, "sevenDay"),
+        ...(a.provider === "workbuddy" ? { credits: WorkBuddyCN.parrot(d?.workbuddy, Storage.get<UsageData>(KEY_CACHE)?.accounts.find(x => x.id === a.accountId)?.credits) } : {}),
       }
     })
   )
@@ -586,9 +594,9 @@ function persist(items: Credential[]) {
 function officialDisplay(item: Credential, index: number): string {
   return item.email || `账号 ${index + 1}（邮箱未提供）`
 }
-export function officialAccounts(): { id: string; name: string; email: string; provider: "codex" | "claude" | "deepseek" }[] {
+export function officialAccounts(): { id: string; name: string; email: string; provider: "codex" | "claude" | "deepseek" | "workbuddy" }[] {
   // Legacy Codex records have no provider field; their dedicated credential collection identifies them.
-  return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const })), ...claudeAccounts(), ...dsCredentials().map(a => ({ id: a.id, name: a.name, email: "", provider: "deepseek" as const }))]
+  return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const })), ...claudeAccounts(), ...dsCredentials().map(a => ({ id: a.id, name: a.name, email: "", provider: "deepseek" as const })), ...WorkBuddyCN.accounts()]
 }
 // Local management includes authorized accounts even before their first usage collection.
 export function managementAccounts(): Account[] {
@@ -607,7 +615,8 @@ export function officialCached(): UsageData | null {
   return { ...cache, accounts: sortAccounts(cache.accounts.map(a => ({ ...a, name: names.get(a.id) ?? a.name })), "official") }
 }
 export function logoutOfficial(id: string) {
-  if (id.startsWith("deepseek:")) { if (!Keychain.set(DS_KEY, JSON.stringify(dsCredentials().filter(x => x.id !== id)))) throw new Error("DeepSeek钥匙串保存失败") }
+  if (id.startsWith("workbuddy:")) WorkBuddyCN.logout(id)
+  else if (id.startsWith("deepseek:")) { if (!Keychain.set(DS_KEY, JSON.stringify(dsCredentials().filter(x => x.id !== id)))) throw new Error("DeepSeek钥匙串保存失败") }
   else if (id.startsWith("claude:")) logoutClaude(id)
   else persist(credentials().filter(x => x.id !== id))
   saveWidgetName(id, "", "official")
@@ -855,13 +864,14 @@ async function fetchAccount(item: Credential, index: number): Promise<Account> {
 export async function loadOfficialUsage(): Promise<LoadResult> {
   try {
     const items = credentials()
-    if (!items.length && !claudeAccounts().length && !dsCredentials().length) return { data: null, stale: false, error: "请在脚本中添加官方账号" }
+    if (!items.length && !claudeAccounts().length && !dsCredentials().length && !WorkBuddyCN.credentials().length) return { data: null, stale: false, error: "请在脚本中添加官方账号" }
     // Keep complete mixed-provider snapshots: a failed account is not silently dropped as current.
-    const isolate = dsCredentials().length > 0
+    const isolate = dsCredentials().length > 0 || WorkBuddyCN.credentials().length > 0
     const [codex, claude] = await Promise.all([Promise.all(items.map((item, i) => isolate ? fetchAccount(item, i).catch(() => quotaFallback(item.id, officialDisplay(item, i), "openai")) : fetchAccount(item, i))), loadClaudeAccounts(isolate)])
     const deepseek = (await Promise.all(dsCredentials().map(dsOfficial))).filter((a): a is Account => !!a)
+    const workbuddy = (await Promise.all(WorkBuddyCN.credentials().map(WorkBuddyCN.read))).filter((a): a is Account => !!a)
     const live = new Set(officialAccounts().map(a => a.id))
-    const accounts = syncAccountOrder([...codex, ...claude, ...deepseek].filter(a => live.has(a.id)), "official")
+    const accounts = syncAccountOrder([...codex, ...claude, ...deepseek, ...workbuddy].filter(a => live.has(a.id)), "official")
     const providerErrors = accounts.flatMap(a => a.readError ? [`${a.name}：${a.readError}`] : [])
     const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts, fetchedAt: Date.now(), ...(providerErrors.length ? { providerErrors } : {}) }
     Storage.set(CACHE, data)
@@ -1435,3 +1445,230 @@ function quotaFallback(id: string, name: string, provider: string): Account {
   const old = officialCached()?.accounts.find(a => a.id === id)
   return { ...(old ?? { id, name, provider, enabled: true, available: false, fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null }, sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null }), readError: "额度读取失败，保留原账号缓存；可重试" }
 }
+
+
+// WorkBuddy CN personal CLI profile, from danger-dream/Parrot 25b93d3 oauth/workbuddy.
+// Private client protocol, not OAuth/PKCE or an API-key balance API. No check-in/trial endpoints.
+export type WorkBuddyCredits = {
+  remaining: number | null; capacity: number | null; used: number | null; reliable: boolean
+  status: string; complete: boolean; fetchedAt: number | null; currentStatus?: string; error?: string
+  packages: { name: string; remaining: number | null; capacity: number | null; used: number | null; expiresAt: string | null; cycleEnd: string | null }[]
+}
+export type WorkBuddyLogin = WorkBuddyCN.Login
+export const fmtWorkBuddyNumber = (n: number | null | undefined): string => typeof n === "number" && Number.isFinite(n) ? String(n) : "未提供"
+namespace WorkBuddyCN {
+const KEY = "ai_usage_workbuddy_cn_cli_v1"
+const AUTH = "https://copilot.tencent.com"
+const BILLING = "https://www.codebuddy.cn"
+const DOMAINS = new Set(["copilot.tencent.com", "codebuddy.cn", "www.codebuddy.cn", "workbuddy.cn", "www.workbuddy.cn"])
+type Credential = { id: string; uid: string; domain: string; name: string; access: string; refresh: string; expiresAt: number }
+export type Login = { url: string; state: string; expiresAt: number; cancelled: boolean; consumed: boolean; cookies: Record<string, string>; timer?: ReturnType<typeof setTimeout>; wake?: () => void; controller?: AbortController }
+const flows = new Set<Login>()
+const refreshing = new Map<string, Promise<Credential>>()
+// Retry saving an in-memory rotated candidate rather than replaying its old refresh token.
+const pendingRefresh = new Map<string, { credential: Credential; until: number }>()
+class WBError extends Error { constructor(message: string, public invalid = false) { super(message) } }
+function text(v: any, max = 32768): string {
+  if (typeof v !== "string" || !v.trim() || v.length > max || /[\x00-\x1f\x7f]/.test(v)) throw new WBError("WorkBuddy响应字段无效")
+  return v.trim()
+}
+function domain(v: any): string { const d = text(v, 128).toLowerCase(); if (!DOMAINS.has(d)) throw new WBError("WorkBuddy返回了不支持的国内认证域名"); return d }
+function number(v: any): number | null {
+  if (typeof v !== "number" && typeof v !== "string" || typeof v === "string" && !v.trim()) return null
+  if (typeof v === "string" && !/^[+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(v.trim())) return null
+  const n = Number(v); return Number.isFinite(n) && n >= 0 && n <= Number.MAX_SAFE_INTEGER ? n : null
+}
+function tokenExpiry(v: any): number { const n = number(v); return n != null && n > 0 && n <= 366 * 86400 ? Date.now() + n * 1000 : 0 }
+export function credentials(): Credential[] {
+  const raw = Keychain.get(KEY); if (!raw) return []
+  try {
+    const rows = JSON.parse(raw); if (!Array.isArray(rows)) throw 0
+    return rows.map(c => { text(c.id); text(c.uid, 512); domain(c.domain); text(c.access); text(c.refresh); return c })
+  } catch { throw new WBError("WorkBuddy登录记录损坏，请移除后重新添加") }
+}
+function persist(rows: Credential[]) { if (!Keychain.set(KEY, JSON.stringify(rows))) throw new WBError("WorkBuddy钥匙串保存失败") }
+export function accounts() { return credentials().map(c => ({ id: c.id, name: c.name || "WorkBuddy", email: "", provider: "workbuddy" as const })) }
+export function logout(id: string) { for (const d of flows) cancel(d); persist(credentials().filter(c => c.id !== id)); for (const key of pendingRefresh.keys()) if (key.startsWith(id + ":")) pendingRefresh.delete(key) }
+function same(c: Credential): boolean { return credentials().some(x => x.id === c.id && x.access === c.access && x.refresh === c.refresh) }
+function headers(c?: Credential, refresh = false): Record<string, string> {
+  const h: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest", Origin: BILLING, Referer: BILLING + "/", "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2", "X-IDE-Type": "CLI", "X-IDE-Name": "CLI", "X-IDE-Version": "2.63.2" }
+  if (c) { domain(c.domain); if (refresh) { h["X-Refresh-Token"] = text(c.refresh); h["X-Auth-Refresh-Source"] = "workbuddy" } else { h.Authorization = "Bearer " + text(c.access); h["X-User-Id"] = text(c.uid, 512); h["X-Domain"] = c.domain } }
+  return h
+}
+function active(d: Login, valid: () => boolean) {
+  if (d.cancelled || Date.now() >= d.expiresAt || !valid()) { cancel(d); throw new WBError("WorkBuddy登录已取消或等待超时，请重新登录") }
+}
+// Scripting fetch docs: handleRedirect returns null to prevent redirects; cookies are NOT shared automatically.
+async function wire(base: string, path: string, method: string, h: Record<string, string>, body?: any, d?: Login, pending = false): Promise<any> {
+  if (base !== AUTH && base !== BILLING) throw new WBError("WorkBuddy不支持此请求域名")
+  if (d?.cancelled) throw new WBError("WorkBuddy登录已取消")
+  let r: any
+  try {
+    r = await fetch(base + path, { method, headers: h, ...(body === undefined ? {} : { body: JSON.stringify(body) }), timeout: 20,
+      handleRedirect: async () => null, ...(d?.controller ? { signal: d.controller.signal } : {}) })
+  } catch { throw new WBError(d?.cancelled ? "WorkBuddy登录已取消" : "WorkBuddy网络请求失败，请重试") }
+  if (d?.cancelled) throw new WBError("WorkBuddy登录已取消")
+  if (r.status < 200 || r.status >= 300) throw new WBError(`WorkBuddy请求失败（HTTP ${r.status}）`, r.status === 401)
+  // Only this state's own cookies, returned by the fixed AUTH host. Never read browser/global cookies.
+  if (d && base === AUTH && Array.isArray(r.cookies)) for (const cookie of r.cookies) {
+    const name = cookie?.name, value = cookie?.value
+    if (typeof name === "string" && /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(name) && typeof value === "string" && /^[\x21-\x7e]*$/.test(value) && !/[;,]/.test(value) && value.length <= 4096) d.cookies[name] = value
+  }
+  let b: any; try { b = await r.json() } catch { throw new WBError("WorkBuddy响应不是有效JSON") }
+  if (!b || !Number.isInteger(b.code)) throw new WBError("WorkBuddy响应结构无效")
+  if (pending && b.code === 11217) return null
+  if (b.code !== 0) {
+    if (pending && typeof b.msg === "string" && b.msg.trim().toLowerCase() === "login ing") return null
+    throw new WBError(`WorkBuddy请求失败（code ${b.code}）`, b.code === 12153)
+  }
+  if (pending && b.data == null) return null
+  if (!b.data || typeof b.data !== "object" || Array.isArray(b.data)) throw new WBError("WorkBuddy响应数据无效")
+  return b.data
+}
+function loginHeaders(d: Login): Record<string, string> { const h = headers(); const cookie = Object.entries(d.cookies).map(([k,v]) => `${k}=${v}`).join("; "); if (cookie) h.Cookie = cookie; return h }
+export function cancel(d: Login) { d.cancelled = true; if (d.timer != null) clearTimeout(d.timer); d.timer = undefined; d.wake?.(); d.wake = undefined; d.controller?.abort(); d.cookies = {}; d.state = ""; d.url = ""; flows.delete(d) }
+export async function begin(valid: () => boolean): Promise<Login> {
+  const d: Login = { url: "", state: "", expiresAt: Date.now() + 10 * 60000, cancelled: false, consumed: false, cookies: {}, ...(typeof AbortController === "function" ? { controller: new AbortController() } : {}) }; flows.add(d)
+  try {
+    active(d, valid)
+    const b = await wire(AUTH, "/v2/plugin/auth/state?platform=CLI", "POST", loginHeaders(d), {}, d)
+    active(d, valid); d.state = text(b.state, 4096)
+    const url = text(b.authUrl, 8192)
+    // Browser navigation only. Tokens never go to a server supplied host.
+    if (!/^https:\/\/(?:[a-z0-9-]+\.)*(?:tencent\.com|codebuddy\.cn|workbuddy\.cn)(?::443)?(?:[/?#]|$)/i.test(url)) throw new WBError("WorkBuddy授权地址不可信")
+    d.url = url; return d
+  } catch (e) { cancel(d); throw e }
+}
+async function wait(d: Login) { await new Promise<void>(resolve => { d.wake = resolve; d.timer = setTimeout(() => { d.timer = undefined; d.wake = undefined; resolve() }, 2000) }) }
+export async function finish(d: Login, valid: () => boolean): Promise<void> {
+  if (d.consumed) throw new WBError("WorkBuddy本次登录已结束")
+  d.consumed = true
+  try {
+    let token: any = null
+    while (!token) {
+      active(d, valid)
+      token = await wire(AUTH, "/v2/plugin/auth/token?state=" + encodeURIComponent(d.state), "GET", loginHeaders(d), undefined, d, true)
+      active(d, valid)
+      if (!token || !token.accessToken) { token = null; await wait(d) }
+    }
+    const access = text(token.accessToken), refresh = text(token.refreshToken), dom = domain(token.domain), expiresAt = tokenExpiry(token.expiresIn)
+    // Access token belongs to the chosen CN profile; identity comes from the same auth flow.
+    const h = loginHeaders(d); h.Authorization = "Bearer " + access; h["X-Domain"] = dom
+    const info = await wire(AUTH, "/v2/plugin/login/account?state=" + encodeURIComponent(d.state), "GET", h, undefined, d)
+    active(d, valid)
+    if (info.enterpriseId || info.enterprise_id) throw new WBError("仅支持WorkBuddy国内个人账号，请使用个人身份登录")
+    const uid = text(info.uid, 512), id = "workbuddy:cn:cli:" + encodeURIComponent(uid)
+    const name = typeof info.nickname === "string" && info.nickname.trim() ? info.nickname.trim().slice(0, 512) : "WorkBuddy"
+    const rows = credentials(), previous = rows.find(c => c.id === id)
+    const credential = { id, uid, domain: dom, name: previous?.name || name, access, refresh, expiresAt }
+    active(d, valid); persist([...rows.filter(c => c.id !== id), credential])
+  } finally { cancel(d) }
+}
+async function refresh(c: Credential): Promise<Credential> {
+  const key = c.id + ":" + c.refresh
+  const existing = refreshing.get(key); if (existing) return existing
+  const task = (async () => {
+    if (!same(c)) throw new WBError("WorkBuddy账号已退出或登录已更新")
+    let candidate = pendingRefresh.get(key)
+    if (candidate && candidate.until <= Date.now()) throw new WBError("WorkBuddy轮换令牌未能保存且已过期，请重新登录", true)
+    if (!candidate) {
+      const b = await wire(AUTH, "/v2/plugin/auth/token/refresh", "POST", headers(c, true))
+      const next: Credential = { ...c, access: text(b.accessToken), refresh: b.refreshToken == null ? c.refresh : text(b.refreshToken), expiresAt: tokenExpiry(b.expiresIn), domain: b.domain == null ? c.domain : domain(b.domain) }
+      candidate = { credential: next, until: next.expiresAt || Date.now() + 300000 }; pendingRefresh.set(key, candidate)
+    }
+    const rows = credentials(); if (!same(c)) { pendingRefresh.delete(key); throw new WBError("WorkBuddy账号已退出或登录已更新") }
+    persist(rows.map(x => x.id === c.id ? candidate!.credential : x)); pendingRefresh.delete(key); return candidate.credential
+  })()
+  refreshing.set(key, task); try { return await task } finally { refreshing.delete(key) }
+}
+function cnTime(v: any): string | null {
+  if (typeof v !== "string" || !v.trim()) return null
+  const raw = v.trim(), zoned = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d$/.test(raw) ? raw.replace(" ", "T") + "+08:00" : ""
+  const ms = Date.parse(zoned); return Number.isFinite(ms) ? new Date(ms).toISOString() : null
+}
+function epoch(v: any): string | null { const n = number(v); if (n == null || n <= 0 || n > 8640000000000000) return null; return new Date(n).toISOString() }
+export function unknown(error?: string): WorkBuddyCredits { return { remaining: null, capacity: null, used: null, reliable: false, status: "unknown", complete: false, fetchedAt: null, packages: [], ...(error ? { error } : {}) } }
+export function parrot(s: any, old?: WorkBuddyCredits): WorkBuddyCredits {
+  const current = snapshot(s)
+  if (!current.reliable) {
+    const error = !s ? "Parrot未提供WorkBuddy个人积分快照" : `Parrot WorkBuddy积分${current.status}，未可靠提供`
+    return old?.reliable ? { ...old, currentStatus: current.status, error: error + "，显示此前快照" } : { ...current, error }
+  }
+  return current
+}
+export function snapshot(s: any): WorkBuddyCredits {
+  if (!s || typeof s !== "object" || s.scope === "enterprise" || s.unit && s.unit !== "credits") return unknown("WorkBuddy个人积分快照未提供")
+  const c = s.personalCredits ?? s.credits ?? {}, complete = s.complete === true
+  if (c.scope === "enterprise" || c.unit && c.unit !== "credits") return unknown("WorkBuddy个人积分未提供")
+  const remaining = number(c.remaining), capacity = number(c.capacity), used = number(c.used)
+  const reliable = complete && s.status === "known" && c.reliable === true && remaining != null && (capacity == null || remaining <= capacity) && (used == null || capacity == null || Math.abs(capacity - remaining - used) <= 0.000001)
+  const packages = Array.isArray(s.packages) ? s.packages.map((p: any) => ({ name: typeof p?.name === "string" ? p.name : "资源包", remaining: number(p?.remaining), capacity: number(p?.capacity), used: number(p?.used), expiresAt: cnTime(p?.expiresAt), cycleEnd: cnTime(p?.cycleEnd) })) : []
+  return { remaining, capacity, used, reliable, complete, status: typeof s.status === "string" ? s.status : "unknown", fetchedAt: typeof s.fetchedAt === "number" && s.fetchedAt > 0 && s.fetchedAt <= 8640000000000000 ? s.fetchedAt : null, packages }
+}
+function normalize(p: any) {
+  const prefix = ["Size", "Remain", "Used"].some(k => p["CycleCapacity" + k] !== undefined || p["CycleCapacity" + k + "Precise"] !== undefined) ? "CycleCapacity" : "Capacity"
+  const val = (suffix: string) => number(Object.prototype.hasOwnProperty.call(p, prefix + suffix + "Precise") ? p[prefix + suffix + "Precise"] : p[prefix + suffix])
+  const capacity = val("Size"), remaining = val("Remain"); let used = val("Used")
+  const invalidPrecise = ["Size", "Remain", "Used"].some(k => Object.prototype.hasOwnProperty.call(p, prefix + k + "Precise") && val(k) == null)
+  let reliable = remaining != null && !invalidPrecise && (capacity == null || remaining <= capacity)
+  if (used == null && reliable && capacity != null) used = capacity - remaining!
+  if (capacity != null && used != null && remaining != null && Math.abs(capacity - used - remaining) > 0.000001) reliable = false
+  if (capacity != null && used != null && used > capacity) reliable = false
+  return { name: typeof p.PackageName === "string" ? p.PackageName : "资源包", capacity, remaining, used, reliable, expiresAt: cnTime(p.PackageEndTime) ?? cnTime(p.EndTime) ?? epoch(p.DeductionEndTime), cycleEnd: cnTime(p.CycleEndTime) }
+}
+export async function read(c: Credential): Promise<Account | null> {
+  const make = (credits: WorkBuddyCredits, readError?: string): Account => ({ id: c.id, name: c.name, provider: "workbuddy", enabled: true, available: true, fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null, credits, ...(readError ? { readError } : {}) })
+  try {
+    let token = c, refreshed = false
+    if (!c.expiresAt || c.expiresAt - Date.now() <= 300000) { token = await refresh(c); refreshed = true }
+    const date = (ms: number) => new Date(ms + 8 * 3600000).toISOString().slice(0,19).replace("T", " ")
+    const begin = date(Date.now()), end = date(Date.now() + 365 * 101 * 86400000)
+    const packages: ReturnType<typeof normalize>[] = [], pages = new Set<string>(), accountIds = new Set<string>(), deadline = Date.now() + 60000
+    let count: number | null = null, complete = false
+    for (let page = 1; page <= 50; page++) {
+      if (Date.now() >= deadline) throw new WBError("WorkBuddy积分分页读取超时，保留此前快照")
+      if (!same(token)) throw new WBError("WorkBuddy账号已退出或登录已更新")
+      const body = { PageSize: 100, PageNumber: page, ProductCode: "p_tcaca", Status: [0,3], PackageEndTimeRangeBegin: begin, PackageEndTimeRangeEnd: end }
+      let b: any
+      try { b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body) }
+      catch (e) { if (!(e instanceof WBError) || !e.invalid || refreshed) throw e; token = await refresh(token); refreshed = true; b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body) }
+      if (!same(token)) throw new WBError("WorkBuddy账号已退出或登录已更新")
+      if (Date.now() >= deadline) throw new WBError("WorkBuddy积分分页读取超时，保留此前快照")
+      const response = b.Response
+      if (!response?.Data || response.Error) throw new WBError("WorkBuddy积分响应结构无效")
+      const data = response.Data, total = number(data.TotalCount)
+      if (total == null || !Number.isInteger(total) || count != null && count !== total) throw new WBError("WorkBuddy积分分页总数无效或变化")
+      count = total
+      const rows = data.Accounts === null && total === 0 ? [] : data.Accounts
+      if (!Array.isArray(rows) || rows.length > 100 || rows.some(p => !p || typeof p !== "object" || Array.isArray(p))) throw new WBError("WorkBuddy积分资源列表无效")
+      const signature = JSON.stringify(rows); if (rows.length && pages.has(signature)) throw new WBError("WorkBuddy积分分页重复"); pages.add(signature)
+      for (const p of rows) if (p.AccountId != null) { const id = String(p.AccountId); if (accountIds.has(id)) throw new WBError("WorkBuddy积分资源重复"); accountIds.add(id) }
+      packages.push(...rows.map(normalize))
+      if (packages.length >= count) { complete = packages.length === count; break }
+      if (!rows.length || rows.length < 100) break
+    }
+    if (!complete) throw new WBError("WorkBuddy积分分页未完整，保留此前快照")
+    const sum = (k: "remaining" | "capacity" | "used") => packages.length && packages.every(p => p[k] != null) ? packages.reduce((n,p) => n + p[k]!, 0) : null
+    const reliable = packages.length > 0 && packages.every(p => p.reliable) && number(sum("remaining")) != null
+    const credits: WorkBuddyCredits = { remaining: sum("remaining"), capacity: sum("capacity"), used: sum("used"), reliable, status: packages.length ? reliable ? "known" : "partial" : "empty", complete, fetchedAt: Date.now(), packages: packages.map(({ reliable, ...p }) => p) }
+    const previous = officialCached()?.accounts.find(a => a.id === c.id)?.credits
+    if (!reliable && previous?.reliable) return make({ ...previous, currentStatus: credits.status, error: `本次${credits.status}，显示此前快照` }, "WorkBuddy本次积分未可靠提供")
+    return make(credits)
+  } catch (e) {
+    if (!credentials().some(x => x.id === c.id)) return null
+    const error = e instanceof WBError ? e.invalid && !e.message.includes("重新登录") ? `WorkBuddy凭据失效，请重新登录（${e.message}）` : e.message : "WorkBuddy积分读取失败，请重试"
+    const previous = officialCached()?.accounts.find(a => a.id === c.id)?.credits
+    const a = make(previous ? { ...previous, error } : unknown(error), error)
+    if (e instanceof WBError && e.invalid) a.available = false
+    return a
+  }
+}
+}
+export const beginWorkBuddyLogin = WorkBuddyCN.begin
+export const finishWorkBuddyLogin = WorkBuddyCN.finish
+export const cancelWorkBuddyLogin = WorkBuddyCN.cancel
+export const mapWorkBuddySnapshot = WorkBuddyCN.snapshot
+
+// Official WorkBuddy favicon, unchanged colors; embedded offline from the official site.
+// https://assets.workbuddy.cn/web/workbuddy/f4728a12fe9cfe5a34da6b2fa827614041c84386/assets/logo.svg
+export const WORKBUDDY_SVG = "<svg width=\"40\" height=\"40\" viewBox=\"0 0 40 40\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">\n<g clip-path=\"url(#clip0_542_3370)\">\n<rect width=\"40\" height=\"40\" rx=\"20\" fill=\"url(#paint0_linear_542_3370)\"/>\n<g filter=\"url(#filter0_f_542_3370)\">\n<circle cx=\"31.3411\" cy=\"43.6183\" r=\"12.8704\" fill=\"#FFE355\" fill-opacity=\"0.49\" style=\"fill:#FFE355;fill:color(display-p3 1.0000 0.8891 0.3348);fill-opacity:0.49;\"/>\n</g>\n<path d=\"M28.5931 3.12762C28.9853 2.77585 29.0091 2.76226 29.2968 2.74499C29.7628 2.71096 30.1894 2.93488 30.916 3.59634C32.6132 5.13875 34.9769 8.30904 36.4462 11.0168L37.0138 12.0682L37.8156 12.4668C38.5896 12.8579 39.8593 13.6593 40.3898 14.0895C40.6297 14.2878 40.6638 14.2925 40.9133 14.1954C42.0388 13.7572 43.6506 14.3382 45.0727 15.7024C46.3529 16.9294 47.5794 19.026 48.0491 20.7757C48.1177 21.0574 48.2087 21.6628 48.2419 22.1134C48.349 23.6964 47.8414 24.9608 46.8637 25.5331C46.664 25.6484 46.6505 25.6795 46.6561 26.1774C46.7011 28.5481 46.0621 30.9144 44.7785 33.2221C43.3293 35.8133 40.7489 38.4945 37.2566 41.0199C35.3813 42.3846 30.9445 44.9701 28.9382 45.8778C24.1324 48.0414 20.2794 48.8709 16.9329 48.4609C14.9368 48.219 12.6769 47.44 11.34 46.5355C10.9885 46.2925 10.9325 46.2774 10.6637 46.3543C9.2327 46.7651 7.35867 45.9207 5.76659 44.1535C5.13165 43.4471 4.1065 41.7127 3.77404 40.7843C3.0054 38.6118 3.15852 36.6506 4.18236 35.4799C4.44671 35.1785 4.45511 35.1658 4.39735 34.6589C4.30195 33.8289 4.25837 32.6008 4.30192 31.808L4.33666 31.0674L3.22502 29.101C1.5033 26.0375 0.409325 23.4645 -0.012563 21.4992C-0.235219 20.4218 -0.221193 19.9436 0.0522186 19.5899C0.21871 19.3763 0.764928 19.1545 1.42322 19.0329C3.08041 18.742 6.69466 19.0056 10.7155 19.7155L11.1329 19.788L12.0511 18.976C13.5747 17.6264 14.587 16.8696 16.4531 15.706C18.3981 14.4891 20.5929 13.4877 23.0648 12.695L23.8577 12.4414L24.2939 11.2964C25.8547 7.17615 27.4533 4.13844 28.5931 3.12762ZM15.5182 24.243C13.7542 25.2615 12.8718 25.7706 12.2236 26.3413C9.59893 28.6526 8.61811 32.3134 9.73545 35.6274C10.0114 36.4457 10.5201 37.3283 11.5386 39.0923C12.5571 40.8564 13.0671 41.7383 13.6378 42.3864C15.9491 45.0112 19.6103 45.9929 22.9243 44.8755C23.7426 44.5995 24.6249 44.0899 26.3888 43.0714L36.5375 37.2121C38.3016 36.1936 39.184 35.6845 39.8321 35.1137C42.4568 32.8024 43.4373 29.1409 42.3198 25.8269C42.0438 25.0086 41.5342 24.1264 40.5158 22.3624C39.4973 20.5983 38.9882 19.7159 38.4175 19.0678C36.1062 16.4432 32.4454 15.4622 29.1314 16.5796C28.3131 16.8556 27.431 17.3651 25.6669 18.3836L15.5182 24.243Z\" fill=\"url(#paint1_linear_542_3370)\"/>\n<rect x=\"16.4961\" y=\"31.3344\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 16.4961 31.3344)\" fill=\"white\" style=\"fill:white;fill-opacity:1;\"/>\n<rect x=\"27.3125\" y=\"25.0894\" width=\"4.00904\" height=\"8.32646\" rx=\"2.00452\" transform=\"rotate(-30 27.3125 25.0894)\" fill=\"white\" style=\"fill:white;fill-opacity:1;\"/>\n</g>\n<defs>\n<filter id=\"filter0_f_542_3370\" x=\"7.47033\" y=\"19.7475\" width=\"47.742\" height=\"47.7416\" filterUnits=\"userSpaceOnUse\" color-interpolation-filters=\"sRGB\">\n<feFlood flood-opacity=\"0\" result=\"BackgroundImageFix\"/>\n<feBlend mode=\"normal\" in=\"SourceGraphic\" in2=\"BackgroundImageFix\" result=\"shape\"/>\n<feGaussianBlur stdDeviation=\"5.50019\" result=\"effect1_foregroundBlur_542_3370\"/>\n</filter>\n<linearGradient id=\"paint0_linear_542_3370\" x1=\"20\" y1=\"0\" x2=\"20\" y2=\"40\" gradientUnits=\"userSpaceOnUse\">\n<stop stop-color=\"#0EC8A9\" style=\"stop-color:#0EC8A9;stop-color:color(display-p3 0.0565 0.7837 0.6625);stop-opacity:1;\"/>\n<stop offset=\"1\" stop-color=\"#01C886\" style=\"stop-color:#01C886;stop-color:color(display-p3 0.0021 0.7858 0.5246);stop-opacity:1;\"/>\n</linearGradient>\n<linearGradient id=\"paint1_linear_542_3370\" x1=\"14.6642\" y1=\"11.0783\" x2=\"33.3762\" y2=\"43.4885\" gradientUnits=\"userSpaceOnUse\">\n<stop stop-color=\"white\" stop-opacity=\"0.8\" style=\"stop-color:white;stop-opacity:0.8;\"/>\n<stop offset=\"0.437689\" stop-color=\"white\" style=\"stop-color:white;stop-opacity:1;\"/>\n</linearGradient>\n<clipPath id=\"clip0_542_3370\">\n<rect width=\"40\" height=\"40\" rx=\"20\" fill=\"white\" style=\"fill:white;fill-opacity:1;\"/>\n</clipPath>\n</defs>\n</svg>\n"

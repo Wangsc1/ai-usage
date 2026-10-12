@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, WORKBUDDY_SVG, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -130,6 +130,10 @@ function LargeSegBar({ remaining, muted = false }: { remaining: number | null; m
 function ProviderIcon({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
   // SVG paths have explicit fills; changing only the parent's foregroundStyle cannot gray them.
   const graySvg = (path: string) => ({ light: iconSvg(path, SUB.light), dark: iconSvg(path, SUB.dark) })
+  if (provider === "workbuddy") {
+    const gray = (color: string) => WORKBUDDY_SVG.replace(/#(?:01C886|0EC8A9|FFE355)/gi, color).replace(/color\(display-p3[^)]*\)/g, color)
+    return <SVG code={muted ? { light: gray(SUB.light), dark: gray(SUB.dark) } : WORKBUDDY_SVG} resizable frame={{ width: size, height: size }} />
+  }
   if (provider === "deepseek") return <SVG code={DEEPSEEK_SVG} resizable frame={{ width: size, height: size }} />
   if (provider === "claude") return <SVG code={muted ? graySvg(CLAUDE_PATH) : CLAUDE_SVG} resizable frame={{ width: size, height: size }} />
   if (provider === "openai") return <SVG code={muted ? graySvg(OPENAI_PATH) : OPENAI_SVG} resizable frame={{ width: size, height: size }} />
@@ -141,10 +145,11 @@ function shortName(acc: Account) {
 }
 
 function providerName(p: string) {
-  return p === "claude" ? "Claude" : p === "openai" ? "Codex" : p === "deepseek" ? "DeepSeek" : p
+  return p === "workbuddy" ? "WorkBuddy" : p === "claude" ? "Claude" : p === "openai" ? "Codex" : p === "deepseek" ? "DeepSeek" : p
 }
 
 export function isQuotaExhausted(acc: Account): boolean {
+  if (acc.provider === "workbuddy") return acc.credits?.reliable === true && acc.credits?.remaining === 0
   return [acc.fiveHour.remainingPercent, acc.sevenDay.remainingPercent].some(v => typeof v === "number" && Number.isFinite(v) && v === 0)
 }
 
@@ -158,6 +163,22 @@ function BalanceRows({ acc, font = 9, compact = false }: { acc: Account; font?: 
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={2} minScaleFactor={0.65}>{main}</Text>
     <Text font={font} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{detail}</Text>
     {status ? <Text font={font - 1} foregroundStyle={b?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.65}>{status}</Text> : null}
+  </VStack>
+}
+
+// Credits retain their own observation time and expiry; never label package expiry as quota reset.
+function CreditsRows({ acc, font = 8, compact = false }: { acc: Account; font?: number; compact?: boolean }) {
+  const c = acc.credits, muted = isQuotaExhausted(acc)
+  const remaining = c?.reliable ? fmtWorkBuddyNumber(c.remaining) : "未提供"
+  const packages = (c?.packages ?? []).filter(p => p.expiresAt && Date.parse(p.expiresAt) > Date.now() && p.remaining != null && p.remaining > 0).sort((a,b) => a.expiresAt!.localeCompare(b.expiresAt!))
+  const expiry = packages[0]
+  const stamp = (iso: string) => new Date(Date.parse(iso) + 8 * 3600000).toISOString().slice(2,16).replace("T", " ")
+  const status = c?.error?.includes("重新登录") ? "登录失效/请重新登录" : c?.error ? c.reliable ? "读取失败/此前快照" : "读取失败/积分未知" : c?.reliable ? "" : c?.status === "partial" ? "积分明细不完整" : "积分未可靠提供"
+  return <VStack alignment="leading" spacing={compact ? 1 : 3}>
+    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`剩余积分 ${remaining}`}</Text>
+    <Text font={font} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{`已用 ${fmtWorkBuddyNumber(c?.used)} / 总量 ${fmtWorkBuddyNumber(c?.capacity)}`}</Text>
+    <Text font={font - 1} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
+    <Text font={font - 1} foregroundStyle={c?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.6}>{`${status}${c?.fetchedAt ? `${status ? " · " : ""}采集 ${stamp(new Date(c.fetchedAt).toISOString())}` : " · 采集时间未提供"}`}</Text>
   </VStack>
 }
 
@@ -293,7 +314,7 @@ function Small({ data, stale }: { data: UsageData; stale: boolean }) {
   const accounts = data.accounts.slice(0, 2), single = accounts.length === 1
   const account = (acc: Account) => <VStack alignment="leading" spacing={acc.provider === "deepseek" ? 6 : 3}>
     <AccountTitle acc={acc} font={s.title} />
-    {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
+    {acc.provider === "workbuddy" ? <CreditsRows acc={acc} font={7} compact /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
   return <GeometryReader>
     {proxy => {
@@ -342,7 +363,7 @@ function Quad({ acc, s, fixedLcd = false, intrinsic = false }: { acc?: Account; 
     fixedSize={intrinsic ? { horizontal: false, vertical: true } : undefined}
     frame={intrinsic ? { maxWidth: "infinity", alignment: "leading" as any } : { maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd={fixedLcd} />)}
+    {acc.provider === "workbuddy" ? <CreditsRows acc={acc} font={7} compact /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd={fixedLcd} />)}
   </VStack>
 }
 
@@ -458,7 +479,7 @@ function Large({ data, stale }: { data: UsageData; stale: boolean }) {
           modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" }).padding({ top: 1 })} /> : null}
         <VStack spacing={0} fixedSize={{ horizontal: false, vertical: true }}><AccountTitle acc={acc} font={12} /></VStack>
         <VStack alignment="leading" spacing={3} padding={acc.provider === "deepseek" ? { top: 3 } : undefined} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
-          {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} />)}
+          {acc.provider === "workbuddy" ? <CreditsRows acc={acc} /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <LargeQuota label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} />)}
         </VStack>
       </VStack>)}
     </VStack>
@@ -487,10 +508,11 @@ function AccessoryRectangular({ acc }: { acc: Account }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
   return <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", maxHeight: "infinity", alignment: "leading" as any }}>
     <AccountTitle acc={acc} font={s.title} />
-    {acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} compact /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
+    {acc.provider === "workbuddy" ? <CreditsRows acc={acc} font={7} compact /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} compact /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} fixedLcd rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
 }
 function AccessoryCircular({ acc }: { acc: Account }) {
+  if (acc.provider === "workbuddy") return <VStack spacing={1}><ProviderIcon provider="workbuddy" size={12} muted={isQuotaExhausted(acc)} /><Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={isQuotaExhausted(acc) ? SUB : undefined} lineLimit={2} minScaleFactor={0.6}>{acc.credits?.reliable ? fmtWorkBuddyNumber(acc.credits.remaining) : "未提供"}</Text><Text font={7}>{acc.credits?.error ? acc.credits.reliable ? "此前积分" : "积分未知" : "剩余积分"}</Text></VStack>
   if (acc.provider === "deepseek") return <VStack spacing={1}><Text font={9}>DeepSeek</Text><Text font={11} monospacedDigit lineLimit={3} minScaleFactor={0.6}>{acc.balance?.money.map(m => `账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`).join(" · ") || "未提供"}</Text><Text font={7}>{acc.balance?.error ? "读取失败" : acc.balance?.available === false ? "不可用" : "余额"}</Text></VStack>
   // One primary value: the 5 h window remaining percentage.
   const v = acc.fiveHour.remainingPercent
@@ -500,6 +522,7 @@ function AccessoryCircular({ acc }: { acc: Account }) {
     currentValueLabel={<Text font={12} fontWeight="semibold" monospacedDigit>{fmtPct(v)}</Text>} />
 }
 function AccessoryInline({ acc }: { acc: Account }) {
+  if (acc.provider === "workbuddy") return <Text lineLimit={1} foregroundStyle={isQuotaExhausted(acc) ? SUB : undefined}>{`WorkBuddy 剩余积分 ${acc.credits?.reliable ? fmtWorkBuddyNumber(acc.credits.remaining) : "未提供"}${acc.credits?.error ? acc.credits.reliable ? " 此前快照" : " 读取失败" : ""}`}</Text>
   if (acc.provider === "deepseek") return <Text lineLimit={1}>{`DeepSeek ${acc.balance?.money.map(m => `账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`).join(" · ") || "余额未提供"}${acc.balance?.available === false ? " 不可用" : ""}${acc.balance?.error ? " 读取失败" : ""}`}</Text>
   return <Text lineLimit={1} foregroundStyle={isQuotaExhausted(acc) ? SUB : undefined}>{`${providerName(acc.provider)} 5h ${fmtPct(acc.fiveHour.remainingPercent)} · 周 ${fmtPct(acc.sevenDay.remainingPercent)}`}</Text>
 }

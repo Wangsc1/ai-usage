@@ -5,18 +5,19 @@ import {
 } from "scripting"
 import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
+import { WORKBUDDY_SVG, fmtWorkBuddyNumber, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.10.40"
+const VERSION = "1.11.0"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
 // Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
 const ICON_SIZE = 17
 function providerIconCode(provider: string) {
-  return provider === "claude" ? CLAUDE_SVG : provider === "deepseek" ? DEEPSEEK_SVG : provider === "codex" || provider === "openai" ? OPENAI_SVG : null
+  return provider === "workbuddy" ? WORKBUDDY_SVG : provider === "claude" ? CLAUDE_SVG : provider === "deepseek" ? DEEPSEEK_SVG : provider === "codex" || provider === "openai" ? OPENAI_SVG : null
 }
-function providerWord(provider: string) { return provider === "deepseek" ? "DeepSeek" : provider === "claude" ? "Claude" : "Codex" }
+function providerWord(provider: string) { return provider === "workbuddy" ? "WorkBuddy" : provider === "deepseek" ? "DeepSeek" : provider === "claude" ? "Claude" : "Codex" }
 // "1. [icon] name"; unknown icon falls back to the original text label.
 function AccountLine({ index, provider, name, fixed = false }: { index: number; provider: string; name: string; fixed?: boolean }) {
   const code = providerIconCode(provider)
@@ -28,7 +29,7 @@ function AccountLine({ index, provider, name, fixed = false }: { index: number; 
     {nameText}
   </HStack>
 }
-const accountLabel = (a: Account, i: number) => `${i + 1}. ${a.provider === "deepseek" ? "DeepSeek" : a.provider === "claude" ? "Claude" : "Codex"} · ${a.name}`
+const accountLabel = (a: Account, i: number) => `${i + 1}. ${providerWord(a.provider)} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
 function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (next: Account[]) => void }) {
@@ -146,11 +147,13 @@ function SettingsView() {
     return () => clearTimeout(timer)
   }, [source, loginProvider, cooldownTick, claudeCooling])
   const [codexBrowser, setCodexBrowser] = useState<CodexBrowserLogin | null>(null)
+  const [workbuddy, setWorkbuddy] = useState<WorkBuddyLogin | null>(null)
+  const [wbPreparing, setWBPreparing] = useState(false)
   const [dsToken, setDSToken] = useState("")
   const [dsAdding, setDSAdding] = useState(false)
   const [logins, setLogins] = useState(officialAccounts())
-  const [auth] = useState({ codex: null as CodexBrowserLogin | null, alive: true, running: false, epoch: 0, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
-  const stopAuth = () => { if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; setCodexBrowser(null); setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
+  const [auth] = useState({ codex: null as CodexBrowserLogin | null, alive: true, running: false, epoch: 0, workbuddy: null as WorkBuddyLogin | null, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
+  const stopAuth = () => { auth.running = false; setWBPreparing(false); if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; setWorkbuddy(null); if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; setCodexBrowser(null); setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const [statisticsSource, setStatisticsSource] = useState<StatisticsSource>(getStatisticsSource())
   const subCur = getSub2APIConfig()
@@ -167,7 +170,7 @@ function SettingsView() {
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
 
-  useEffect(() => () => { if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
+  useEffect(() => () => { if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
     stopAuth()
@@ -183,6 +186,7 @@ function SettingsView() {
       if (!auth.alive || auth.running || busy || auth.claude || getSource() !== "official") return
       setDSToken(""); setDSAdding(true); return
     }
+    if (loginProvider === "workbuddy") { await startWorkBuddy(); return }
     if (loginProvider === "claude") { startClaude(); return }
     if (auth.running || busy) return
     stopAuth(); setBrowserError("")
@@ -193,6 +197,40 @@ function SettingsView() {
       }, () => { if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex官方授权未完成，请重新登录") } })
       auth.codex = d; setCodexBrowser(d)
     } catch (e: any) { setBrowserError(e.message) }
+  }
+  async function startWorkBuddy() {
+    if (!auth.alive || auth.running || busy || getSource() !== "official") return
+    stopAuth(); setBrowserError("")
+    if (typeof WebViewController !== "function") { setBrowserError(UNSUPPORTED_BROWSER); return }
+    const epoch = auth.epoch
+    const valid = () => auth.alive && auth.epoch === epoch && getSource() === "official"
+    auth.running = true; setBusy(true); setWBPreparing(true)
+    try {
+      const d = await beginWorkBuddyLogin(valid)
+      if (!valid()) { cancelWorkBuddyLogin(d); return }
+      auth.workbuddy = d; setWorkbuddy(d)
+    } catch (e: any) { if (valid()) setBrowserError(e.message || "WorkBuddy登录准备失败") }
+    finally { if (valid()) { auth.running = false; setBusy(false); setWBPreparing(false) } }
+  }
+  async function openWorkBuddy() {
+    const d = auth.workbuddy
+    if (!d || auth.running) return
+    const epoch = auth.epoch
+    const valid = () => auth.alive && auth.epoch === epoch && auth.workbuddy === d && getSource() === "official"
+    let saved = false
+    auth.running = true; setBusy(true); setBrowserError("")
+    try {
+      // Presentation starts before polling; its own ephemeral cookies are never copied into fetch.
+      const shown = presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url)
+      const completed = finishWorkBuddyLogin(d, valid).then(() => {
+        if (!valid()) return
+        saved = true; setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null
+      })
+      await Promise.all([completed, shown.then(() => { if (!saved && valid()) throw new Error("WorkBuddy登录已取消，请重新登录") })])
+      if (valid() && saved) { auth.workbuddy = null; setWorkbuddy(null); await test() }
+    } catch (e: any) {
+      if (valid()) { cancelWorkBuddyLogin(d); auth.workbuddy = null; setWorkbuddy(null); setBrowserError(e.message || "WorkBuddy登录失败，请重试"); auth.releaseBrowser?.(); auth.releaseBrowser = null }
+    } finally { if (auth.alive && epoch === auth.epoch) { auth.running = false; setBusy(false) } }
   }
   async function completeCodex(d: CodexBrowserLogin) {
     const epoch = auth.epoch
@@ -293,7 +331,7 @@ function SettingsView() {
 
   // Same remove-then-insert contract as the official editable_list onMove example; persisted by stable ID.
   function moveLogins(indices: number[], newOffset: number) {
-    if (busy || claude || codexBrowser || getSource() !== "official") return
+    if (busy || claude || codexBrowser || workbuddy || getSource() !== "official") return
     const current = sortAccounts(logins, "official")
     if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
     const moving = indices.map(i => current[i])
@@ -318,7 +356,7 @@ function SettingsView() {
   }
 
   const loginRow = (a: ReturnType<typeof officialAccounts>[number], i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
-          <Button title="删除" role="destructive" disabled={busy || !!claude || !!codexBrowser} action={async () => {
+          <Button title="删除" role="destructive" disabled={busy || !!claude || !!codexBrowser || !!workbuddy} action={async () => {
           try {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
@@ -374,12 +412,12 @@ function SettingsView() {
 
       {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
-          {!dsAdding && !claude && !codexBrowser
+          {!dsAdding && !claude && !codexBrowser && !workbuddy && !wbPreparing
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
             : <Text foregroundStyle="secondaryLabel">{loginProvider === "deepseek" ? "API Key" : "授权进行中"}</Text>}
           <Spacer />
           <Picker title="" pickerStyle="menu" tint="secondaryLabel" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
-            <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text>
+            <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text><Text tag="workbuddy">WorkBuddy</Text>
           </Picker>
         </HStack>
         {loginProvider === "deepseek" && dsAdding ? <>
@@ -392,6 +430,12 @@ function SettingsView() {
         </> : null}
         {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
         {loginProvider === "claude" && claudeProgress && claudeProgress !== "等待Claude回调（尚未收到）" ? <Text>{claudeProgress}</Text> : null}
+        {wbPreparing ? <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} /> : null}
+        {workbuddy ? <>
+          <Text font={12} foregroundStyle="secondaryLabel">国内个人账号 · 客户端私有协议，可能变更。浏览器授权成功保存后自动返回。</Text>
+          <Button title="点击登录" action={openWorkBuddy} disabled={busy} />
+          <Button title="取消登录" action={() => { stopAuth(); auth.running = false; setBusy(false) }} />
+        </> : null}
         {codexBrowser ? <>
           <Button title="点击登录" action={openCodex} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
@@ -407,7 +451,7 @@ function SettingsView() {
           </> : null}
           <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
-        {!claude && !codexBrowser && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
+        {!claude && !codexBrowser && !workbuddy && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
         {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortAccounts(logins, "official")[i], i)} />
           : sortAccounts(logins, "official").map(loginRow)}
         {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
@@ -429,6 +473,21 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section> : null}
 
+      {accounts.some(a => a.provider === "workbuddy") ? <Section header={<Text>WorkBuddy个人积分（缓存）</Text>}>
+        {accounts.filter(a => a.provider === "workbuddy").map(a => <NavigationLink key={a.id} destination={<Form navigationTitle="WorkBuddy积分明细">
+          <Section header={<Text>{a.name}</Text>}>
+            <Text>{a.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(a.credits.remaining)}` : "积分未可靠提供"}</Text>
+            <Text>{`已用 ${fmtWorkBuddyNumber(a.credits?.used)} / 总量 ${fmtWorkBuddyNumber(a.credits?.capacity)}`}</Text>
+            <Text>{a.credits?.fetchedAt ? `真实采集时间 ${new Date(a.credits.fetchedAt).toISOString()}` : "采集时间未提供"}</Text>
+            {a.credits?.error ? <Text>{a.credits.error}</Text> : null}
+          </Section>
+          {(a.credits?.packages ?? []).map((p, i) => <Section key={String(i)} header={<Text>{p.name}</Text>}>
+            <Text>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · 已用 ${fmtWorkBuddyNumber(p.used)} / 总量 ${fmtWorkBuddyNumber(p.capacity)}`}</Text>
+            <Text>{`资源到期 ${p.expiresAt ?? "未提供"}`}</Text>
+            <Text>{`周期结束 ${p.cycleEnd ?? "未提供"}（不等同资源到期）`}</Text>
+          </Section>)}
+        </Form>}><Text>{a.name} · 积分与有效期</Text></NavigationLink>)}
+      </Section> : null}
       <Section header={<Text>刷新预览</Text>}>
         <Picker title={"刷新间隔"} value={refreshMinutes} onChanged={async (value: string) => {
           setRefreshMinutes(value)
