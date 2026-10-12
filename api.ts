@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.11.2"
+export const VERSION = "1.11.3"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -1462,7 +1462,7 @@ export function fmtWorkBuddyCheckin(c: WorkBuddyCheckin | undefined): string {
   if (c?.error) return "签到未知（查询失败）"
   if (!c || c.observedAt == null || c.checked == null || c.observedAt > Date.now()) return "签到未知"
   if (workBuddyDay(c.observedAt) !== workBuddyDay(Date.now())) return "签到未知（旧缓存）"
-  return `${c.checked ? "已签到" : "未签到"}（本日缓存）`
+  return `${c.checked ? "已签到" : "未签到"}`
 }
 export type WorkBuddyCredits = {
   checkin?: WorkBuddyCheckin

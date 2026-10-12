@@ -5,10 +5,10 @@ import {
 } from "scripting"
 import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
-import { workBuddyBrandImage, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
+import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.2"
+const VERSION = "1.11.3"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -87,12 +87,72 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
     await Widget.reloadAll()
     close()
   }
-  return <Form navigationTitle="小组件用户名" navigationBarTitleDisplayMode="inline">
+  return <Form navigationTitle="账号详情" navigationBarTitleDisplayMode="inline">
     <Section header={<Text>{account.name}</Text>} footer={<Text>仅修改本机小组件显示，所有尺寸共用。留空保存恢复原名；不修改远端账号。三种额度来源独立保存。</Text>}>
       <TextField title="小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
     </Section>
+    <AccountCacheSections account={account} source={source} />
   </Form>
+}
+
+// Shared detail content consumes only the passed cached account and source-local cache timestamps.
+function AccountCacheSections({ account, source }: { account: Account; source: DataSource }) {
+  const iso = (at: number | null | undefined) => typeof at === "number" && Number.isFinite(at) && at > 0 && at <= 8640000000000000 ? new Date(at).toISOString() : "未提供"
+  if (account.provider === "workbuddy") return <>
+          <Section header={<Text>WorkBuddy个人积分（缓存）</Text>}>
+            <Text>{account.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(account.credits.remaining)}` : "积分未可靠提供"}</Text>
+            <Text>{`已用 ${fmtWorkBuddyNumber(account.credits?.used)} / 总量 ${fmtWorkBuddyNumber(account.credits?.capacity)}`}</Text>
+            <Text>{fmtWorkBuddyCheckin(account.credits?.checkin)}</Text>
+            <Text>{`真实采集时间 ${iso(account.credits?.fetchedAt)}`}</Text>
+            {account.credits?.error || account.readError ? <Text>{account.credits?.error || account.readError}</Text> : null}
+          </Section>
+          {(account.credits?.packages ?? []).map((p, i) => <Section key={String(i)} header={<Text>{p.name}</Text>}>
+            <Text>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · 已用 ${fmtWorkBuddyNumber(p.used)} / 总量 ${fmtWorkBuddyNumber(p.capacity)}`}</Text>
+            <Text>{`资源到期 ${p.expiresAt ?? "未提供"}`}</Text>
+            <Text>{`周期结束 ${p.cycleEnd ?? "未提供"}（不等同资源到期）`}</Text>
+          </Section>)}
+  </>
+  if (account.provider === "deepseek") {
+    const b = account.balance
+    return <>
+      <Section header={<Text>DeepSeek余额（缓存）</Text>}>
+        <Text>{`认证方式 ${b?.auth || "未提供"}`}</Text>
+        <Text>{`可用状态 ${b?.available == null ? "未提供" : b.available ? "可用" : "不可用"}`}</Text>
+        <Text>{`余额采集时间 ${iso(b?.fetchedAt)}`}</Text>
+        {b?.stale ? <Text>此前余额缓存</Text> : null}
+        {b?.error || account.readError ? <Text>{b?.error || account.readError}</Text> : null}
+        {!b?.money?.length ? <Text>余额未提供</Text> : null}
+      </Section>
+      {(b?.money ?? []).map((m, i) => <Section key={String(i)} header={<Text>{m.currency}</Text>}>
+        <Text>{`账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`}</Text>
+        <Text>{`充值余额 ${fmtDeepSeekMoney(m.currency, m.toppedUp)}`}</Text>
+        <Text>{`赠送余额 ${fmtDeepSeekMoney(m.currency, m.granted)}`}</Text>
+        {b?.auth === "网页Token" || m.weekCost != null ? <>
+          <Text>{`近7日消费 ${fmtDeepSeekMoney(m.currency, m.weekCost)}`}</Text>
+          <Text>{`7日消费采集时间 ${iso(b?.weekFetchedAt)}`}</Text>
+          {b?.weekStale ? <Text>此前7日消费缓存</Text> : null}
+        </> : null}
+      </Section>)}
+    </>
+  }
+  const cache = Storage.get<{ fetchedAt?: number }>(source === "official" ? "ai_usage_official_cache_v1" : source === "sub2api" ? "ai_usage_sub2api_quota_v1" : "ai_usage_cache_v1")
+  const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${v}%` : "未提供"
+  return <>
+    <Section header={<Text>{`${providerWord(account.provider)}额度（缓存）`}</Text>}>
+      <Text>{`采集时间 ${iso(cache?.fetchedAt)}`}</Text>
+      <Text>只读本机缓存，不自动刷新。</Text>
+      {account.readError ? <Text>{account.readError}</Text> : null}
+    </Section>
+    {([["5 h", account.fiveHour], ["7 d", account.sevenDay]] as const).map(([label, w]) => <Section key={label} header={<Text>{label}</Text>}>
+      <Text>{`剩余额度 ${percent(w?.remainingPercent)}`}</Text>
+      <Text>{`已用额度 ${percent(w?.usedPercent)}`}</Text>
+      <Text>{`重置时间 ${w?.resetsAt || "未提供"}`}</Text>
+    </Section>)}
+    <Section header={<Text>重置卡（缓存）</Text>}>
+      <Text>{typeof account.resetCredits === "number" && Number.isFinite(account.resetCredits) && account.resetCredits >= 0 ? `可用重置卡 ${account.resetCredits}` : "可用重置卡 未提供"}</Text>
+    </Section>
+  </>
 }
 
 const UNSUPPORTED_BROWSER = "当前Scripting不支持WebViewController临时浏览器，请更新Scripting"
@@ -475,22 +535,6 @@ function SettingsView() {
         {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
       </Section> : null}
 
-      {accounts.some(a => a.provider === "workbuddy") ? <Section header={<Text>WorkBuddy个人积分（缓存）</Text>}>
-        {accounts.filter(a => a.provider === "workbuddy").map(a => <NavigationLink key={a.id} destination={<Form navigationTitle="WorkBuddy积分明细">
-          <Section header={<Text>{a.name}</Text>}>
-            <Text>{a.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(a.credits.remaining)}` : "积分未可靠提供"}</Text>
-            <Text>{`已用 ${fmtWorkBuddyNumber(a.credits?.used)} / 总量 ${fmtWorkBuddyNumber(a.credits?.capacity)}`}</Text>
-            <Text>{fmtWorkBuddyCheckin(a.credits?.checkin)}</Text>
-            <Text>{a.credits?.fetchedAt ? `真实采集时间 ${new Date(a.credits.fetchedAt).toISOString()}` : "采集时间未提供"}</Text>
-            {a.credits?.error ? <Text>{a.credits.error}</Text> : null}
-          </Section>
-          {(a.credits?.packages ?? []).map((p, i) => <Section key={String(i)} header={<Text>{p.name}</Text>}>
-            <Text>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · 已用 ${fmtWorkBuddyNumber(p.used)} / 总量 ${fmtWorkBuddyNumber(p.capacity)}`}</Text>
-            <Text>{`资源到期 ${p.expiresAt ?? "未提供"}`}</Text>
-            <Text>{`周期结束 ${p.cycleEnd ?? "未提供"}（不等同资源到期）`}</Text>
-          </Section>)}
-        </Form>}><Text>{a.name} · 积分与有效期</Text></NavigationLink>)}
-      </Section> : null}
       <Section header={<Text>刷新预览</Text>}>
         <Picker title={"刷新间隔"} value={refreshMinutes} onChanged={async (value: string) => {
           setRefreshMinutes(value)
