@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.11.1"
+export const VERSION = "1.11.2"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -268,7 +268,7 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
       catch (e) {
         if (a.provider !== "workbuddy" || e instanceof HttpError && e.status === 401) throw e
         const old = Storage.get<UsageData>(KEY_CACHE)?.accounts.find(x => x.id === a.accountId)
-        return { ...(old ?? { fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null }), id: a.accountId, enabled: !!a.enabled, available: !!a.available, provider: a.provider, name: String(a.displayName ?? a.identity ?? a.accountId), fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null, credits: { ...(old?.credits ?? WorkBuddyCN.unknown()), error: "Parrot WorkBuddy详情读取失败，显示此前快照" }, readError: "Parrot WorkBuddy详情读取失败" }
+        return { ...(old ?? { fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null }), id: a.accountId, enabled: !!a.enabled, available: !!a.available, provider: a.provider, name: String(a.displayName ?? a.identity ?? a.accountId), fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null, credits: { ...(old?.credits ?? WorkBuddyCN.unknown()), checkin: workBuddyCheckin(null, null, "Parrot详情读取失败"), error: "Parrot WorkBuddy详情读取失败，显示此前快照" }, readError: "Parrot WorkBuddy详情读取失败" }
       }
       // 重置卡：Parrot 管理接口暂未提供只读字段；若日后账号详情返回 resetCreditCount 则自动显示
       const rc = d?.resetCreditCount ?? d?.openai?.resetCreditCount
@@ -1449,7 +1449,23 @@ function quotaFallback(id: string, name: string, provider: string): Account {
 
 // WorkBuddy CN personal CLI profile, from danger-dream/Parrot 25b93d3 oauth/workbuddy.
 // Private client protocol, not OAuth/PKCE or an API-key balance API. No check-in/trial endpoints.
+export type WorkBuddyCheckin = { checked: boolean | null; observedAt: number | null; active: boolean | null; error?: string }
+// Upstream Parrot business_date uses billing.CN_TIMEZONE = Asia/Shanghai (UTC+8).
+export function workBuddyDay(at: number): string { return new Date(at + 8 * 3600000).toISOString().slice(0,10) }
+export function workBuddyCheckin(raw: any, observedAt: any, error?: string): WorkBuddyCheckin {
+  const at = typeof observedAt === "number" && Number.isFinite(observedAt) && observedAt > 0 && observedAt <= Date.now() ? observedAt : null
+  const checked = raw?.todayCheckedIn ?? raw?.today_checked_in
+  const active = raw?.active ?? raw?.Active
+  return { checked: typeof checked === "boolean" && !error && active !== false && raw?.supported !== false ? checked : null, observedAt: at, active: typeof active === "boolean" ? active : null, ...(error ? { error } : {}) }
+}
+export function fmtWorkBuddyCheckin(c: WorkBuddyCheckin | undefined): string {
+  if (c?.error) return "签到未知（查询失败）"
+  if (!c || c.observedAt == null || c.checked == null || c.observedAt > Date.now()) return "签到未知"
+  if (workBuddyDay(c.observedAt) !== workBuddyDay(Date.now())) return "签到未知（旧缓存）"
+  return `${c.checked ? "已签到" : "未签到"}（本日缓存）`
+}
 export type WorkBuddyCredits = {
+  checkin?: WorkBuddyCheckin
   remaining: number | null; capacity: number | null; used: number | null; reliable: boolean
   status: string; complete: boolean; fetchedAt: number | null; currentStatus?: string; error?: string
   packages: { name: string; remaining: number | null; capacity: number | null; used: number | null; expiresAt: string | null; cycleEnd: string | null }[]
@@ -1592,7 +1608,7 @@ export function parrot(s: any, old?: WorkBuddyCredits): WorkBuddyCredits {
   const current = snapshot(s)
   if (!current.reliable) {
     const error = !s ? "Parrot未提供WorkBuddy个人积分快照" : `Parrot WorkBuddy积分${current.status}，未可靠提供`
-    return old?.reliable ? { ...old, currentStatus: current.status, error: error + "，显示此前快照" } : { ...current, error }
+    return old?.reliable ? { ...old, checkin: current.checkin, currentStatus: current.status, error: error + "，显示此前快照" } : { ...current, error }
   }
   return current
 }
@@ -1603,7 +1619,7 @@ export function snapshot(s: any): WorkBuddyCredits {
   const remaining = number(c.remaining), capacity = number(c.capacity), used = number(c.used)
   const reliable = complete && s.status === "known" && c.reliable === true && remaining != null && (capacity == null || remaining <= capacity) && (used == null || capacity == null || Math.abs(capacity - remaining - used) <= 0.000001)
   const packages = Array.isArray(s.packages) ? s.packages.map((p: any) => ({ name: typeof p?.name === "string" ? p.name : "资源包", remaining: number(p?.remaining), capacity: number(p?.capacity), used: number(p?.used), expiresAt: cnTime(p?.expiresAt), cycleEnd: cnTime(p?.cycleEnd) })) : []
-  return { remaining, capacity, used, reliable, complete, status: typeof s.status === "string" ? s.status : "unknown", fetchedAt: typeof s.fetchedAt === "number" && s.fetchedAt > 0 && s.fetchedAt <= 8640000000000000 ? s.fetchedAt : null, packages }
+  return { checkin: workBuddyCheckin(s.checkin, s.checkin?.observedAt ?? s.checkin?.observed_at, s.errors?.checkin ? "Parrot签到查询失败" : undefined), remaining, capacity, used, reliable, complete, status: typeof s.status === "string" ? s.status : "unknown", fetchedAt: typeof s.fetchedAt === "number" && s.fetchedAt > 0 && s.fetchedAt <= 8640000000000000 ? s.fetchedAt : null, packages }
 }
 function normalize(p: any) {
   const prefix = ["Size", "Remain", "Used"].some(k => p["CycleCapacity" + k] !== undefined || p["CycleCapacity" + k + "Precise"] !== undefined) ? "CycleCapacity" : "Capacity"
@@ -1651,14 +1667,27 @@ export async function read(c: Credential): Promise<Account | null> {
     const sum = (k: "remaining" | "capacity" | "used") => packages.length && packages.every(p => p[k] != null) ? packages.reduce((n,p) => n + p[k]!, 0) : null
     const reliable = packages.length > 0 && packages.every(p => p.reliable) && number(sum("remaining")) != null
     const credits: WorkBuddyCredits = { remaining: sum("remaining"), capacity: sum("capacity"), used: sum("used"), reliable, status: packages.length ? reliable ? "known" : "partial" : "empty", complete, fetchedAt: Date.now(), packages: packages.map(({ reliable, ...p }) => p) }
+    // Read-only upstream queries. Never call checkin, claim_trial, payment or refresh-status actions.
+    const started = Date.now()
+    try {
+      let status: any
+      try { status = await wire(BILLING, "/v2/billing/meter/checkin-activity-status", "POST", headers(token), {}) }
+      catch (e) {
+        if (!(e instanceof WBError) || !e.message.includes("HTTP 404")) throw e
+        status = await wire(BILLING, "/v2/billing/meter/checkin-status", "POST", headers(token), {})
+      }
+      const observed = Date.now()
+      credits.checkin = workBuddyCheckin(status, observed, workBuddyDay(started) !== workBuddyDay(observed) ? "查询跨越北京时间日期边界" : undefined)
+    } catch { credits.checkin = workBuddyCheckin(null, null, "WorkBuddy签到查询失败") }
+    if (!same(token)) return null
     const previous = officialCached()?.accounts.find(a => a.id === c.id)?.credits
-    if (!reliable && previous?.reliable) return make({ ...previous, currentStatus: credits.status, error: `本次${credits.status}，显示此前快照` }, "WorkBuddy本次积分未可靠提供")
+    if (!reliable && previous?.reliable) return make({ ...previous, checkin: credits.checkin, currentStatus: credits.status, error: `本次${credits.status}，显示此前快照` }, "WorkBuddy本次积分未可靠提供")
     return make(credits)
   } catch (e) {
     if (!credentials().some(x => x.id === c.id)) return null
     const error = e instanceof WBError ? e.invalid && !e.message.includes("重新登录") ? `WorkBuddy凭据失效，请重新登录（${e.message}）` : e.message : "WorkBuddy积分读取失败，请重试"
     const previous = officialCached()?.accounts.find(a => a.id === c.id)?.credits
-    const a = make(previous ? { ...previous, error } : unknown(error), error)
+    const a = make(previous ? { ...previous, checkin: workBuddyCheckin(null, null, "本次读取失败"), error } : { ...unknown(error), checkin: workBuddyCheckin(null, null, "本次读取失败") }, error)
     if (e instanceof WBError && e.invalid) a.available = false
     return a
   }

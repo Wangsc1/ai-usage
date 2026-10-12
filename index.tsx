@@ -5,10 +5,10 @@ import {
 } from "scripting"
 import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
-import { workBuddyBrandImage, fmtWorkBuddyNumber, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
+import { workBuddyBrandImage, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.1"
+const VERSION = "1.11.2"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -480,6 +480,7 @@ function SettingsView() {
           <Section header={<Text>{a.name}</Text>}>
             <Text>{a.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(a.credits.remaining)}` : "积分未可靠提供"}</Text>
             <Text>{`已用 ${fmtWorkBuddyNumber(a.credits?.used)} / 总量 ${fmtWorkBuddyNumber(a.credits?.capacity)}`}</Text>
+            <Text>{fmtWorkBuddyCheckin(a.credits?.checkin)}</Text>
             <Text>{a.credits?.fetchedAt ? `真实采集时间 ${new Date(a.credits.fetchedAt).toISOString()}` : "采集时间未提供"}</Text>
             {a.credits?.error ? <Text>{a.credits.error}</Text> : null}
           </Section>
