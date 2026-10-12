@@ -8,7 +8,7 @@ import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogi
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.21"
+const VERSION = "1.22"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -89,7 +89,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
   }
   return <Form navigationTitle="账号详情" navigationBarTitleDisplayMode="inline">
     <Section header={<Text>{account.name}</Text>} footer={<Text>自定义小组件用户名</Text>}>
-      <TextField title="小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
+      <TextField title="自定义小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
     </Section>
     <AccountCacheSections account={account} source={source} />
@@ -436,7 +436,7 @@ function SettingsView() {
           <NavigationLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
             <VStack alignment="leading" spacing={3}>
               <AccountLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed />
-              <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
+              <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
             </VStack>
           </NavigationLink>
           <Spacer />
@@ -532,7 +532,7 @@ function SettingsView() {
           destination={<WidgetNamePage account={a} source={source} onSaved={() => setAccounts(cachedAccounts())} />}>
           <VStack alignment="leading" spacing={3}>
             <AccountLine index={i} provider={a.provider} name={a.name} />
-            <Text font={12} foregroundStyle="secondaryLabel">小组件用户名：{getWidgetName(a.id, source) || "使用原名（点此设置）"}</Text>
+            <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, source) || "使用原名（点此设置）"}</Text>
           </VStack>
         </NavigationLink>)}
         {accounts.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} onSaved={setAccounts} />}>
