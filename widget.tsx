@@ -1,5 +1,5 @@
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
+import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -166,17 +166,18 @@ function BalanceRows({ acc, font = 9, compact = false }: { acc: Account; font?: 
 // Credits retain their own observation time and expiry; never label package expiry as quota reset.
 function CreditsRows({ acc, font = 8, compact = false }: { acc: Account; font?: number; compact?: boolean }) {
   const c = acc.credits, muted = isQuotaExhausted(acc)
-  const remaining = c?.reliable && typeof c.remaining === "number" && Number.isFinite(c.remaining) ? c.remaining.toFixed(2) : "未提供"
+  const amount = (n: number | null | undefined) => c?.reliable && typeof n === "number" && Number.isFinite(n) && n >= 0 ? n.toFixed(2) : "未提供"
+  const remaining = amount(c?.remaining), capacity = amount(c?.capacity)
+  const usedPct = c?.reliable && typeof c.used === "number" && Number.isFinite(c.used) && c.used >= 0 && typeof c.capacity === "number" && Number.isFinite(c.capacity) && c.capacity > 0 ? (c.used / c.capacity * 100).toFixed(2) + "%" : "未提供"
   const packages = (c?.packages ?? []).filter(p => p.expiresAt && Date.parse(p.expiresAt) > Date.now() && p.remaining != null && p.remaining > 0).sort((a,b) => a.expiresAt!.localeCompare(b.expiresAt!))
   const expiry = packages[0]
   const stamp = (iso: string) => new Date(Date.parse(iso) + 8 * 3600000).toISOString().slice(2,16).replace("T", " ")
   const status = c?.error?.includes("重新登录") ? "登录失效/请重新登录" : c?.error ? c.reliable ? "读取失败/此前快照" : "读取失败/积分未知" : c?.reliable ? "" : c?.status === "partial" ? "积分明细不完整" : "积分未可靠提供"
   const checkin = fmtWorkBuddyCheckin(c?.checkin)
-  return <VStack alignment="leading" spacing={compact ? 1 : 3}>
+  return <VStack alignment="leading" spacing={compact ? 3 : 6}>
     <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`账户: 个人 · 中国区 | ${checkin}`}</Text>
-    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`剩余积分：${remaining}`}</Text>
-    <Text font={font} monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{fmtWorkBuddyUsed(c?.used, c?.capacity)}</Text>
-    <Text font={font - 1} foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
+    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : FG} lineLimit={1} minScaleFactor={0.65}>{`积分：已用 ${usedPct}（${capacity}/${remaining}）`}</Text>
+    <Text font={font + 3} fontWeight="semibold" monospacedDigit foregroundStyle={SUB} lineLimit={1} minScaleFactor={0.65}>{expiry ? `${fmtWorkBuddyNumber(expiry.remaining)}积分 到期 ${stamp(expiry.expiresAt!)}${packages.length > 1 ? ` 等${packages.length}包` : ""}` : "有效期未提供"}</Text>
     {status ? <Text font={font - 1} foregroundStyle={c?.error ? RED : SUB} lineLimit={1} minScaleFactor={0.6}>{status}</Text> : null}
   </VStack>
 }
