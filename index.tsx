@@ -8,7 +8,7 @@ import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogi
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.11.6"
+const VERSION = "1.11.7"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -443,6 +443,7 @@ function SettingsView() {
       navigationBarTitleDisplayMode={"inline"}
       toolbar={{
         cancellationAction: <Button title={"完成"} action={dismiss} />,
+        primaryAction: <Button title={busy ? "刷新中…" : "刷新"} disabled={busy || !!claude || !!codexBrowser || !!workbuddy} action={async () => { if (busy || auth.running || auth.claude || auth.codex || auth.workbuddy) return; await test() }} />,
       }}
     >
       <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>}>
