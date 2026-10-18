@@ -95,7 +95,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
       <TextField title="自定义小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
     </Section>
-    {account.provider === "antigravity" ? <Section header={<Text>Antigravity额度分组</Text>} footer={<Text>选择仅保存在本机，按账号及来源独立；组件同步显示。缺少分组或窗口时显示未知，不回退其他分组。</Text>}>
+    {account.provider === "antigravity" ? <Section header={<Text>Antigravity额度分组</Text>}>
       {source === "official" ? <Picker title="显示额度" value={quotaMode} onChanged={async value => {
         if (getSource() !== source || !officialAccounts().some(a => a.id === account.id)) return
         const mode = ANTIGRAVITY_MODES.find(m => m.value === value)?.value
@@ -107,7 +107,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
       }}>
         {ANTIGRAVITY_MODES.map(mode => <Text key={mode.value} tag={mode.value}>{mode.label}</Text>)}
       </Picker> : null}
-      <Text>{antigravityModeHint(detailAccount, source)}</Text>
+      {source !== "official" ? <Text>{antigravityModeHint(detailAccount, source)}</Text> : null}
     </Section> : null}
     <AccountCacheSections account={detailAccount} source={source} />
   </Form>
