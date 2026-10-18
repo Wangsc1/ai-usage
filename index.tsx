@@ -1,4 +1,4 @@
-import { antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
+import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, VStack, useState, useEffect,
@@ -80,6 +80,9 @@ function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (n
 function WidgetNamePage({ account, source, onSaved }: { account: Account; source: DataSource; onSaved: () => void }) {
   const close = Navigation.useDismiss()
   const [name, setName] = useState(getWidgetName(account.id, source))
+  const [quotaMode, setQuotaMode] = useState<AntigravityMode>(account.provider === "antigravity" ? getAntigravityMode(account.id, source) : "summary")
+  const detailAccount = account.provider === "antigravity" && source === "official" && getSource() === source
+    ? managementAccounts().find(a => a.id === account.id) ?? account : account
   async function save() {
     saveWidgetName(account.id, name, source)
     setName(name.trim())
@@ -92,12 +95,27 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
       <TextField title="自定义小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
     </Section>
-    <AccountCacheSections account={account} />
+    {account.provider === "antigravity" ? <Section header={<Text>Antigravity额度分组</Text>} footer={<Text>选择仅保存在本机，按账号及来源独立；组件同步显示。缺少分组或窗口时显示未知，不回退其他分组。</Text>}>
+      {source === "official" ? <Picker title="显示额度" value={quotaMode} onChanged={async value => {
+        if (getSource() !== source || !officialAccounts().some(a => a.id === account.id)) return
+        const mode = ANTIGRAVITY_MODES.find(m => m.value === value)?.value
+        if (!mode) return
+        saveAntigravityMode(account.id, mode, source); setQuotaMode(mode)
+        requestAntigravityWidgetProjection()
+        onSaved()
+        await Widget.reloadAll()
+      }}>
+        {ANTIGRAVITY_MODES.map(mode => <Text key={mode.value} tag={mode.value}>{mode.label}</Text>)}
+      </Picker> : null}
+      <Text>{antigravityModeHint(detailAccount, source)}</Text>
+    </Section> : null}
+    <AccountCacheSections account={detailAccount} source={source} />
   </Form>
 }
 
 // Shared detail content consumes only the passed cached account and source-local cache timestamps.
-function AccountCacheSections({ account }: { account: Account }) {
+function AccountCacheSections({ account, source = getSource() }: { account: Account; source?: DataSource }) {
+  account = projectAntigravityAccount(account, source)
   const beijingTime = (at: number) => {
     const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
     return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`

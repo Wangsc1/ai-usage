@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.28"
+export const VERSION = "1.29"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -124,11 +124,12 @@ function syncAccountOrder(accounts: Account[], source: DataSource): Account[] {
   return sorted
 }
 export function cachedAccounts(): Account[] {
-  return sortAccounts((getSource() === "official" ? officialCached() : Storage.get<UsageData>(getSource() === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE))?.accounts ?? [])
+  const source = getSource()
+  return sortAccounts(((source === "official" ? officialCached() : Storage.get<UsageData>(source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE))?.accounts ?? []).map(a => projectAntigravityAccount(a, source)), source)
 }
 export function widgetAccounts(accounts: Account[], parameter = ""): Account[] {
   // 参数序号与 App 账号列表从上到下一致，1 起算；支持英文/中文逗号或空格。
-  accounts = sortAccounts(accounts)
+  accounts = sortAccounts(accounts.map(a => projectAntigravityAccount(a, getSource())))
   const numbers = parameter.split(/[,，\s]+/).filter(Boolean)
   if (numbers.length) {
     const picked: Account[] = []
@@ -610,20 +611,24 @@ export function managementAccounts(): Account[] {
     sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null,
   }), "official")
 }
-export function officialCached(): UsageData | null {
+function officialSnapshot(): UsageData | null {
   const cache = Storage.get<UsageData>(CACHE)
   if (!cache) return null
   const names = new Map(officialAccounts().map(a => [a.id, a.name]))
   return { ...cache, accounts: sortAccounts(cache.accounts.map(a => ({ ...a, name: names.get(a.id) ?? a.name })), "official") }
 }
+export function officialCached(): UsageData | null {
+  const cache = officialSnapshot()
+  return cache ? { ...cache, accounts: cache.accounts.map(a => projectAntigravityAccount(a, "official")) } : null
+}
 export function logoutOfficial(id: string) {
-  if (id.startsWith("antigravity:")) Antigravity.logout(id)
+  if (id.startsWith("antigravity:")) { Antigravity.logout(id); saveAntigravityMode(id, "summary", "official"); if (!Antigravity.accounts().length) Storage.remove(AG_LOCAL_WIDGET_UNTIL) }
   else if (id.startsWith("workbuddy:")) WorkBuddyCN.logout(id)
   else if (id.startsWith("deepseek:")) { if (!Keychain.set(DS_KEY, JSON.stringify(dsCredentials().filter(x => x.id !== id)))) throw new Error("DeepSeek钥匙串保存失败") }
   else if (id.startsWith("claude:")) logoutClaude(id)
   else persist(credentials().filter(x => x.id !== id))
   saveWidgetName(id, "", "official")
-  const cache = officialCached()
+  const cache = officialSnapshot()
   if (cache) Storage.set(CACHE, { ...cache, accounts: cache.accounts.filter(a => a.id !== id) })
   const order = Storage.get<string[]>(orderKey("official"))
   if (order) saveAccountOrder(order.filter(x => x !== id), "official")
@@ -878,8 +883,8 @@ export async function loadOfficialUsage(): Promise<LoadResult> {
     const accounts = syncAccountOrder([...codex, ...claude, ...deepseek, ...workbuddy, ...antigravity].filter(a => live.has(a.id)), "official")
     const providerErrors = accounts.flatMap(a => a.readError ? [`${a.name}：${a.readError}`] : [])
     const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts, fetchedAt: Date.now(), ...(providerErrors.length ? { providerErrors } : {}) }
-    Storage.set(CACHE, data)
-    return { data, stale: false, error: null }
+    Storage.set(CACHE, data) // canonical windows + all raw groups; never persist a selected projection
+    return { data: { ...data, accounts: data.accounts.map(a => projectAntigravityAccount(a, "official")) }, stale: false, error: null }
   } catch (e: any) {
     // Logout may have pruned the cache while a request was in flight; never resurrect its old snapshot.
     const cached = officialCached()
@@ -1446,7 +1451,7 @@ async function dsSub2(cfg: ReturnType<typeof getSub2APIConfig>, row: any, old?: 
 }
 
 function quotaFallback(id: string, name: string, provider: string): Account {
-  const old = officialCached()?.accounts.find(a => a.id === id)
+  const old = officialSnapshot()?.accounts.find(a => a.id === id)
   return { ...(old ?? { id, name, provider, enabled: true, available: false, fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null }, sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null }), readError: "额度读取失败，保留原账号缓存；可重试" }
 }
 
@@ -1734,6 +1739,68 @@ export type AntigravityQuota = {
   tier: string | null; creditAmount: number | null; minimumCreditAmount: number | null;
   groups: { name: string; buckets: { name: string; window: string; remainingPercent: number | null; resetsAt: string | null }[] }[]
 }
+export type AntigravityMode = "summary" | "gemini" | "claude_gpt"
+export const ANTIGRAVITY_MODES = [
+  { value: "summary", label: "两个分组最低剩余额度汇总" },
+  { value: "gemini", label: "Gemini Models" },
+  { value: "claude_gpt", label: "Claude and GPT models" },
+] as const
+// The verified public parser exposes displayName, not a stable provider group ID.
+// Match these real group names exactly (after whitespace trimming), never their order.
+const AG_GROUP_NAMES = { gemini: "Gemini Models", claude_gpt: "Claude and GPT models" }
+const agModeKey = (source: DataSource) => `ai_usage_antigravity_mode_${source}_v1`
+function isAntigravityMode(value: any): value is AntigravityMode { return value === "summary" || value === "gemini" || value === "claude_gpt" }
+export function getAntigravityMode(id: string, source: DataSource = getSource()): AntigravityMode {
+  const modes = Storage.get<Record<string, AntigravityMode>>(agModeKey(source)) ?? {}
+  return Object.prototype.hasOwnProperty.call(modes, id) && isAntigravityMode(modes[id]) ? modes[id] : "summary"
+}
+export function saveAntigravityMode(id: string, mode: AntigravityMode, source: DataSource = getSource()) {
+  if (!isAntigravityMode(mode)) return
+  const modes = { ...(Storage.get<Record<string, AntigravityMode>>(agModeKey(source)) ?? {}) }
+  if (mode === "summary") delete modes[id] // Default is backwards-compatible and needs no stored override.
+  else Object.defineProperty(modes, id, { value: mode, enumerable: true, configurable: true, writable: true })
+  if (Object.keys(modes).length) Storage.set(agModeKey(source), modes)
+  else Storage.remove(agModeKey(source))
+}
+const AG_LOCAL_WIDGET_UNTIL = "ai_usage_antigravity_local_widget_until_v1"
+export function requestAntigravityWidgetProjection() {
+  if (getSource() === "official") Storage.set(AG_LOCAL_WIDGET_UNTIL, Date.now() + getRefreshMinutes() * 60000)
+}
+// Widget.reloadAll starts widget scripts too. During this explicit local-only reload,
+// every widget instance uses cached quota/statistics until its next scheduled refresh.
+// Manual App/intent refresh still calls loadUsage directly and is never suppressed.
+export function cachedAntigravityWidgetProjection(): LoadResult | null {
+  const until = Storage.get<number>(AG_LOCAL_WIDGET_UNTIL)
+  if (getSource() !== "official" || typeof until !== "number" || !Number.isFinite(until) || Date.now() >= until) return null
+  const cache = officialCached() ?? { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: managementAccounts(), fetchedAt: 0 }
+  const statisticsSource = getStatisticsSource()
+  const stats = Storage.get<ParrotStats>(statisticsSource === "sub2api" ? KEY_SUB_STATS : KEY_STATS) ?? (statisticsSource === "parrot" ? Storage.get<UsageData>(KEY_CACHE) : null)
+  return { data: { ...cache, today: stats?.today ?? null, month: stats?.month ?? null, todayByFamily: stats?.todayByFamily ?? {}, monthByFamily: stats?.monthByFamily ?? {},
+    statistics: { fetchedAt: stats?.fetchedAt ?? null, stale: true, error: stats?.today && stats?.month ? null : `${statisticsSource === "parrot" ? "Parrot" : "Sub2API"}统计缓存未提供` } }, stale: true, error: null }
+}
+function antigravityWindows(groups: AntigravityQuota["groups"]): Pick<Account, "fiveHour" | "sevenDay"> {
+  const window = (name: string): QuotaWindow => {
+    const buckets = groups.flatMap(g => g.buckets).filter(b => b.window === name && typeof b.remainingPercent === "number" && Number.isFinite(b.remainingPercent) && b.remainingPercent >= 0 && b.remainingPercent <= 100)
+    // Strict comparison retains the original response order on equal remaining quota.
+    const worst = buckets.reduce<(typeof buckets)[number] | null>((a, b) => !a || b.remainingPercent! < a.remainingPercent! ? b : a, null)
+    return worst ? { remainingPercent: worst.remainingPercent, usedPercent: 100 - worst.remainingPercent!, resetsAt: worst.resetsAt } : emptyWindow()
+  }
+  return { fiveHour: window("5h"), sevenDay: window("weekly") }
+}
+export function projectAntigravityAccount(account: Account, source: DataSource = getSource()): Account {
+  if (account.provider !== "antigravity" || source !== "official") return account
+  const mode = getAntigravityMode(account.id, source), groups = account.antigravity?.groups ?? []
+  if (mode === "summary" && !groups.length) return account // Older snapshots retain their standard windows.
+  const selected = mode === "summary" ? groups : groups.filter(g => g.name.trim() === AG_GROUP_NAMES[mode])
+  return { ...account, ...antigravityWindows(selected) } // All original groups stay intact, even when selection is missing.
+}
+export function antigravityModeHint(account: Account, source: DataSource = getSource()): string {
+  if (source === "parrot") return "Parrot管理接口未公开真实分组明细，不支持分组切换；保留管理接口标准窗口。"
+  if (source === "sub2api") return "Sub2API当前提供的是模型额度，不是真实两个分组，不支持分组切换；保留原有窗口。"
+  const mode = getAntigravityMode(account.id, source), groups = account.antigravity?.groups ?? []
+  if (mode !== "summary" && !groups.some(g => g.name.trim() === AG_GROUP_NAMES[mode])) return `所选 ${AG_GROUP_NAMES[mode]} 分组未提供，5 h／7 d 均为未知；保留选择，不回退另一组。`
+  return mode === "summary" ? "按各窗口最低剩余额度汇总，并采用对应重置时间；未提供真实分组的旧缓存沿用标准窗口。" : `仅显示 ${AG_GROUP_NAMES[mode]}；缺少的窗口为未知，不回退另一组。`
+}
 function agNumber(v: any): number | null {
   if (typeof v !== "number" && (typeof v !== "string" || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(v.trim()))) return null
   const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : null
@@ -1750,13 +1817,9 @@ export function mapAntigravityQuota(load: any, summary: any): Pick<Account, "fiv
       return { name: String(b.displayName || b.bucketId || "?"), window: typeof b.window === "string" ? b.window : "", remainingPercent: fraction != null && fraction <= 1 ? fraction * 100 : null, resetsAt: agTime(b.resetTime) }
     }) })
   }
-  const window = (name: string): QuotaWindow => {
-    const buckets = groups.flatMap(g => g.buckets).filter(b => b.window === name && b.remainingPercent != null)
-    const worst = buckets.reduce<(typeof buckets)[number] | null>((a, b) => !a || b.remainingPercent! < a.remainingPercent! ? b : a, null)
-    return worst ? { remainingPercent: worst.remainingPercent, usedPercent: 100 - worst.remainingPercent!, resetsAt: worst.resetsAt } : emptyWindow()
-  }
+  const windows = antigravityWindows(groups)
   const tier = [paid?.name, load?.currentTier?.name, paid?.id, load?.currentTier?.id].find(v => typeof v === "string" && v.trim())
-  return { fiveHour: window("5h"), sevenDay: window("weekly"), antigravity: { tier: tier?.trim() ?? null,
+  return { ...windows, antigravity: { tier: tier?.trim() ?? null,
     creditAmount: agNumber(credit?.creditAmount), minimumCreditAmount: agNumber(credit?.minimumCreditAmountForUsage), groups } }
 }
 // Sub2API @3a6fd1c9: five_hour is a selected-model compatibility projection, not
