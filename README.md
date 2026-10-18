@@ -1,6 +1,6 @@
-# AI 用量、余额与积分小组件 · Codex / Claude / DeepSeek / WorkBuddy
+# AI 用量、余额与积分小组件 · Codex / Claude / Antigravity / DeepSeek / WorkBuddy
 
-**Codex / Claude 额度、DeepSeek 余额、WorkBuddy 国内个人积分；支持 Parrot、Sub2API 与官方账号，适用于 iPhone 主屏和锁屏**
+**Codex / Claude / Antigravity 额度、DeepSeek 余额、WorkBuddy 国内个人积分；支持 Parrot、Sub2API 与官方账号，适用于 iPhone 主屏和锁屏**
 
 基于 [Scripting](https://apps.apple.com/app/id6479691128)，显示 Codex / Claude 的 5 小时、每周剩余额度、重置倒计时与可用重置卡。主屏还可显示今日与本月用量统计，支持多账号排序、自定义名称和点击刷新。DeepSeek使用独立余额显示，WorkBuddy使用剩余积分、已用／总量及资源有效期显示，均不套用5小时／每周额度。小组件窗口标签为 `5 h`、`7 d`，剩余天数用 `d` 表示。
 
@@ -8,7 +8,7 @@
 
 进入或重新打开 App 只读取本机缓存，不自动联网或续期。右上角“刷新”可读取当前账号来源与统计并重载小组件；不提供单独的连接状态模块；新增账号、授权成功、切换来源以及“保存并测试”仍会触发读取，主屏小组件可点击双箭头刷新。
 
-- **账号来源**：OAuth,API、Parrot、Sub2API 三选一。Parrot／Sub2API 自动发现账号与 DeepSeek 频道；官方账号支持 Codex／Claude 授权登录、WorkBuddy 国内个人浏览器登录和 DeepSeek 官方 API Key 直接添加。Parrot可读取WorkBuddy积分快照；官方版Sub2API暂不支持WorkBuddy。
+- **账号来源**：OAuth,API,Token、Parrot、Sub2API 三选一。Parrot／Sub2API 自动发现账号与 DeepSeek 频道；官方账号支持 Codex／Claude／Antigravity 授权登录、WorkBuddy 国内个人浏览器登录和 DeepSeek 官方 API Key 直接添加。Parrot可读取WorkBuddy积分快照；官方版Sub2API暂不支持WorkBuddy。
 - **统计来源**：Parrot、Sub2API 独立二选一，不合计。可以组合使用，例如官方额度＋Sub2API统计。
 - 配置、账号缓存、排序与自定义名称按账号来源隔离；切换不会删除另一来源的配置或登录。
 - 重置卡只跟随当前账号来源，不从统计来源或其他服务补齐。有效数量大于 0 时显示 `RE:N`；0 或未知时隐藏。只查询，不兑换重置卡或重置额度。
@@ -53,7 +53,7 @@ DeepSeek频道通过管理接口自动分页发现，无需逐账号填写API Ke
 
 ### 官方账号（Codex / Claude OAuth、DeepSeek、WorkBuddy）
 
-选择 **OAuth,API**，再在“添加账号”右侧选择对应服务。官方登录和额度读取不需要 Parrot 或 Sub2API；今日／本月统计需要另外配置统计来源。可以添加多个 Codex、Claude、WorkBuddy 账号，重复登录同一身份会更新原记录。
+选择 **OAuth,API,Token**，再在“添加账号”右侧选择对应服务。官方登录和额度读取不需要 Parrot 或 Sub2API；今日／本月统计需要另外配置统计来源。可以添加多个 Codex、Claude、Antigravity、WorkBuddy 账号，重复登录同一身份会更新原记录。
 
 #### Codex
 
@@ -75,7 +75,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 
 #### DeepSeek
 
-账号来源选“OAuth,API”，在“添加账号”同行右侧选择“DeepSeek”，先点“添加账号”，再在“登录账号”顶部输入官方API Key后点“保存”，直接保存并验证余额。新增账号默认名称为“DeepSeek”，固定使用API Key。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
+账号来源选“OAuth,API,Token”，在“添加账号”同行右侧选择“DeepSeek”，先点“添加账号”，再在“登录账号”顶部输入官方API Key后点“保存”，直接保存并验证余额。新增账号默认名称为“DeepSeek”，固定使用API Key。每次添加独立账号，支持多个账号及局部退出；API Key账号凭据失效可移除该账号后重新添加。
 
 - **API Key**：只请求 `https://api.deepseek.com/user/balance`，显示总余额、充值余额、赠送余额及可用状态。
 - **已有网页User Token账号**：保留凭据、原查询能力和局部退出，不再提供新添加入口。不是API Key，也不是OAuth。查询 `platform.deepseek.com/api/v0/users/get_user_summary` 与 `api/v0/usage/by_api_key/cost`，显示账户余额及北京时间包含今天的7个自然日消费。属于私有网页接口，可能变化或拒绝请求；不冒充浏览器，不自动登录或续期，Token失效需手动更新。
@@ -89,7 +89,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 
 #### WorkBuddy（国内个人）
 
-1. 账号来源选 **OAuth,API**，在“添加账号”右侧选 **WorkBuddy**，点“添加账号”再点“点击登录”。
+1. 账号来源选 **OAuth,API,Token**，在“添加账号”右侧选 **WorkBuddy**，点“添加账号”再点“点击登录”。
 2. 在独立临时浏览器中登录腾讯WorkBuddy个人身份。服务返回令牌并成功保存本机Keychain后，自动关闭网页返回App并读取真实积分。
 3. 本机等待期限为10分钟，不是官方公布的授权有效期。取消、关闭网页、退出设置或切换服务／来源会结束本次尝试；迟到响应不会保存账号。企业身份和国际版不支持。
 
@@ -107,6 +107,16 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 - 在“登录账号”列表左滑点“删除”，只移除此账号的本机登录及对应显示数据，不退出其他账号，也不是撤销整个官方会话。
 - Codex／Claude账号读取与小组件刷新共用续期逻辑：访问令牌临近到期或额度接口返回 401 时尝试续期，并保存服务返回的轮换令牌。网络故障、429 或 5xx 不等于登录失效，保留登录和可用额度缓存；429 按有效 `Retry-After` 冷却，未提供时本机退避 5 分钟，冷却后在下次正常刷新时再尝试，不使用后台定时器或无限重试。续期前及失败后会重读本机凭据；若另一执行已保存有效新令牌，会优先复用。仍明确返回 `invalid_grant` 且没有有效新凭据时提示重新添加账号。多个系统执行同时续期仍可能竞争，不能保证跨进程严格互斥。Claude授权交换与续期都使用JSON协商和脚本自身的诚实HTTP标识，不冒充官方客户端；这些兼容设置不能保证消除429。此机制不能消除官方限流，实际续期仍受服务、权限、网络及系统调度限制。
 
+### Antigravity
+
+- 账号来源选 **OAuth,API,Token**，添加账号菜单选 **Antigravity**，点击登录并在临时浏览器完成 Google 授权。使用 PKCE、state、离线授权和独立本机钥匙串凭据；可多账号添加、排序、设置组件名称或本机退出。Token 是账号来源标签的一部分，不表示所有服务都支持手动导入令牌。
+- 回调地址固定为 `http://localhost:51121/oauth-callback`，监听仅绑定 `127.0.0.1:51121`。端口被占用或 Scripting 缺少本机 HTTP／PKCE／临时 WebView 能力时不能登录。关闭授权页、取消、退出设置或切换来源会结束未完成的流程。
+- 官方直连仅查询 `loadCodeAssist` 和 `retrieveUserQuotaSummary`。组件按真实 `5h`／`weekly` 分组显示最少剩余比例及对应重置时间；这是展示汇总，不代表模型路由或账号可用性。详情显示真实分组、套餐、GOOGLE_ONE_AI credits 和最低使用额度；缺字段为未知，不补成 0。不自动开通项目、领取额度或消费 credits。
+- Parrot 仍只查询其管理账号列表／详情，显示管理接口提供的标准窗口；当前管理 schema 未公开 Antigravity credits／分组，详情对应显示未提供，不绕过管理服务直连。
+- Sub2API 仍只 GET `/api/v1/admin/accounts/{id}/usage`，支持 Antigravity OAuth 账号的模型配额、套餐和已提供的 credits。当前上游 `five_hour` 是主要模型兼容投影，并无真实窗口时长，因此不冒充 5 h／7 d，组件显示 `--`，模型额度保留在详情；缺少的 credits 数值也显示未知。
+- 访问令牌临近到期时续期，401 最多续期重试一次；轮换保存带并发去重和凭据比较，暂时失败不删除登录。跨系统执行仍不能保证严格互斥。接口、授权权限和网络策略可能变化，需真机验证 Google 授权与回调。
+- App 与组件共享离线嵌入的[官方彩色图标](https://antigravity.google/assets/image/antigravity-logo.png)，来源为 [Antigravity 官网](https://antigravity.google/) 的 icon 声明；真实额度耗尽时使用其灰度派生图，不改变其他服务图标。
+
 ### Sub2API
 
 [Sub2API](https://github.com/Wei-Shaw/sub2api) 的账号额度与统计共用一份配置。
@@ -116,7 +126,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 3. 点“保存并测试”，确认账号列表。统计时区默认 `Asia/Shanghai`，沿用已保存配置，决定今日与自然月的日期边界；设置页不再提供时区输入栏。
 
 - 管理员密钥权限较高，使用可信部署及 HTTPS，不要分享密钥。已存密钥显示前4字符，其余以 `*` 遮蔽（不超过4字符全部遮蔽）；点输入框填写新密钥，留空保存沿用原密钥。
-- 官方版Sub2API暂不支持WorkBuddy，不把兼容OpenAI频道识别为WorkBuddy。账号额度支持 Claude OAuth／SetupToken 和 Codex OAuth；自动纳入DeepSeek按量账号，通过管理余额接口读取多币种总余额，无需额外Key。Sub2API接口未提供赠送／充值拆分，显示未提供。余额不冒充 5 h／每周额度；SetupToken 重置卡未知。
+- 官方版Sub2API暂不支持WorkBuddy，不把兼容OpenAI频道识别为WorkBuddy。账号额度支持 Claude OAuth／SetupToken、Codex OAuth 和 Antigravity OAuth；自动纳入DeepSeek按量账号，通过管理余额接口读取多币种总余额，无需额外Key。Sub2API接口未提供赠送／充值拆分，显示未提供。余额不冒充 5 h／每周额度；SetupToken 重置卡未知。
 - 统计是该部署**全站汇总**，不按用户、Key 或小组件所选账号过滤；花费是实际扣费，不是标准计费或上游账号成本。
 - 客户端只发送 GET 查询，不调用兑换、重置或写入刷新接口；额度查询可能由 Sub2API 请求上游服务。
 - 改变地址或密钥会清理 Sub2API 对应缓存，避免混用。较旧部署缺少接口时显示错误或未知；单账号读取失败保留列表及该来源可用缓存，不用其他来源替代。
@@ -177,9 +187,9 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 
 ## 安全与实际限制
 
-- 地址、管理密钥／会话和官方令牌只保存在本机脚本隔离的 Keychain，默认不开启 iCloud 同步；Codex、Claude、WorkBuddy凭据分别保存。排序、名称、额度和统计使用本机缓存，切换来源不会跨源拼接账号或重置卡。授权码、state 与 PKCE 仅用于本次内存流程，不写日志或持久保存。
+- 地址、管理密钥／会话和官方令牌只保存在本机脚本隔离的 Keychain，默认不开启 iCloud 同步；Codex、Claude、Antigravity、WorkBuddy凭据分别保存。排序、名称、额度和统计使用本机缓存，切换来源不会跨源拼接账号或重置卡。授权码、state 与 PKCE 仅用于本次内存流程，不写日志或持久保存。
 - Parrot 和 Sub2API 管理密钥具有高权限。不要公开密钥、token、完整授权码或带凭据的备份；HTTP 会明文传输服务凭据，建议 HTTPS。
-- 官方账号直接访问相应官方服务：Codex 使用 `auth.openai.com`、`chatgpt.com`；Claude 授权页使用 `claude.com`，令牌与资料／额度使用 `platform.claude.com`、`api.anthropic.com`。WorkBuddy国内个人认证与续期使用 `copilot.tencent.com`，积分使用 `www.codebuddy.cn`，token只发送到这两个固定已核实国内域名。不把官方 token 发给 Parrot、Sub2API 或 GitHub，不复制浏览器 Cookie 或其他应用的登录文件。
+- 官方账号直接访问相应官方服务：Codex 使用 `auth.openai.com`、`chatgpt.com`；Claude 授权页使用 `claude.com`，令牌与资料／额度使用 `platform.claude.com`、`api.anthropic.com`；Antigravity 授权与接口固定使用 `accounts.google.com`、`oauth2.googleapis.com`、`www.googleapis.com`、`cloudcode-pa.googleapis.com`。WorkBuddy国内个人认证与续期使用 `copilot.tencent.com`，积分使用 `www.codebuddy.cn`，token只发送到这两个固定已核实国内域名。不把官方 token 发给 Parrot、Sub2API 或 GitHub，不复制浏览器 Cookie 或其他应用的登录文件。
 - 只读取真实汇总额度，模型专属限额、钱包余额和额外付费金额不充当汇总额度或重置卡。字段缺失、无权限或查询失败保持未知，不凭空填零。
-- 本项目是第三方脚本，不是 OpenAI、Anthropic 或腾讯WorkBuddy官方客户端。官方授权、接口版本、风控、组织权限和 Scripting／iOS 兼容性可能变化；当前不支持需要专用路由的 FedRAMP 账号。
-- 临时浏览器、Codex／Claude 本机回调、后台刷新、锁屏着色和字体效果均受设备与系统限制，不能保证每次登录成功或刷新准点。
+- 本项目是第三方脚本，不是 OpenAI、Anthropic、Google 或腾讯WorkBuddy官方客户端。官方授权、接口版本、风控、组织权限和 Scripting／iOS 兼容性可能变化；当前不支持需要专用路由的 FedRAMP 账号。
+- 临时浏览器、Codex／Claude／Antigravity 本机回调、后台刷新、锁屏着色和字体效果均受设备与系统限制，不能保证每次登录成功或刷新准点。

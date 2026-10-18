@@ -1,3 +1,4 @@
+import { antigravityBrandImage } from "./api"
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
 import { loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
@@ -130,6 +131,7 @@ function LargeSegBar({ remaining, muted = false }: { remaining: number | null; m
 function ProviderIcon({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
   // SVG paths have explicit fills; changing only the parent's foregroundStyle cannot gray them.
   const graySvg = (path: string) => ({ light: iconSvg(path, SUB.light), dark: iconSvg(path, SUB.dark) })
+  if (provider === "antigravity") return <Image image={antigravityBrandImage(muted)} renderingMode="original" resizable frame={{ width: size, height: size }} />
   if (provider === "workbuddy") return <Image image={workBuddyBrandImage(muted)} renderingMode="original" resizable frame={{ width: size, height: size }} />
   if (provider === "deepseek") return <SVG code={DEEPSEEK_SVG} resizable frame={{ width: size, height: size }} />
   if (provider === "claude") return <SVG code={muted ? graySvg(CLAUDE_PATH) : CLAUDE_SVG} resizable frame={{ width: size, height: size }} />
@@ -142,7 +144,7 @@ function shortName(acc: Account) {
 }
 
 function providerName(p: string) {
-  return p === "workbuddy" ? "WorkBuddy" : p === "claude" ? "Claude" : p === "openai" ? "Codex" : p === "deepseek" ? "DeepSeek" : p
+  return p === "antigravity" ? "Antigravity" : p === "workbuddy" ? "WorkBuddy" : p === "claude" ? "Claude" : p === "openai" ? "Codex" : p === "deepseek" ? "DeepSeek" : p
 }
 
 export function isQuotaExhausted(acc: Account): boolean {

@@ -1,3 +1,4 @@
+import { antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, VStack, useState, useEffect,
@@ -16,15 +17,15 @@ const ICON_SIZE = 17
 function providerIconCode(provider: string) {
   return provider === "claude" ? CLAUDE_SVG : provider === "deepseek" ? DEEPSEEK_SVG : provider === "codex" || provider === "openai" ? OPENAI_SVG : null
 }
-function providerWord(provider: string) { return provider === "workbuddy" ? "WorkBuddy" : provider === "deepseek" ? "DeepSeek" : provider === "claude" ? "Claude" : "Codex" }
+function providerWord(provider: string) { return provider === "antigravity" ? "Antigravity" : provider === "workbuddy" ? "WorkBuddy" : provider === "deepseek" ? "DeepSeek" : provider === "claude" ? "Claude" : "Codex" }
 // "1. [icon] name"; unknown icon falls back to the original text label.
 function AccountLine({ index, provider, name, fixed = false }: { index: number; provider: string; name: string; fixed?: boolean }) {
   const code = providerIconCode(provider)
   const nameText = <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{name}</Text>
-  if (!code && provider !== "workbuddy") return <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{`${index + 1}. ${providerWord(provider)} ${name}`}</Text>
+  if (!code && provider !== "workbuddy" && provider !== "antigravity") return <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{`${index + 1}. ${providerWord(provider)} ${name}`}</Text>
   return <HStack spacing={4}>
     <Text>{`${index + 1}.`}</Text>
-    {provider === "workbuddy"
+    {provider === "antigravity" ? <Image image={antigravityBrandImage()} renderingMode="original" resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} /> : provider === "workbuddy"
       ? <Image image={workBuddyBrandImage()} renderingMode="original" resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} />
       : <SVG code={code!} resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} />}
     {nameText}
@@ -67,7 +68,7 @@ function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (n
                 fill={active.value?.id === a.id ? "tertiarySystemFill" : "secondarySystemGroupedBackground"} />)
               .contentShape({ kind: "dragPreview", shape: { type: "rect", cornerRadius: 12 } })}
           >
-            {a.provider === "workbuddy" ? <AccountLine index={i} provider={a.provider} name={`WorkBuddy · ${a.name}`} /> : <Text>{accountLabel(a, i)}</Text>}
+            {a.provider === "workbuddy" || a.provider === "antigravity" ? <AccountLine index={i} provider={a.provider} name={a.provider === "workbuddy" ? `WorkBuddy · ${a.name}` : a.name} /> : <Text>{accountLabel(a, i)}</Text>}
           </VStack>}
           onMove={onMove}
         />
@@ -155,9 +156,21 @@ function AccountCacheSections({ account }: { account: Account }) {
       <Text>{`已用额度 ${percent(w?.usedPercent)}`}</Text>
       <Text>{`重置时间 ${cnTime(w?.resetsAt)}`}</Text>
     </Section>)}
-    <Section header={<Text>重置卡</Text>}>
+    {account.provider === "antigravity" ? <>
+      <Section header={<Text>Antigravity AI Credits</Text>}>
+        <Text>{`套餐 ${account.antigravity?.tier || "未提供"}`}</Text>
+        <Text>{`剩余 ${account.antigravity?.creditAmount ?? "未提供"}`}</Text>
+        <Text>{`最低可用额度 ${account.antigravity?.minimumCreditAmount ?? "未提供"}`}</Text>
+      </Section>
+      {(account.antigravity?.groups ?? []).map((g, i) => <Section key={String(i)} header={<Text>{g.name}</Text>}>
+        {g.buckets.map((b, j) => <VStack key={String(j)} alignment="leading">
+          <Text>{`${b.name} · ${b.window || "窗口未提供"} · 剩余 ${percent(b.remainingPercent)}`}</Text>
+          <Text>{`重置时间 ${cnTime(b.resetsAt)}`}</Text>
+        </VStack>)}
+      </Section>)}
+    </> : <Section header={<Text>重置卡</Text>}>
       <Text>{typeof account.resetCredits === "number" && Number.isFinite(account.resetCredits) && account.resetCredits >= 0 ? `可用重置卡 ${account.resetCredits}` : "可用重置卡 未提供"}</Text>
-    </Section>
+    </Section>}
   </>
 }
 
@@ -220,8 +233,8 @@ function SettingsView() {
   const [dsToken, setDSToken] = useState("")
   const [dsAdding, setDSAdding] = useState(false)
   const [logins, setLogins] = useState(officialAccounts())
-  const [auth] = useState({ codex: null as CodexBrowserLogin | null, alive: true, running: false, epoch: 0, workbuddy: null as WorkBuddyLogin | null, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
-  const stopAuth = () => { auth.running = false; setWBPreparing(false); if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; setWorkbuddy(null); if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; setCodexBrowser(null); setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
+  const [auth] = useState({ antigravity: null as AntigravityLogin | null, codex: null as CodexBrowserLogin | null, alive: true, running: false, epoch: 0, workbuddy: null as WorkBuddyLogin | null, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
+  const stopAuth = () => { if (auth.antigravity) cancelAntigravityLogin(auth.antigravity); auth.antigravity = null; setAGBrowser(null); auth.running = false; setWBPreparing(false); if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; setWorkbuddy(null); if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; setCodexBrowser(null); setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
   const [statisticsSource, setStatisticsSource] = useState<StatisticsSource>(getStatisticsSource())
   const subCur = getSub2APIConfig()
@@ -237,8 +250,9 @@ function SettingsView() {
   const [browserError, setBrowserError] = useState("")
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
   const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
+  const [agBrowser, setAGBrowser] = useState<AntigravityLogin | null>(null)
 
-  useEffect(() => () => { if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
+  useEffect(() => () => { if (auth.antigravity) cancelAntigravityLogin(auth.antigravity); auth.antigravity = null; if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
     stopAuth()
@@ -256,6 +270,7 @@ function SettingsView() {
     }
     if (loginProvider === "workbuddy") { await startWorkBuddy(); return }
     if (loginProvider === "claude") { startClaude(); return }
+    if (loginProvider === "antigravity") { startAG(); return }
     if (auth.running || busy) return
     stopAuth(); setBrowserError("")
     if (typeof WebViewController !== "function") { setBrowserError("Codex浏览器登录缺少WebViewController，请重新登录"); return }
@@ -320,6 +335,39 @@ function SettingsView() {
     auth.running = true; setBusy(true); setBrowserError("")
     try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url) }
     catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Codex授权页") + "，请重试登录") }
+    finally { if (auth.alive && epoch === auth.epoch && !d.consumed) { auth.running = false; setBusy(false) } }
+  }
+  function startAG() {
+    if (!auth.alive || getSource() !== "official" || auth.running || busy) return
+    stopAuth(); setBrowserError("")
+    if (typeof WebViewController !== "function") { setBrowserError("Antigravity浏览器登录缺少WebViewController，请重新登录"); return }
+    try {
+      const d = beginAntigravityLogin(() => { if (auth.antigravity === d) void completeAG(d) }, () => {
+        if (auth.antigravity === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Antigravity本次本机登录等待超时，请重新登录") }
+      }, () => { if (auth.antigravity === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Antigravity官方授权未完成，请重新登录") } })
+      auth.antigravity = d; setAGBrowser(d)
+    } catch (e: any) { setBrowserError(e.message) }
+  }
+  async function completeAG(d: AntigravityLogin) {
+    const epoch = auth.epoch
+    const valid = () => auth.alive && auth.antigravity === d && auth.epoch === epoch && getSource() === "official"
+    if (!valid() || d.consumed) return
+    auth.running = true; setBusy(true)
+    try {
+      await finishAntigravityLogin(d, valid)
+      if (!valid()) return
+      auth.antigravity = null; setAGBrowser(null); setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null; await test()
+    } catch (e: any) { if (valid()) { auth.antigravity = null; setAGBrowser(null); setBrowserError(e.message || "Antigravity浏览器登录失败，请重新登录") } }
+    finally { if (auth.alive && epoch === auth.epoch) { auth.running = false; setBusy(false) } }
+  }
+  async function openAG() {
+    const d = auth.antigravity
+    if (!d || auth.running) return
+    const epoch = auth.epoch
+    const valid = () => auth.alive && auth.antigravity === d && auth.epoch === epoch
+    auth.running = true; setBusy(true); setBrowserError("")
+    try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url); if (valid()) { stopAuth(); setBusy(false) } }
+    catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Antigravity授权页") + "，请重试登录") }
     finally { if (auth.alive && epoch === auth.epoch && !d.consumed) { auth.running = false; setBusy(false) } }
   }
   function startClaude(manual = false) {
@@ -399,7 +447,7 @@ function SettingsView() {
 
   // Same remove-then-insert contract as the official editable_list onMove example; persisted by stable ID.
   function moveLogins(indices: number[], newOffset: number) {
-    if (busy || claude || codexBrowser || workbuddy || getSource() !== "official") return
+    if (busy || claude || codexBrowser || workbuddy || agBrowser || getSource() !== "official") return
     const current = sortAccounts(logins, "official")
     if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
     const moving = indices.map(i => current[i])
@@ -424,7 +472,7 @@ function SettingsView() {
   }
 
   const loginRow = (a: ReturnType<typeof officialAccounts>[number], i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
-          <Button title="删除" role="destructive" disabled={busy || !!claude || !!codexBrowser || !!workbuddy} action={async () => {
+          <Button title="删除" role="destructive" disabled={busy || !!claude || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => {
           try {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
@@ -449,12 +497,12 @@ function SettingsView() {
       navigationBarTitleDisplayMode={"inline"}
       toolbar={{
         cancellationAction: <Button title={"完成"} action={dismiss} />,
-        primaryAction: <Button title={busy ? "刷新中…" : "刷新"} disabled={busy || !!claude || !!codexBrowser || !!workbuddy} action={async () => { if (busy || auth.running || auth.claude || auth.codex || auth.workbuddy) return; await test() }} />,
+        primaryAction: <Button title={busy ? "刷新中…" : "刷新"} disabled={busy || !!claude || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => { if (busy || auth.running || auth.claude || auth.codex || auth.workbuddy || auth.antigravity) return; await test() }} />,
       }}
     >
       <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>}>
         <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
-          <Text tag={"official"}>OAuth,API</Text>
+          <Text tag={"official"}>OAuth,API,Token</Text>
           <Text tag={"parrot"}>Parrot</Text>
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
@@ -481,12 +529,12 @@ function SettingsView() {
 
       {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
-          {!dsAdding && !claude && !codexBrowser && !workbuddy && !wbPreparing
+          {!dsAdding && !claude && !codexBrowser && !workbuddy && !wbPreparing && !agBrowser
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
             : <Text foregroundStyle="secondaryLabel">{loginProvider === "deepseek" ? "API Key" : "授权进行中"}</Text>}
           <Spacer />
           <Picker title="" pickerStyle="menu" tint="secondaryLabel" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
-            <Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text><Text tag="workbuddy">WorkBuddy</Text>
+            <Text tag="antigravity">Antigravity</Text><Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text><Text tag="workbuddy">WorkBuddy</Text>
           </Picker>
         </HStack>
         {loginProvider === "deepseek" && dsAdding ? <>
@@ -505,6 +553,11 @@ function SettingsView() {
           <Button title="点击登录" action={openWorkBuddy} disabled={busy} />
           <Button title="取消登录" action={() => { stopAuth(); auth.running = false; setBusy(false) }} />
         </> : null}
+        {agBrowser ? <>
+          <Button title="点击登录" action={openAG} disabled={busy} />
+          {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
+          <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
+        </> : null}
         {codexBrowser ? <>
           <Button title="点击登录" action={openCodex} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
@@ -520,7 +573,7 @@ function SettingsView() {
           </> : null}
           <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
-        {!claude && !codexBrowser && !workbuddy && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
+        {!claude && !codexBrowser && !workbuddy && !agBrowser && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
         {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortAccounts(logins, "official")[i], i)} />
           : sortAccounts(logins, "official").map(loginRow)}
         {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={() => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
