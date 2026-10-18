@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.31"
+export const VERSION = "1.32"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -1741,7 +1741,7 @@ export type AntigravityQuota = {
 }
 export type AntigravityMode = "summary" | "gemini" | "claude_gpt"
 export const ANTIGRAVITY_MODES = [
-  { value: "summary", label: "两个分组最低剩余额度汇总" },
+  { value: "summary", label: "最低剩余额度汇总" },
   { value: "gemini", label: "Gemini Models" },
   { value: "claude_gpt", label: "Claude and GPT models" },
 ] as const
