@@ -26,7 +26,9 @@
 
 ## 安装
 
-1. 安装 Scripting，在 iPhone 上打开以下导入地址：
+**[一键导入到 Scripting](https://scripting.fun/import_scripts?urls=["https%3A%2F%2Fgithub.com%2FWangsc1%2Fai-usage"])**
+
+1. 安装 Scripting，在 iPhone 上点击上方“一键导入到 Scripting”；也可以复制以下导入地址打开：
 
 ```text
 https://scripting.fun/import_scripts?urls=["https%3A%2F%2Fgithub.com%2FWangsc1%2Fai-usage"]
