@@ -95,7 +95,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
       <TextField title="自定义小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
     </Section>
-    {account.provider === "antigravity" ? <Section header={<Text>Antigravity额度分组</Text>}>
+    {account.provider === "antigravity" ? <Section header={<Text>小组件额度显示</Text>}>
       {source === "official" ? <Picker title="显示额度" value={quotaMode} onChanged={async value => {
         if (getSource() !== source || !officialAccounts().some(a => a.id === account.id)) return
         const mode = ANTIGRAVITY_MODES.find(m => m.value === value)?.value

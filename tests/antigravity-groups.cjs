@@ -52,7 +52,7 @@ function page(a,source='official',onSaved=()=>{}){hook=0;return walk(app.WidgetN
 const picker=nodes=>nodes.find(n=>n?.type==='Picker'&&n.props.title==='显示额度')
 function assertModeSection(account,source='official'){
  hook=0;const section=app.WidgetNamePage({account,source,onSaved:()=>{}}).props.children[1]
- assert.equal(section.props.header.props.children,'Antigravity额度分组')
+ assert.equal(section.props.header.props.children,'小组件额度显示')
  assert.equal(Object.hasOwn(section.props,'footer'),false,'no explanation footer for any source')
  const children=section.props.children.filter(Boolean)
  assert.equal(children.length,1,'exactly one content row, no empty section or second hint row')
@@ -69,7 +69,7 @@ function expand(n){if(n==null||typeof n!=='object')return n;if(Array.isArray(n))
 const treeHash=n=>crypto.createHash('sha256').update(JSON.stringify(expand(n))).digest('hex')
 function assertWidgetTrees(a){const p=project(a),expected={...p,id:'expected-summary',antigravity:{...p.antigravity,groups:[]}};for(const family of families){scripting.Widget.family=family;scripting.Widget.parameter='';assert.equal(treeHash(widget.Root({data:usage([a]),error:null})),treeHash(widget.Root({data:usage([expected]),error:null})),family)}}
 async function main(){
- reset();seed();states=[];hook=0;const positioned=app.WidgetNamePage({account:make(),source:'official',onSaved:()=>{}}).props.children;assert.equal(positioned[0].props.children[0].props.title,'自定义小组件用户名');assert.equal(positioned[1].props.header.props.children,'Antigravity额度分组');assert.equal(positioned[2].type,app.AccountCacheSections);const a=make(),original=JSON.stringify(a),rawCache=JSON.stringify(store.get(CACHE));assert.equal(api.getAntigravityMode(A),'summary');windows(project(a),32,41,groups[1].buckets[0].resetTime,groups[0].buckets[1].resetTime)
+ reset();seed();states=[];hook=0;const positioned=app.WidgetNamePage({account:make(),source:'official',onSaved:()=>{}}).props.children;assert.equal(positioned[0].props.children[0].props.title,'自定义小组件用户名');assert.equal(positioned[1].props.header.props.children,'小组件额度显示');assert.equal(positioned[2].type,app.AccountCacheSections);const a=make(),original=JSON.stringify(a),rawCache=JSON.stringify(store.get(CACHE));assert.equal(api.getAntigravityMode(A),'summary');windows(project(a),32,41,groups[1].buckets[0].resetTime,groups[0].buckets[1].resetTime)
  for(const raw of [groups,[...groups].reverse()])for(const [mode,five,seven,r5,r7]of [['summary',32,41,groups[1].buckets[0].resetTime,groups[0].buckets[1].resetTime],['gemini',85,41,groups[0].buckets[0].resetTime,groups[0].buckets[1].resetTime],['claude_gpt',32,78,groups[1].buckets[0].resetTime,groups[1].buckets[1].resetTime]]){api.saveAntigravityMode(A,mode);const account=make(A,raw),p=project(account);windows(p,five,seven,r5,r7);assert.equal(p.antigravity,account.antigravity,'raw groups must be retained by reference');assertDetails(account,five,seven);assertWidgetTrees(account);assertModeSection(account)}
  assert.equal(JSON.stringify(a),original);assert.equal(JSON.stringify(store.get(CACHE)),rawCache);assert.equal(calls.length,0)
  // Equal values keep the first matching bucket's reset from the existing response order.
