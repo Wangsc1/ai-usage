@@ -717,7 +717,7 @@ async function main() {
   // Syntax-only compilation of settings, plus version integration.
   const index=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   assert.equal(ts.transpileModule(index,{fileName:'index.tsx',compilerOptions:{jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true}).diagnostics.filter(x=>x.category===ts.DiagnosticCategory.Error).length,0)
-  assert.ok(!index.includes("updateFromGitHub")); assert.ok(!index.includes('from "./official"')); assert.ok(index.includes('const VERSION = "'+JSON.parse(fs.readFileSync(path.join(root,'script.json'))).version+'"'))
+  assert.ok(!index.includes("updateFromGitHub")); assert.ok(!index.includes('from "./official"')); assert.ok(!index.includes('const VERSION =')); assert.match(index, /import \{ VERSION,.*\} from "\.\/api"/)
   // Local widget aliases: never modify account records, stable-ID/source scoped, preserve all input except trim.
   const alias='🦜 工作@local · '+ '名字'.repeat(80)
   api.saveWidgetName('p0','  '+alias+'  ','parrot');api.saveWidgetName('p0','官方🐻','official')

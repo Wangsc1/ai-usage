@@ -3,12 +3,11 @@ import {
   SecureField, SVG, Image, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
+import { VERSION, getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
 import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-const VERSION = "1.25"
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
@@ -92,23 +91,25 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
       <TextField title="自定义小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
     </Section>
-    <AccountCacheSections account={account} source={source} />
+    <AccountCacheSections account={account} />
   </Form>
 }
 
 // Shared detail content consumes only the passed cached account and source-local cache timestamps.
-function AccountCacheSections({ account, source }: { account: Account; source: DataSource }) {
-  const iso = (at: number | null | undefined) => {
-    if (typeof at !== "number" || !Number.isFinite(at) || at <= 0 || at > 8640000000000000) return "未提供"
+function AccountCacheSections({ account }: { account: Account }) {
+  const beijingTime = (at: number) => {
     const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
     return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+  }
+  const iso = (at: number | null | undefined) => {
+    if (typeof at !== "number" || !Number.isFinite(at) || at <= 0 || at > 8640000000000000) return "未提供"
+    return beijingTime(at)
   }
   const cnTime = (v: string | null | undefined) => {
     if (!v) return "未提供"
     const at = Date.parse(v)
     if (!Number.isFinite(at)) return v
-    const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
-    return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+    return beijingTime(at)
   }
   if (account.provider === "workbuddy") return <>
           <Section header={<Text>WorkBuddy个人积分</Text>}>
@@ -522,7 +523,7 @@ function SettingsView() {
         {!claude && !codexBrowser && !workbuddy && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
         {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortAccounts(logins, "official")[i], i)} />
           : sortAccounts(logins, "official").map(loginRow)}
-        {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={next => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
+        {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={() => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}
       </Section> : null}

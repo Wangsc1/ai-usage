@@ -203,7 +203,7 @@ function AccountTitle({ acc, font }: { acc: Account; font: number }) {
   </HStack>
 }
 
-function RefreshTime({ data, stale }: { data: UsageData; stale: boolean }) {
+function RefreshTime({ data }: { data: UsageData }) {
   return <HStack spacing={3}>
     <Button intent={RefreshUsageIntent(undefined)} buttonStyle="plain" frame={{ width: 12, height: 12 }}>
       <Image systemName="arrow.triangle.2.circlepath" font={9} foregroundStyle={SUB} />
@@ -313,7 +313,7 @@ function smallRegionLayout(height: number) {
   const dividerY = Math.max(74, Math.min(height * 0.56, height - 57)) - 5
   return { dividerY, lowerY: dividerY + 1 + 4, lowerHeight: height - dividerY - 1, fits: height >= 131 }
 }
-function Small({ data, stale }: { data: UsageData; stale: boolean }) {
+function Small({ data }: { data: UsageData }) {
   const s: Scale = { title: 11, label: 8, lcd: 10, bar: 3, segs: 10, gap: 1 }
   const accounts = data.accounts.slice(0, 2), single = accounts.length === 1
   const account = (acc: Account) => <VStack alignment="leading" spacing={acc.provider === "deepseek" ? 6 : 3}>
@@ -459,7 +459,7 @@ function LargeQuota({ label, w, fmt, muted = false }: Win) {
   </VStack>
 }
 
-function Large({ data, stale }: { data: UsageData; stale: boolean }) {
+function Large({ data }: { data: UsageData }) {
   const m = data.today
   const month = data.month
   const contentWidth = Widget.displaySize.width - 28 // Root's 14pt horizontal inset on each side.
@@ -538,7 +538,7 @@ function AccessoryRoot({ data, error, family }: { data: UsageData | null; error:
   return <AccessoryRectangular acc={acc} />
 }
 
-function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; error: string | null }) {
+function Root({ data, error }: { data: UsageData | null; error: string | null }) {
   if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} />
   let body: VirtualNode
   let largeCredits = false
@@ -550,8 +550,8 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     const f = Widget.family
     largeCredits = (f === "systemLarge" || f === "systemExtraLarge") && selected.slice(0, 4).some(acc => acc.provider === "workbuddy")
     if (!selected.length) body = <Message text="请按脚本账号列表检查小组件参数中的账号序号" />
-    else if (f === "systemSmall") body = <Small data={sorted} stale={stale} />
-    else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} stale={stale} />
+    else if (f === "systemSmall") body = <Small data={sorted} />
+    else if (f === "systemLarge" || f === "systemExtraLarge") body = <Large data={sorted} />
     else body = <Medium data={sorted} />
   }
   return <ZStack
@@ -567,14 +567,14 @@ function Root({ data, stale, error }: { data: UsageData | null; stale: boolean; 
     </VStack> : <ZStack padding={{ bottom: data ? 14 : 0 }} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>{body}</ZStack>}
     {data ? <VStack frame={{ maxWidth: "infinity", maxHeight: "infinity" }}>
       <Spacer />
-      <HStack offset={{ x: 3, y: 6 }}><Spacer /><RefreshTime data={data} stale={stale} /></HStack>
+      <HStack offset={{ x: 3, y: 6 }}><Spacer /><RefreshTime data={data} /></HStack>
     </VStack> : null}
   </ZStack>
 }
 
 async function run() {
   const r = await loadUsage()
-  Widget.present(<Root data={r.data} stale={r.stale} error={r.error} />, {
+  Widget.present(<Root data={r.data} error={r.error} />, {
     reloadPolicy: { policy: "after", date: new Date(Date.now() + getRefreshMinutes() * 60 * 1000) },
   })
 }
