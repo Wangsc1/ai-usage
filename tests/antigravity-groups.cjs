@@ -50,6 +50,14 @@ function details(a,source='official'){return walk(app.AccountCacheSections({acco
 function assertDetails(a,five,seven){const nodes=details(a);for(const[label,v]of[['5 h',five],['7 d',seven]]){const section=nodes.find(n=>n?.type==='Section'&&n.props.header?.props.children===label);assert.ok(section,label);assert.ok(walk(section).includes('剩余额度 '+(v==null?'未提供':v+'%')))}}
 function page(a,source='official',onSaved=()=>{}){hook=0;return walk(app.WidgetNamePage({account:a,source,onSaved}))}
 const picker=nodes=>nodes.find(n=>n?.type==='Picker'&&n.props.title==='显示额度')
+for(const source of ['official','parrot','sub2api'])for(const provider of ['antigravity','openai','claude','deepseek','workbuddy']){
+ states=[];hook=0;const section=app.WidgetNamePage({account:{...make(),provider},source,onSaved:()=>{}}).props.children[0]
+ assert.equal(section.props.header.props.children,'小组件用户名')
+ assert.equal(Object.hasOwn(section.props,'footer'),false)
+ assert.equal(section.props.children[0].props.title,'自定义小组件用户名')
+ assert.equal(section.props.children[1].props.title,'保存')
+}
+
 function assertModeSection(account,source='official'){
  hook=0;const section=app.WidgetNamePage({account,source,onSaved:()=>{}}).props.children[1]
  assert.equal(section.props.header.props.children,'小组件额度显示')

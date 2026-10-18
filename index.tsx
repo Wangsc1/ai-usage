@@ -91,7 +91,7 @@ function WidgetNamePage({ account, source, onSaved }: { account: Account; source
     close()
   }
   return <Form navigationTitle="账号详情" navigationBarTitleDisplayMode="inline">
-    <Section header={<Text>{account.name}</Text>} footer={<Text>自定义小组件用户名</Text>}>
+    <Section header={<Text>小组件用户名</Text>}>
       <TextField title="自定义小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
     </Section>
