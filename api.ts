@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.27"
+export const VERSION = "1.28"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -1755,7 +1755,8 @@ export function mapAntigravityQuota(load: any, summary: any): Pick<Account, "fiv
     const worst = buckets.reduce<(typeof buckets)[number] | null>((a, b) => !a || b.remainingPercent! < a.remainingPercent! ? b : a, null)
     return worst ? { remainingPercent: worst.remainingPercent, usedPercent: 100 - worst.remainingPercent!, resetsAt: worst.resetsAt } : emptyWindow()
   }
-  return { fiveHour: window("5h"), sevenDay: window("weekly"), antigravity: { tier: typeof (paid?.name ?? load?.currentTier?.name) === "string" ? (paid?.name ?? load.currentTier.name) : null,
+  const tier = [paid?.name, load?.currentTier?.name, paid?.id, load?.currentTier?.id].find(v => typeof v === "string" && v.trim())
+  return { fiveHour: window("5h"), sevenDay: window("weekly"), antigravity: { tier: tier?.trim() ?? null,
     creditAmount: agNumber(credit?.creditAmount), minimumCreditAmount: agNumber(credit?.minimumCreditAmountForUsage), groups } }
 }
 // Sub2API @3a6fd1c9: five_hour is a selected-model compatibility projection, not
@@ -1776,6 +1777,10 @@ const CLIENT = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleuserco
 // Public installed-client secret, not a user credential.
 const SECRET = "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"
 const TOKEN = "https://oauth2.googleapis.com/token", BASE = "https://cloudcode-pa.googleapis.com/v1internal:"
+// loadCodeAssist and quota summary select the Antigravity product by this public client
+// profile (Parrot oauth/antigravity.py). A generic UA can yield HTTP 200 without
+// project/tier, followed by quota HTTP 403. Keep this scoped to these two reads.
+const QUOTA_USER_AGENT = "antigravity/hub/2.22.0 (aidev_client; os_type=linux; arch=amd64; cl=995734886)"
 type Credential = { id: string; email: string; access: string; refresh: string; expiresAt: number }
 export function credentials(): Credential[] {
   const raw = Keychain.get(KEY); if (!raw) return []
@@ -1908,12 +1913,28 @@ async function renew(item: Credential, force = false): Promise<Credential> {
 export async function read(item: Credential): Promise<Account> {
   try {
     let current = renewalDue(item.expiresAt) ? await renew(item) : item, retried = false
-    const post = async (method: string, body: any) => {
-      const send = () => request(BASE + method, { method: "POST", headers: { Authorization: `Bearer ${current.access}`, "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) })
+    const post = async (method: "loadCodeAssist" | "retrieveUserQuotaSummary", body: any) => {
+      const projectState = method === "retrieveUserQuotaSummary" ? `；project ${body.project ? "已提供" : "未提供"}` : ""
+      const send = async () => {
+        try { return await request(BASE + method, { method: "POST", headers: { Authorization: `Bearer ${current.access}`, "Content-Type": "application/json", Accept: "application/json", "User-Agent": QUOTA_USER_AGENT }, body: JSON.stringify(body) }) }
+        catch { throw new Error(`Antigravity ${method}：网络请求失败（无 HTTP 状态${projectState}），保留登录；可重试`) }
+      }
       let r = await send()
       if (r.status === 401 && !retried) { retried = true; current = await renew(current, true); r = await send() }
-      if (r.status !== 200) throw new Error(`Antigravity额度读取失败（HTTP ${r.status}）`)
-      return json(r)
+      if (r.status !== 200) {
+        // Do not echo Google messages, URLs, request IDs or arbitrary error fields.
+        // Only these fixed protocol status names are safe to surface in cached details.
+        let status = ""
+        try {
+          const b = await r.json(), s = b?.error?.status
+          if (["PERMISSION_DENIED", "UNAUTHENTICATED", "INVALID_ARGUMENT", "FAILED_PRECONDITION", "NOT_FOUND", "RESOURCE_EXHAUSTED", "INTERNAL", "UNAVAILABLE", "VALIDATION_REQUIRED"].includes(s)) status = `；${s}`
+        } catch { /* HTTP status and step remain useful without a response body. */ }
+        throw new Error(`Antigravity ${method}失败（HTTP ${r.status}${status}${projectState}），保留登录；可重试`)
+      }
+      let parsed: any
+      try { parsed = await r.json() } catch { throw new Error(`Antigravity ${method}（HTTP 200${projectState}）：响应无法解析，保留登录；可重试`) }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`Antigravity ${method}（HTTP 200${projectState}）：响应结构无效，保留登录；可重试`)
+      return parsed
     }
     const load = await post("loadCodeAssist", { metadata: { ideType: "ANTIGRAVITY" } })
     let project = ""
@@ -1921,10 +1942,15 @@ export async function read(item: Credential): Promise<Account> {
       const value = load?.[key]; if (typeof value === "string" && value.trim()) { project = value.trim(); break }
       if (typeof value?.id === "string" && value.id.trim()) { project = value.id.trim(); break }
     }
-    let summary: any = null, readError: string | undefined
-    try { summary = await post("retrieveUserQuotaSummary", project ? { project } : {}) } catch { readError = "Antigravity分组额度读取失败，窗口未知；可重试" }
+    const diagnostics: string[] = []
+    if (!project) diagnostics.push("Antigravity loadCodeAssist（HTTP 200）：未返回 project；不自动开通项目，保留登录")
+    let summary: any = null
+    try { summary = await post("retrieveUserQuotaSummary", project ? { project } : {}) }
+    catch (e: any) { diagnostics.push(typeof e?.message === "string" && e.message.startsWith("Antigravity") ? e.message : "Antigravity retrieveUserQuotaSummary：续期或本机凭据处理失败，保留登录；可重试") }
     if (!credentials().some(c => c.id === item.id)) throw new Error("Antigravity账号已退出")
-    return { id: item.id, name: current.email, provider: "antigravity", enabled: true, available: true, resetCredits: null, ...mapAntigravityQuota(load, summary), ...(readError ? { readError } : {}) }
+    const mapped = mapAntigravityQuota(load, summary)
+    if (summary && !mapped.antigravity?.groups.length) diagnostics.push("Antigravity retrieveUserQuotaSummary（HTTP 200）：未提供额度分组，窗口未知")
+    return { id: item.id, name: current.email, provider: "antigravity", enabled: true, available: true, resetCredits: null, ...mapped, ...(diagnostics.length ? { readError: diagnostics.join("；") } : {}) }
   } catch (e: any) {
     const fallback = quotaFallback(item.id, item.email, "antigravity")
     // Only locally authored diagnostics; transport/JSON failures use shared redacted errors.
