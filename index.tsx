@@ -186,7 +186,7 @@ function AccountCacheSections({ account, source = getSource() }: { account: Acco
       </Section>
       {(account.antigravity?.groups ?? []).map((g, i) => <Section key={String(i)} header={<Text>{g.name}</Text>}>
         {g.buckets.map((b, j) => <VStack key={String(j)} alignment="leading">
-          <Text>{`${b.name} · ${b.window || "窗口未提供"} · 剩余 ${percent(b.remainingPercent)}`}</Text>
+          <Text>{`${b.name} · ${b.window || "窗口未提供"} · 剩余 ${typeof b.remainingPercent === "number" && Number.isFinite(b.remainingPercent) ? `${Math.round(b.remainingPercent)}%` : "未提供"}`}</Text>
           <Text>{`重置时间 ${cnTime(b.resetsAt)}`}</Text>
         </VStack>)}
       </Section>)}
