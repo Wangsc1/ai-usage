@@ -332,6 +332,7 @@ function SettingsView() {
     const epoch = auth.epoch
     const valid = () => auth.alive && auth.epoch === epoch && auth.workbuddy === d && getSource() === "official"
     let saved = false
+    const browserCancelled = new Error("WorkBuddy authorization cancelled")
     auth.running = true; setBusy(true); setBrowserError("")
     try {
       // Presentation starts before polling; its own ephemeral cookies are never copied into fetch.
@@ -340,10 +341,10 @@ function SettingsView() {
         if (!valid()) return
         saved = true; setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null
       })
-      await Promise.all([completed, shown.then(() => { if (!saved && valid()) throw new Error("WorkBuddy登录已取消，请重新登录") })])
+      await Promise.all([completed, shown.then(() => { if (!saved && valid()) throw browserCancelled })])
       if (valid() && saved) { auth.workbuddy = null; setWorkbuddy(null); await test() }
     } catch (e: any) {
-      if (valid()) { cancelWorkBuddyLogin(d); auth.workbuddy = null; setWorkbuddy(null); setBrowserError(e.message || "WorkBuddy登录失败，请重试"); auth.releaseBrowser?.(); auth.releaseBrowser = null }
+      if (valid()) { cancelWorkBuddyLogin(d); auth.workbuddy = null; setWorkbuddy(null); if (e !== browserCancelled) setBrowserError(e.message || "WorkBuddy登录失败，请重试"); auth.releaseBrowser?.(); auth.releaseBrowser = null }
     } finally { if (auth.alive && epoch === auth.epoch) { auth.running = false; setBusy(false) } }
   }
   async function completeCodex(d: CodexBrowserLogin) {
@@ -621,7 +622,6 @@ function SettingsView() {
         {loginProvider === "claude" && claudeProgress && claudeProgress !== "等待Claude回调（尚未收到）" ? <Text>{claudeProgress}</Text> : null}
         {wbPreparing ? <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} /> : null}
         {workbuddy ? <>
-          <Text font={12} foregroundStyle="secondaryLabel">国内个人账号 · 客户端私有协议，可能变更。浏览器授权成功保存后自动返回。</Text>
           <Button title="点击登录" action={openWorkBuddy} disabled={busy} />
           <Button title="取消登录" action={() => { stopAuth(); auth.running = false; setBusy(false) }} />
         </> : null}

@@ -2,7 +2,7 @@
   "name": "AI Usage",
   "icon": "gauge.with.dots.needle.67percent",
   "color": "rgba(126, 217, 87,1)",
-  "version": "1.47",
+  "version": "1.48",
   "entry": "index.tsx",
   "runInApp": false,
   "description": "Codex / Claude / Antigravity 额度（百分比取整显示）、DeepSeek 余额与 WorkBuddy 国内个人积分／只读签到小组件，支持 OAuth,API,Token、Parrot、Sub2API，Antigravity 分组（含 Gemini 4 Argon）切换、独立统计、账号排序、自定义小组件用户名及主屏／锁屏显示。",

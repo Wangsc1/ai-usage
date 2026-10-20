@@ -1,10 +1,10 @@
 // Production SettingsView + shared browser lifecycle, offline. No protocol/network changes mocked here.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict')
 const ts=require(process.env.TYPESCRIPT_PATH||'/tmp/chk/node_modules/typescript'),root=path.resolve(__dirname,'..')
-let states=[],hook=0,effects=[],source='official',flows=[],accounts=[],instances=[],timers=new Map(),seq=0,mode='pending',rejectLoad,resolveLoad,finishExchange,holdExchange=false
+let states=[],hook=0,effects=[],source='official',flows=[],accounts=[],instances=[],timers=new Map(),seq=0,mode='pending',rejectLoad,resolveLoad,finishExchange,holdExchange=false,loginError=false
 const api=new Proxy({
  getSource:()=>source,saveSource:s=>{source=s},officialAccounts:()=>accounts,cachedAccounts:()=>[],getConfig:()=>({}),getSub2APIConfig:()=>({}),getStatisticsSource:()=> 'parrot',getRefreshMinutes:()=>30,accountScope:()=>0,hiddenAccountIds:()=>[],claudeCooldownUntil:()=>0,REFRESH_OPTIONS:[],loadUsage:async()=>({data:null}),sortAccounts:a=>a,
-},{get:(o,k)=>k in o?o[k]: /^begin.*Login$/.test(k)?(...args)=>{const flow={url:'https://fixture.invalid/'+k,consumed:false,cancelled:false,progress:'',callback:args[0]};flows.push(flow);return k==='beginWorkBuddyLogin'?Promise.resolve(flow):flow}: /^cancel.*Login$/.test(k)?d=>{d.cancelled=true}: /^finish.*Login$/.test(k)?async(d,...args)=>{d.consumed=true;const valid=args.at(-1);if(holdExchange)await new Promise(r=>finishExchange=r);if(!d.cancelled&&valid())accounts.push({id:'fixture',provider:'fixture'});}:()=>undefined})
+},{get:(o,k)=>k in o?o[k]: /^begin.*Login$/.test(k)?(...args)=>{const flow={url:'https://fixture.invalid/'+k,consumed:false,cancelled:false,progress:'',callback:args[0]};flows.push(flow);return k==='beginWorkBuddyLogin'?Promise.resolve(flow):flow}: /^cancel.*Login$/.test(k)?d=>{d.cancelled=true}: /^finish.*Login$/.test(k)?async(d,...args)=>{d.consumed=true;if(loginError)throw Error("fixture login network error");const valid=args.at(-1);if(holdExchange)await new Promise(r=>finishExchange=r);if(!d.cancelled&&valid())accounts.push({id:'fixture',provider:'fixture'});}:()=>undefined})
 const scripting=new Proxy({Navigation:{useDismiss:()=>()=>{},present:()=>{throw Error('independent presentation forbidden')}},Widget:{reloadAll:async()=>{}},useState:v=>{const i=hook++;if(!(i in states))states[i]=v;return [states[i],v=>states[i]=typeof v==='function'?v(states[i]):v]},useEffect:f=>effects.push(f)},{get:(o,k)=>k in o?o[k]:k})
 const context=vm.createContext({console,Map,Set,Promise,Math,Number,Date,
  setTimeout:(fn,ms)=>{const id=++seq;timers.set(id,{fn,ms});return id},clearTimeout:id=>timers.delete(id),
@@ -16,8 +16,8 @@ const m={exports:{}};vm.runInContext(`(function(require,module,exports){${out.ou
 function walk(v,out=[]){if(v==null||v===false)return out;if(Array.isArray(v)){v.forEach(x=>walk(x,out));return out}if(typeof v!=='object'){out.push(v);return out}if(typeof v.type==='function')return walk(v.type(v.props),out);out.push(v);walk(v.props?.children,out);return out}
 function render(){hook=0;return walk(m.exports.SettingsView())}
 const button=title=>{const b=render().find(n=>n?.type==='Button'&&n.props.title===title);assert.ok(b,title);return b},dest=()=>render().find(n=>n?.type==='Form').props.navigationDestination,flush=async(n=40)=>{while(n--)await Promise.resolve()}
-function reset(){states=[];effects=[];source='official';flows=[];accounts=[];instances=[];timers.clear();mode='pending';holdExchange=false;finishExchange=null}
-async function prepare(provider){reset();render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged(provider);await button('添加账号').props.action();return flows.at(-1)}
+function reset(){states=[];effects=[];source='official';flows=[];accounts=[];instances=[];timers.clear();mode='pending';holdExchange=false;finishExchange=null;loginError=false;rejectLoad=null;resolveLoad=null}
+async function prepare(provider){reset();render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged(provider);await button('添加账号').props.action();if(provider==='workbuddy')assert.ok(!render().some(n=>typeof n==='string'&&n.includes('国内个人账号 · 客户端私有协议')));return flows.at(-1)}
 async function main(){
  for(const provider of ['codex','claude','antigravity','workbuddy'])for(const action of ['back','success','false','throw','timeout','loaded','cancel','source','unmount','late-exchange','back-exchange']){
   const flow=await prepare(provider);mode=action==='false'?'false':action==='throw'?'throw':'pending';holdExchange=['late-exchange','back-exchange'].includes(action)||(provider==='workbuddy'&&action!=='success');
@@ -28,13 +28,23 @@ async function main(){
   else if(action==='success'){if(provider!=='workbuddy')flow.callback();await flush();await task;assert.equal(accounts.length,1);assert.equal(dest().isPresented,false,'save automatically pops')}
   else if(action==='back-exchange'){if(provider!=='workbuddy')flow.callback();await flush();assert.ok(finishExchange);binding.onChanged(false);await flush();if(['codex','claude'].includes(provider))assert.equal(button('点击登录').props.disabled,true,'back must not unlock an exchange in progress');finishExchange();await task;await flush();assert.equal(accounts.length,['codex','claude'].includes(provider)?1:0)}
   else if(action==='late-exchange'){if(provider!=='workbuddy')flow.callback();await flush();assert.ok(finishExchange);button('取消登录').props.action();finishExchange();await task;await flush();assert.equal(accounts.length,0)}
-  else {if(action==='back')binding.onChanged(false);if(action==='cancel')button('取消登录').props.action();if(action==='source')await render().find(n=>n?.type==='Picker'&&n.props.title==='账号来源').props.onChanged('sub2api');if(action==='unmount')effects.map(f=>f()).filter(f=>typeof f==='function').forEach(f=>f());if(provider==='workbuddy')finishExchange?.();await task;const count=accounts.length;if(provider!=='workbuddy'&&action!=='back')flow.callback();await flush();assert.equal(accounts.length,count,'cancelled callback cannot revive authorization');if(action==='back')assert.ok(['workbuddy','antigravity'].includes(provider)?button('添加账号'):button('点击登录').props.disabled===false)}
+  else {if(action==='back')binding.onChanged(false);if(action==='cancel')button('取消登录').props.action();if(action==='source')await render().find(n=>n?.type==='Picker'&&n.props.title==='账号来源').props.onChanged('sub2api');if(action==='unmount')effects.map(f=>f()).filter(f=>typeof f==='function').forEach(f=>f());if(provider==='workbuddy'){await flush();finishExchange?.()}await task;const count=accounts.length;if(provider!=='workbuddy'&&action!=='back')flow.callback();await flush();assert.equal(accounts.length,count,'cancelled callback cannot revive authorization');if(action==='back')assert.ok(['workbuddy','antigravity'].includes(provider)?button('添加账号'):button('点击登录').props.disabled===false)}
+  if(provider==='workbuddy'&&['back','cancel','loaded','back-exchange','late-exchange'].includes(action)){
+    assert.equal(flow.cancelled,true,'normal cancellation still terminates poll flow '+action);assert.equal(accounts.length,0)
+    assert.ok(!render().some(n=>typeof n==='string'&&n.includes('WorkBuddy登录已取消，请重新登录')))
+    assert.ok(!render().some(n=>n?.type==='Text'&&n.props.foregroundStyle==='systemRed'),'normal cancellation has no error row')
+    assert.equal(button('添加账号').props.disabled,false,'busy unlocked')
+    finishExchange?.();await flush();assert.equal(accounts.length,0,'late poll cannot save after return')
+  }
   assert.equal(view.disposed,1,provider+' '+action);assert.equal(timers.size,0);binding.onChanged(false);assert.equal(view.disposed,1,'back notification after release is idempotent');if(rejectLoad)rejectLoad(Error('late load rejection'));await flush()
  }
+ // Real login/poll errors, unlike the internal cancellation sentinel, remain visible.
+ await prepare('workbuddy');loginError=true;const failed=button('点击登录').props.action();await failed;assert.ok(render().includes('fixture login network error'));assert.equal(flows[0].cancelled,true);assert.equal(instances[0].disposed,1);assert.equal(button('添加账号').props.disabled,false)
  // A synchronous native push failure still cleans up the isolated controller.
  reset();await assert.rejects(()=>m.exports.presentIsolatedAuthorization(undefined,'https://fixture.invalid/',()=>{throw Error('push failed')}),/push failed/);assert.equal(instances[0].disposed,1);assert.equal(timers.size,0)
  // A late cleanup from the previous destination must not pop a subsequent attempt.
  await prepare('codex');let first=button('点击登录').props.action();const old=dest();old.onChanged(false);await first;const second=button('点击登录').props.action();old.onChanged(false);assert.equal(dest().isPresented,true);dest().onChanged(false);await second;assert.notEqual(instances[0],instances[1]);assert.ok(instances.every(b=>b.disposed===1))
+ console.log('PASS WorkBuddy normal return/cancel silent, old explanatory Text removed, poll cancellation/late-save protection retained, genuine loading/timeout/login errors visible')
  console.log('PASS four provider production TSX native navigationDestination/WebView push, no modal/custom back; immediate display with pending load, success pop, native back unlock, failure/timeout, isolated sessions, exactly-once dispose, source/unmount/cancel/late exchange and callbacks, stale destination isolation')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})
