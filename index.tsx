@@ -39,7 +39,7 @@ function FullScreenPage({ children }: { children: any }) {
   const close = Navigation.useDismiss()
   return <NavigationStack>
     <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      toolbar={{ cancellationAction: <Button title="关闭" systemImage="xmark" action={close} /> }}>
+      toolbar={{ cancellationAction: <Button title="返回" systemImage="chevron.left" action={close} /> }}>
       {children}
     </VStack>
   </NavigationStack>

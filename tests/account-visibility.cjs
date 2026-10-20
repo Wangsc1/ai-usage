@@ -129,7 +129,7 @@ async function main(){
    const chrome=modal.element.type(modal.element.props)
    assert.equal(chrome.type,'NavigationStack')
    const close=chrome.props.children.props.toolbar.cancellationAction
-   assert.equal(close.props.systemImage,'xmark');const d=dismissed;close.props.action();assert.equal(dismissed,d+1)
+   assert.equal(close.props.systemImage,'chevron.left');assert.equal(close.props.title,'返回');const d=dismissed;close.props.action();assert.equal(dismissed,d+1)
    assert.equal(exited,0,'closing child never exits root script')
   }
  }
