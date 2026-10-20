@@ -161,7 +161,7 @@ async function main() {
   const linesIn=tree=>tree.filter(isLine).map(lineOf)
   let skipAccountTitles=false
   let proposedStatsWidth=null
-  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function'&&skipAccountTitles&&n.type.name==='AccountTitle')return [];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame?.height===5?330:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame?.height??134}}))];return [n,...expand(n.props?.children)] }
+  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function'&&skipAccountTitles&&n.type.name==='AccountTitle')return [];if(typeof n.type==='function'&&n.type.name==='FullScreenLink')return [n,...expand(n.type(n.props))];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame?.height===5?330:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame?.height??134}}))];return [n,...expand(n.props?.children)] }
   const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:i!==0,available:true,...mapped}))
   const data={today:null,month:null,accounts,fetchedAt:now,todayByFamily:{},monthByFamily:{}}
   const expectedLight={gradient:[{color:'#FAFDFE',location:0},{color:'#F2F8FC',location:0.45},{color:'#DAEDF9',location:0.75},{color:'#ADD9F3',location:1}],startPoint:{x:0.3,y:0},endPoint:{x:0.7,y:1}}
@@ -661,7 +661,7 @@ async function main() {
   scripting.useObservable=init=>{const i=obsIndex++;if(!(i in obsStore)){const o={value:typeof init==='function'?init():init,setValue(v){o.value=v}};obsStore[i]=o}return obsStore[i]}
   scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
   const ids=()=>Array.from(api.cachedAccounts(),a=>a.id)
-  const link=()=>render().find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
+  const link=()=>render().find(x=>x.type?.name==='FullScreenLink'&&x.props.destination?.type?.name==='AccountOrderPage')
   assert.ok(link());assert.equal(link().props.children.props.children,'账号排序')
   const openPage=()=>{obsStore=[];obsIndex=0;const d=link().props.destination;assert.equal(d.props.source,'parrot');return d}
   const pageTree=d=>{obsIndex=0;return expand(d.type(d.props))}
@@ -758,7 +758,7 @@ async function main() {
   await editor().find(x=>x.type==='Button'&&x.props.title==='保存').props.action();assert.equal(api.getWidgetName('p0','parrot'),'')
   api.saveWidgetName('p0',alias,'parrot');storage.set('ai_usage_cache_v1',{...data,accounts});states.length=0
   const aliasUI=render();assert.ok(aliasUI.some(x=>typeof x==='string'&&x.includes('匿名0')))
-  assert.ok(aliasUI.includes(alias));assert.ok(aliasUI.some(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='WidgetNamePage'))
+  assert.ok(aliasUI.includes(alias));assert.ok(aliasUI.some(x=>x.type?.name==='FullScreenLink'&&x.props.destination?.type?.name==='WidgetNamePage'))
   // Logout is explicitly official-scoped even when another source is currently active.
   api.saveWidgetName('p1','保留官方','official');api.logoutOfficial('p0')
   assert.equal(api.getWidgetName('p0','official'),'');assert.equal(api.getWidgetName('p1','official'),'保留官方');assert.equal(api.getWidgetName('p0','parrot'),alias)
@@ -817,10 +817,10 @@ async function main() {
   states.length=0;let emailUI=render()
   assert.ok(emailUI.some(x=>isLine(x)&&lineOf(x).icon==='codex'&&lineOf(x).name==='nested@example.test'))
   assert.ok(!emailUI.some(x=>x.type==='Section'&&x.props.header?.props.children==='目前账号'))
-  assert.ok(!emailUI.some(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage'),'native sort replaces official sub-page')
+  assert.ok(!emailUI.some(x=>x.type?.name==='FullScreenLink'&&x.props.destination?.type?.name==='AccountOrderPage'),'native sort replaces official sub-page')
   const nativeOrder=emailUI.find(x=>x.type==='ForEach');assert.ok(nativeOrder);assert.equal(typeof nativeOrder.props.onMove,'function')
   const fallbackUI=withMissingSort(()=>{states.length=0;return render()})
-  const orderLink=fallbackUI.find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
+  const orderLink=fallbackUI.find(x=>x.type?.name==='FullScreenLink'&&x.props.destination?.type?.name==='AccountOrderPage')
   obsStore=[];obsIndex=0;const emailOrder=expand(orderLink.props.destination.type(orderLink.props.destination.props))
   const orderBuilder=emailOrder.find(x=>x.type==='ReorderableForEach')
   assert.ok(expand(orderBuilder.props.builder(nestedAccount,0)).some(x=>typeof x==='string'&&x.includes('nested@example.test')))
@@ -1297,7 +1297,7 @@ async function main() {
   for(const a of listRecords){
     const row=exitRow(exitUI,a.id);assert.ok(row)
     const children=Array.from(row.props.children)
-    assert.deepEqual(children.map(x=>x.type),['NavigationLink','Spacer']);const lineHStack=expand(children[0]).find(isLine),l=lineOf(lineHStack),text=lineHStack.props.children[2]
+    assert.deepEqual(children.map(x=>x.type?.name||x.type),['FullScreenLink','Spacer']);const lineHStack=expand(children[0]).find(isLine),l=lineOf(lineHStack),text=lineHStack.props.children[2]
     assert.deepEqual([l.n,l.icon,l.name],[(api.sortAccounts(listRecords,'official').findIndex(r=>r.id===a.id)+1)+'.',a.provider==='claude'?'claude':'codex',a.provider==='claude'?(a.email||'邮箱未提供'):a.name])
     assert.equal(text.props.action,undefined);assert.equal(text.props.onTapGesture,undefined);assert.equal(row.props.action,undefined)
     assert.equal(text.props.lineLimit,undefined);assert.equal(text.props.fixedSize.horizontal,false);assert.equal(text.props.fixedSize.vertical,true)
@@ -1714,7 +1714,7 @@ async function main() {
     assert.equal(authUI.filter(x=>x.type==='HStack'&&x.key===targetID).length,1)
     assert.ok(!authUI.some(x=>x.type==='Text'&&typeof x.props.children==='string'&&x.props.children.includes('已保存')))
     const completedRow=authUI.find(x=>x.type==='HStack'&&x.key===targetID),rowChildren=completedRow.props.children
-    assert.deepEqual(Array.from(rowChildren).map(x=>x.type),['NavigationLink','Spacer'])
+    assert.deepEqual(Array.from(rowChildren).map(x=>x.type?.name||x.type),['FullScreenLink','Spacer'])
     assert.deepEqual((l=>[l.n,l.icon,l.name])(lineOf(expand(completedRow).find(isLine))),expectedLabel);assert.equal(completedRow.props.trailingSwipeActions.actions[0].props.title,'删除');assert.equal(completedRow.props.trailingSwipeActions.actions[0].props.disabled,false)
     assert.equal(api.officialAccounts().at(-1).id,lastCompletion.id);assert.equal(kc.get('ai_usage_official_oauth_v1'),otherCredKey)
     const remainingIDs=api.officialAccounts().filter(a=>a.id!==targetID).map(a=>a.id)
@@ -2653,7 +2653,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     // Native (exports present): header EditButton, single ForEach with onMove, no official sub-page entry; rows keep swipe/name link.
     const loginSec=()=>render().find(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号')
     assert.deepEqual(Array.from(loginSec().props.header.props.children.filter(Boolean),n=>n.type),['Text','Spacer','EditButton'])
-    assert.ok(!managementUI.some(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage'))
+    assert.ok(!managementUI.some(n=>n?.type?.name==='FullScreenLink'&&n.props.destination?.type?.name==='AccountOrderPage'))
     const nativeEach=()=>render().filter(n=>n?.type==='ForEach');assert.equal(nativeEach().length,1);const fe=nativeEach()[0]
     assert.equal(fe.props.count,3);assert.equal(fe.props.onDelete,undefined);assert.equal(typeof fe.props.onMove,'function')
     assert.ok(rows().every(n=>n.props.trailingSwipeActions&&n.props.children[0].type==='NavigationLink'))
@@ -2673,7 +2673,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     // Missing exports: first render succeeds, no ForEach/EditButton, original sub-page entry returns and still sorts.
     {const fallback=withMissingSort(()=>{states.length=0;return render()})
      assert.ok(!fallback.some(n=>n?.type==='ForEach'||n?.type==='EditButton'))
-     const orderLink=fallback.find(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage');assert.ok(orderLink)
+     const orderLink=fallback.find(n=>n?.type?.name==='FullScreenLink'&&n.props.destination?.type?.name==='AccountOrderPage');assert.ok(orderLink)
      const destination=orderLink.props.destination;obsStore=[];obsIndex=0;const orderTree=expand(destination.type(destination.props));assert.ok(orderTree.some(n=>n?.type==='ScrollView'))
      assert.deepEqual(Array.from(orderTree.find(n=>n?.type==='ReorderableForEach').props.data,n=>n.id),['claude:manage:org',ds,'manage-codex'])}
     states.length=0
@@ -2888,7 +2888,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
         states.length=0;effects=[];cleanups=[];await runApp()
         assert.ok(mounted.some(n=>n?.type==='Form'),opening+' first render non-blank')
         assert.ok(!mounted.some(n=>n?.type==='Button'&&/验证码|复制代码/.test(n.props.title||'')));assert.ok(!mounted.some(n=>n?.type==='Text'&&/一次性代码|有效期|浏览器登录已准备/.test(String(n.props.children||''))))
-        if(source==='official'){assert.equal(mounted.some(n=>n?.type==='ForEach'),!missing.length);assert.equal(mounted.some(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage'),!!missing.length)}
+        if(source==='official'){assert.equal(mounted.some(n=>n?.type==='ForEach'),!missing.length);assert.equal(mounted.some(n=>n?.type?.name==='FullScreenLink'&&n.props.destination?.type?.name==='AccountOrderPage'),!!missing.length)}
         assert.equal(calls.length,beforeCalls,source+'/'+statsSource+'/'+cacheMode+'/'+opening+' zero network including expiry renewal')
         assert.equal(reloads,beforeReload,'entry does not reload widgets');assert.equal(JSON.stringify([...kc]),beforeKC);assert.equal(JSON.stringify([...storage]),beforeStore)
         const text=mounted.filter(x=>typeof x==='string').join(' ')
