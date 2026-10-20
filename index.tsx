@@ -552,8 +552,8 @@ function SettingsView() {
       navigationTitle={"AI 用量"}
       navigationBarTitleDisplayMode={"inline"}
       toolbar={{
-        cancellationAction: <Button title={"完成"} action={dismiss} />,
-        primaryAction: <Button title={busy ? "刷新中…" : "刷新"} disabled={busy || !!claude || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => { if (busy || auth.running || auth.claude || auth.codex || auth.workbuddy || auth.antigravity) return; await test() }} />,
+        cancellationAction: <Button title={"完成"} systemImage="xmark" action={dismiss} />,
+        primaryAction: <Button title={busy ? "刷新中…" : "刷新"} systemImage="arrow.clockwise" disabled={busy || !!claude || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => { if (busy || auth.running || auth.claude || auth.codex || auth.workbuddy || auth.antigravity) return; await test() }} />,
       }}
     >
       <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>}>
