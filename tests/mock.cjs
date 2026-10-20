@@ -1571,10 +1571,10 @@ async function main() {
   const signalServer=claudeServers.at(-1);signalServer.handlers['/callback'](callback(signalFlow.state))
   for(let i=0;i<100;i++)await Promise.resolve()
   assert.deepEqual(orderedStages,['收到Claude回调，已通过本次校验','正在交换Claude令牌（不重复提交）','正在读取Claude账号资料','正在保存Claude账号到本机','Claude stage-order@example.test'])
-  // Browser close WITHOUT callback keeps waiting; cancellation suppresses late signals and late token saves.
-  authUI=await startClaudeUI();const emptyBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
-  closeClaudeModal();await emptyBrowser;assert.ok(!render().includes('等待Claude回调（尚未收到）'));assert.equal(uiAttempt().progress,'等待Claude回调（尚未收到）')
-  render().find(x=>x.type==='Button'&&x.props.title==='取消登录').props.action()
+  // Browser close WITHOUT callback cancels the unconsumed attempt and unlocks homepage refresh; late signals cannot save.
+  authUI=await startClaudeUI();const emptyAttempt=uiAttempt(),emptyServer=claudeServers.at(-1);const emptyBrowser=authUI.find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action()
+  closeClaudeModal();await emptyBrowser;assert.ok(!render().includes('等待Claude回调（尚未收到）'));assert.equal(uiAttempt(),undefined);assert.equal(emptyAttempt.cancelled,true);assert.equal(emptyServer.stops,1);assert.equal(render().find(x=>x.type==='Form').props.toolbar.primaryAction.props.disabled,false)
+  assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='添加账号'))
   for(const stop of ['cancel','source']){
     authUI=await startClaudeUI();stageAttempt=uiAttempt();stageServer=claudeServers.at(-1);holdToken=true;releaseClaudeRequest=null
     const credentialsBefore=kc.get('ai_usage_claude_oauth_v1')
@@ -2775,10 +2775,11 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     d=api.beginCodexBrowserLogin(()=>{finishPromise=api.finishCodexBrowserLogin(d,()=>true)},()=>{});callback(d)(req(d));await Promise.resolve();await finishPromise;assert.equal(posts,prior+1);assert.equal(api.officialAccounts().filter(a=>a.email==='browser@codex.test').length,1);assert.equal(api.getWidgetName(account.id,'official'),'Browser Alias');assert.equal(storage.get('ai_usage_official_order_v1')[0],account.id)
     // Unknown network outcome is terminal, not automatically retried.
     exchangeMode='fail';d=api.beginCodexBrowserLogin(()=>{},()=>{});d.code='FAIL';await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true),/503/);const failedPosts=posts;await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true));assert.equal(posts,failedPosts);exchangeMode='network';d=api.beginCodexBrowserLogin(()=>{},()=>{});d.code='UNKNOWN';await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true),/网络/);const unknownPosts=posts;await assert.rejects(()=>api.finishCodexBrowserLogin(d,()=>true));assert.equal(posts,unknownPosts);assert.equal(d.cancelled,true);exchangeMode='ok'
-    // Real App: default prepares locally, close-before-callback keeps attempt retryable.
+    // Real App: default prepares locally; close-before-callback cancels and unlocks refresh/new login.
     api.saveSource('official');states.length=0;const n=calls.length,ns=servers.length
     await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action();assert.equal(calls.length,n);assert.equal(servers.length,ns+1);assert.ok(!render().some(x=>x?.type==='Text'&&x.props.contextMenu));assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='验证码登录'))
-    await render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();assert.equal(views.at(-1).disposed,1);assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='点击登录'));assert.equal(calls.length,n)
+    await render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();assert.equal(views.at(-1).disposed,1);assert.ok(render().some(x=>x.type==='Button'&&x.props.title==='添加账号'));assert.equal(render().find(x=>x.type==='Form').props.toolbar.primaryAction.props.disabled,false);assert.equal(servers.at(-1).stops,1);assert.equal(calls.length,n)
+    await render().find(x=>x.type==='Button'&&x.props.title==='添加账号').props.action()
     // Browser closes while exchange is in flight: busy remains locked until completion, then saved/refreshed.
     holdView=true;exchangeMode='hold';const open=render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.action();await Promise.resolve();const server=servers.at(-1),u=new URL(views.at(-1).url);server.handlers['/auth/callback']({method:'GET',queryParams:[{key:'state',value:u.searchParams.get('state')},{key:'code',value:'UI-CODE'}]});for(let i=0;i<30&&!releaseExchange;i++)await Promise.resolve();assert.ok(releaseExchange);assert.equal(views.at(-1).dismissed,0);assert.equal(views.at(-1).disposed,0);closeView();await open;assert.ok(render().find(x=>x.type==='Button'&&x.props.title==='点击登录').props.disabled);releaseExchange();for(let i=0;i<100&&render().some(x=>x.type==='Button'&&x.props.title==='取消登录');i++)await Promise.resolve();assert.ok(!render().some(x=>x.type==='Button'&&x.props.title==='取消登录'));assert.equal(server.stops,1);assert.equal(views.at(-1).disposed,1);assert.equal(views.at(-1).dismissed,1);holdView=false;exchangeMode='ok'
     // In-flight late tokens cannot save after cancel/provider/source/dismiss controls.

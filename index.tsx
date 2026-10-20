@@ -359,7 +359,7 @@ function SettingsView() {
     auth.running = true; setBusy(true); setBrowserError("")
     try {
       // Presentation starts before polling; its own ephemeral cookies are never copied into fetch.
-      const shown = presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url, pushAuthorization)
+      const shown = presentIsolatedAuthorization(release => { if (valid()) auth.releaseBrowser = release }, d.url, pushAuthorization)
       const completed = finishWorkBuddyLogin(d, valid).then(() => {
         if (!valid()) return
         saved = true; setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null
@@ -388,9 +388,12 @@ function SettingsView() {
     const epoch = auth.epoch
     const valid = () => auth.alive && auth.codex === d && auth.epoch === epoch
     auth.running = true; setBusy(true); setBrowserError("")
-    try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url, pushAuthorization) }
+    try { await presentIsolatedAuthorization(release => { if (valid()) auth.releaseBrowser = release }, d.url, pushAuthorization) }
     catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Codex授权页") + "，请重试登录") }
-    finally { if (auth.alive && epoch === auth.epoch && !d.consumed) { auth.running = false; setBusy(false) } }
+    finally {
+      // Native back/load failure ends an unconsumed attempt, not a token exchange.
+      if (valid() && !d.consumed) { stopAuth(); setBusy(false) }
+    }
   }
   function startAG() {
     if (!auth.alive || getSource() !== "official" || auth.running || busy) return
@@ -421,9 +424,12 @@ function SettingsView() {
     const epoch = auth.epoch
     const valid = () => auth.alive && auth.antigravity === d && auth.epoch === epoch
     auth.running = true; setBusy(true); setBrowserError("")
-    try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url, pushAuthorization); if (valid()) { stopAuth(); setBusy(false) } }
+    try { await presentIsolatedAuthorization(release => { if (valid()) auth.releaseBrowser = release }, d.url, pushAuthorization) }
     catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Antigravity授权页") + "，请重试登录") }
-    finally { if (auth.alive && epoch === auth.epoch && !d.consumed) { auth.running = false; setBusy(false) } }
+    finally {
+      // Native back/load failure ends an unconsumed attempt, not a token exchange.
+      if (valid() && !d.consumed) { stopAuth(); setBusy(false) }
+    }
   }
   function startClaude(manual = false) {
     if (auth.running) return
@@ -462,7 +468,7 @@ function SettingsView() {
           auth.claude = null; setClaude(null)
         }
       }
-    } finally { auth.running = false; if (auth.alive && epoch === auth.epoch) setBusy(false) }
+    } finally { if (auth.alive && epoch === auth.epoch) { auth.running = false; setBusy(false) } }
   }
   async function openClaude() {
     const d = auth.claude
@@ -471,7 +477,7 @@ function SettingsView() {
     const valid = () => auth.alive && auth.claude === d && auth.epoch === epoch && getSource() === "official"
     auth.running = true; setBusy(true); setBrowserError("")
     try {
-      await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url, pushAuthorization)
+      await presentIsolatedAuthorization(release => { if (valid()) auth.releaseBrowser = release }, d.url, pushAuthorization)
       if (valid() && !d.consumed && d.code) await completeClaude(d)
     } catch (e: any) { if (valid()) {
       const message = e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载") ? e.message : "无法打开Claude授权页，请重试"
@@ -479,8 +485,11 @@ function SettingsView() {
     } }
     finally {
       // Closing the browser must not unlock an exchange/profile request still in flight.
-      if (auth.alive && epoch === auth.epoch && !(auth.claude === d && d.consumed && !d.cancelled)) {
-        auth.running = false; setBusy(false)
+      if (valid() && !d.consumed) {
+        // No loopback listener in manual fallback: keep code/state for paste, but no active I/O lock.
+        if (d.manual) auth.running = false
+        else stopAuth()
+        setBusy(false)
       }
     }
   }
@@ -595,7 +604,7 @@ function SettingsView() {
       navigationBarTitleDisplayMode={"inline"}
       toolbar={{
         cancellationAction: <Button title={"完成"} systemImage="xmark" action={dismiss} />,
-        primaryAction: <Button title={busy ? "刷新中…" : "刷新"} systemImage="arrow.clockwise" disabled={busy || !!claude || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => { if (busy || auth.running || auth.claude || auth.codex || auth.workbuddy || auth.antigravity) return; await test() }} />,
+        primaryAction: <Button title={busy ? "刷新中…" : "刷新"} systemImage="arrow.clockwise" disabled={busy || (!!claude && !claude.manual) || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => { if (busy || auth.running || (auth.claude && !auth.claude.manual) || auth.codex || auth.workbuddy || auth.antigravity) return; await test() }} />,
       }}
     >
       <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>}>
@@ -627,7 +636,7 @@ function SettingsView() {
 
       {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
-          {!dsAdding && !claude && !codexBrowser && !workbuddy && !wbPreparing && !agBrowser
+          {!dsAdding && (!claude || claude.manual && !busy) && !codexBrowser && !workbuddy && !wbPreparing && !agBrowser
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
             : <Text foregroundStyle="secondaryLabel">{loginProvider === "deepseek" ? "API Key" : "授权进行中"}</Text>}
           <Spacer />
