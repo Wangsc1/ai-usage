@@ -113,6 +113,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 - 回调地址固定为 `http://localhost:51121/oauth-callback`，监听仅绑定 `127.0.0.1:51121`。端口被占用或 Scripting 缺少本机 HTTP／PKCE／临时 WebView 能力时不能登录。关闭授权页、取消、退出设置或切换来源会结束未完成的流程。
 - 官方直连仅查询 production 主机 `cloudcode-pa.googleapis.com` 的 `loadCodeAssist` 获取 project／套餐，以及 daily 主机 `daily-cloudcode-pa.googleapis.com` 的 `retrieveUserQuotaSummary` 获取完整额度分组；两个主机都是 Google 官方接口。production 的 summary 可能不提供 Argon，不能以其双分组响应代替 daily 配额。账号详情中，“小组件用户名”区块下方的“小组件额度显示”可选择 **Gemini Models**、**Claude and GPT models**、**Gemini 4 Argon** 或 **最低剩余额度汇总**；默认汇总，与未设置选择的历史账号一致。汇总包含接口实际返回的所有真实分组（含 Argon），按各窗口最低剩余及对应重置时间显示，平局保留接口原顺序；这是展示汇总，不代表模型路由或账号可用性。详情保留全部真实分组、套餐、GOOGLE_ONE_AI credits 和最低使用额度；不自动开通项目、领取额度或消费 credits。
 - 每个账号独立保存选择，按账号来源隔离。切换只保存本机偏好并重新投影缓存，App详情和所有主屏／锁屏组件跟随，不联网、不续期，也不覆盖原始分组。为避免同步组件时立即请求上游，组件先显示缓存，下一次计划刷新到期后恢复正常读取；手动刷新仍可随时读取新数据。刷新、排序和修改组件用户名不会重置选择；删除账号只清理该账号的选择。
+- Antigravity 详情中的 5 h／7 d 与各分组剩余百分比四舍五入显示为整数（如 88.76% 显示 89%）；这只是显示，缓存和分组投影仍保留原始精度。
 - 指定分组缺少某个窗口时，该窗口显示 `--`；所选分组未返回时，两窗均显示未知，不回退另一分组，也不删除选择。分组按接口真实名称精确匹配，不依赖顺序，也不从模型名推测分组。Gemini 4 Argon 目前只提供 weekly；选择后 5 h 显示未知，7 d 显示其真实剩余及 reset，若以后接口提供其他窗口则按实际数据展示。该独立选项仅支持官方直连；实际显示以当前账号的 daily 响应为准，未返回的分组保持未知，不拼接旧 Argon 数据或模型用量。Parrot未公开分组明细、Sub2API目前仅提供模型额度，均不提供分组切换，保留各来源原有标准窗口并在详情说明限制。
 - Parrot 仍只查询其管理账号列表／详情，显示管理接口提供的标准窗口；当前管理 schema 未公开 Antigravity credits／分组，详情对应显示未提供，不绕过管理服务直连。
 - Sub2API 仍只 GET `/api/v1/admin/accounts/{id}/usage`，支持 Antigravity OAuth 账号的模型配额、套餐和已提供的 credits。当前上游 `five_hour` 是主要模型兼容投影，并无真实窗口时长，因此不冒充 5 h／7 d，组件显示 `--`，模型额度保留在详情；缺少的 credits 数值也显示未知。
