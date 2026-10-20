@@ -1,3 +1,4 @@
+import { accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
@@ -34,21 +35,22 @@ function AccountLine({ index, provider, name, fixed = false }: { index: number; 
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${providerWord(a.provider)} · ${a.name}`
 
 // Separate ScrollView page: Scripting docs recommend ReorderableForEach outside List/Form (built-in long-press drag).
-function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (next: Account[]) => void }) {
+function AccountOrderPage({ source, onSaved, expectedScope }: { source: DataSource; onSaved: (next: Account[]) => void; expectedScope?: number }) {
   const data = useObservable<Account[]>(() => managementAccounts())
   const active = useObservable<Account | null>(null)
+  const scope = useObservable(() => expectedScope ?? accountScope(source))
   const onMove = (indices: number[], newOffset: number) => {
     // A page opened for one source must never write after the app switched source.
-    if (getSource() !== source) return
+    if (getSource() !== source || accountScope(source) !== scope.value) return
     const current = data.value
-    if (!indices.length || indices.some(i => i < 0 || i >= current.length)) return
+    if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
     // Standard implementation from views/reorderable_foreach documentation.
     const movingItems = indices.map(index => current[index])
     const newValue = current.filter((_, index) => !indices.includes(index))
     newValue.splice(Math.max(0, Math.min(newOffset, newValue.length)), 0, ...movingItems)
     if (newValue.every((a, i) => a.id === current[i].id)) return
+    if (!saveVisibleAccountOrder(newValue.map(a => a.id), source, scope.value)) return
     data.setValue(newValue)
-    saveAccountOrder(newValue.map(a => a.id), source)
     onSaved(newValue)
     void Widget.reloadAll()
   }
@@ -77,13 +79,15 @@ function AccountOrderPage({ source, onSaved }: { source: DataSource; onSaved: (n
   </ScrollView>
 }
 
-function WidgetNamePage({ account, source, onSaved }: { account: Account; source: DataSource; onSaved: () => void }) {
+function WidgetNamePage({ account, source, onSaved, expectedScope }: { account: Account; source: DataSource; onSaved: () => void; expectedScope?: number }) {
   const close = Navigation.useDismiss()
   const [name, setName] = useState(getWidgetName(account.id, source))
+  const [scope] = useState(expectedScope ?? accountScope(source))
   const [quotaMode, setQuotaMode] = useState<AntigravityMode>(account.provider === "antigravity" ? getAntigravityMode(account.id, source) : "summary")
   const detailAccount = account.provider === "antigravity" && source === "official" && getSource() === source
     ? managementAccounts().find(a => a.id === account.id) ?? account : account
   async function save() {
+    if (getSource() !== source || accountScope(source) !== scope || (source !== "official" && !cachedAccounts().some(a => a.id === account.id))) return
     saveWidgetName(account.id, name, source)
     setName(name.trim())
     onSaved()
@@ -267,7 +271,10 @@ function SettingsView() {
   const [busy, setBusy] = useState(false)
   const [browserError, setBrowserError] = useState("")
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
-  const [accounts, setAccounts] = useState<Account[]>(cachedAccounts())
+  const [, setAccounts] = useState<Account[]>(cachedAccounts())
+  const listScope = accountScope(source)
+  const visible = getSource() === source ? cachedAccounts() : []
+  const hiddenCount = hiddenAccountIds(source).length
   const [agBrowser, setAGBrowser] = useState<AntigravityLogin | null>(null)
 
   useEffect(() => () => { if (auth.antigravity) cancelAntigravityLogin(auth.antigravity); auth.antigravity = null; if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
@@ -449,14 +456,14 @@ function SettingsView() {
   }
 
   async function test() {
-    const requestSource = getSource(), requestStats = getStatisticsSource()
+    const requestSource = getSource(), requestScope = accountScope(requestSource), requestStats = getStatisticsSource()
     setBusy(true)
     try {
       const r = await loadUsage()
       // A late refresh from the previous source must not replace this source's account list.
-      if (!auth.alive || getSource() !== requestSource || getStatisticsSource() !== requestStats) return
+      if (!auth.alive || getSource() !== requestSource || accountScope(requestSource) !== requestScope || getStatisticsSource() !== requestStats) return
       if (r.data) {
-        setAccounts(r.data.accounts)
+        setAccounts(cachedAccounts())
         await Widget.reloadAll()
       }
     } catch { /* failures keep the existing cached list */ }
@@ -480,6 +487,36 @@ function SettingsView() {
     void Widget.reloadAll()
   }
 
+  function moveRemoteAccounts(indices: number[], newOffset: number) {
+    if (busy || source === "official" || getSource() !== source || accountScope(source) !== listScope) return
+    const current = cachedAccounts()
+    // Reject an event from a stale row snapshot (e.g. another widget hid a row).
+    if (current.length !== visible.length || current.some((a, i) => a.id !== visible[i].id)) return
+    if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
+    const moving = indices.map(i => current[i]), next = current.filter((_, i) => !indices.includes(i))
+    const at = newOffset - indices.filter(i => i < newOffset).length
+    next.splice(Math.max(0, Math.min(at, next.length)), 0, ...moving)
+    if (next.every((a, i) => a.id === current[i].id)) return
+    if (!saveVisibleAccountOrder(next.map(a => a.id), source, listScope)) return
+    setAccounts(cachedAccounts())
+    void Widget.reloadAll()
+  }
+  const remoteRow = (a: Account, i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
+    <Button title="隐藏" role="destructive" disabled={busy} action={async () => {
+      if (busy || !hideAccount(a.id, source, listScope)) return
+      setAccounts(cachedAccounts())
+      await Widget.reloadAll()
+    }} />
+  ] }}>
+    <NavigationLink destination={<WidgetNamePage account={a} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
+      <VStack alignment="leading" spacing={3}>
+        <AccountLine index={i} provider={a.provider} name={a.name} />
+        <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, source) || "使用原名（点此设置）"}</Text>
+      </VStack>
+    </NavigationLink>
+    <Spacer />
+  </HStack>
+
   async function save() {
     const finalKey = key.trim() || cur.managementKey || ""
     if (!baseUrl.trim() || !finalKey) return
@@ -491,6 +528,7 @@ function SettingsView() {
 
   const loginRow = (a: ReturnType<typeof officialAccounts>[number], i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
           <Button title="删除" role="destructive" disabled={busy || !!claude || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => {
+          if (getSource() !== "official") return
           try {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
@@ -599,18 +637,17 @@ function SettingsView() {
         </NavigationLink> : null}
       </Section> : null}
 
-      {source !== "official" ? <Section header={<Text>目前账号</Text>}>
-        {accounts.map((a, i) => <NavigationLink key={a.id}
-          destination={<WidgetNamePage account={a} source={source} onSaved={() => setAccounts(cachedAccounts())} />}>
-          <VStack alignment="leading" spacing={3}>
-            <AccountLine index={i} provider={a.provider} name={a.name} />
-            <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, source) || "使用原名（点此设置）"}</Text>
-          </VStack>
-        </NavigationLink>)}
-        {accounts.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} onSaved={setAccounts} />}>
+      {source !== "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>目前账号</Text><Spacer />{NATIVE_SORT && visible.length > 1 ? <EditButton /> : null}</HStack>}>
+        {NATIVE_SORT ? <ForEach count={visible.length} onMove={moveRemoteAccounts} itemBuilder={i => remoteRow(visible[i], i)} /> : visible.map(remoteRow)}
+        {!NATIVE_SORT && visible.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}
-        {!accounts.length ? <Text>连接成功后显示账号列表</Text> : null}
+        {hiddenCount > 0 ? <Button title={`恢复全部隐藏账号（${hiddenCount}）`} disabled={busy} action={async () => {
+          if (busy || !restoreHiddenAccounts(source, listScope)) return
+          setAccounts(cachedAccounts())
+          await Widget.reloadAll()
+        }} /> : null}
+        {!visible.length ? <Text>{hiddenCount ? "账号已全部在本机隐藏，可恢复；服务器账号未删除。" : "连接成功后显示账号列表"}</Text> : null}
       </Section> : null}
 
       <Section header={<Text>刷新预览</Text>}>

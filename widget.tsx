@@ -1,6 +1,6 @@
 import { antigravityBrandImage } from "./api"
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { cachedAntigravityWidgetProjection, loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
+import { visibleAccounts, cachedLocalWidgetProjection, loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -541,6 +541,7 @@ function AccessoryRoot({ data, error, family }: { data: UsageData | null; error:
 }
 
 function Root({ data, error }: { data: UsageData | null; error: string | null }) {
+  if (data) data = { ...data, accounts: visibleAccounts(data.accounts) }
   if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} />
   let body: VirtualNode
   let largeCredits = false
@@ -575,7 +576,7 @@ function Root({ data, error }: { data: UsageData | null; error: string | null })
 }
 
 async function run() {
-  const r = cachedAntigravityWidgetProjection() ?? await loadUsage()
+  const r = cachedLocalWidgetProjection() ?? await loadUsage()
   Widget.present(<Root data={r.data} error={r.error} />, {
     reloadPolicy: { policy: "after", date: new Date(Date.now() + getRefreshMinutes() * 60 * 1000) },
   })

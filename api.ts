@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.33"
+export const VERSION = "1.34"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -20,10 +20,10 @@ export function saveSub2APIConfig(baseUrl: string, adminKey: string, timezone: s
   if (!key) throw new Error("请填写Sub2API管理员密钥")
   try { new Intl.DateTimeFormat("en", { timeZone: tz }).format(new Date()) } catch { throw new Error("请填写有效IANA统计时区，如Asia/Shanghai") }
   const old = getSub2APIConfig()
-  if (old.baseUrl !== url || old.adminKey !== key || old.timezone !== tz) { Storage.remove(KEY_SUB_STATS); Storage.remove(KEY_SUB_CACHE); Storage.remove(KEY_SUB_CARDS) }
+  if (old.baseUrl !== url || old.adminKey !== key || old.timezone !== tz) { Storage.remove(KEY_SUB_STATS); Storage.remove(KEY_SUB_CACHE); Storage.remove(KEY_SUB_CARDS); resetRemoteAccountScope("sub2api") }
   Keychain.set(KEY_SUB_URL, url); Keychain.set(KEY_SUB_KEY, key); Keychain.set(KEY_SUB_TZ, tz)
 }
-export function clearSub2APIConfig() { Keychain.remove(KEY_SUB_URL); Keychain.remove(KEY_SUB_KEY); Keychain.remove(KEY_SUB_TZ); Storage.remove(KEY_SUB_STATS); Storage.remove(KEY_SUB_CACHE); Storage.remove(KEY_SUB_CARDS) }
+export function clearSub2APIConfig() { resetRemoteAccountScope("sub2api"); Keychain.remove(KEY_SUB_URL); Keychain.remove(KEY_SUB_KEY); Keychain.remove(KEY_SUB_TZ); Storage.remove(KEY_SUB_STATS); Storage.remove(KEY_SUB_CACHE); Storage.remove(KEY_SUB_CARDS) }
 
 // Local widget-only names: stable account ID within the explicitly separate data source.
 const widgetNameKey = (source: DataSource) => `ai_usage_widget_names_${source}_v1`
@@ -123,13 +123,49 @@ function syncAccountOrder(accounts: Account[], source: DataSource): Account[] {
   saveAccountOrder(sorted.map(a => a.id), source) // prune removed IDs only on a successful full fetch
   return sorted
 }
-export function cachedAccounts(): Account[] {
-  const source = getSource()
-  return sortAccounts(((source === "official" ? officialCached() : Storage.get<UsageData>(source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE))?.accounts ?? []).map(a => projectAntigravityAccount(a, source)), source)
+// Remote account removal is local visibility only. Cache and complete order stay canonical.
+const hiddenKey = (source: DataSource) => `ai_usage_hidden_${source}_v1`
+const scopeKey = (source: DataSource) => `ai_usage_account_scope_${source}_v1`
+export function accountScope(source: DataSource = getSource()): number { return source === "official" ? 0 : Storage.get<number>(scopeKey(source)) ?? 0 }
+function resetRemoteAccountScope(source: "parrot" | "sub2api") {
+  Storage.set(scopeKey(source), accountScope(source) + 1) // no configuration or secret copies
+  Storage.remove(hiddenKey(source))
+  Storage.remove(localWidgetKey(source))
+}
+function rawCachedAccounts(source: DataSource): Account[] {
+  return (source === "official" ? officialCached() : Storage.get<UsageData>(source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE))?.accounts ?? []
+}
+export function hiddenAccountIds(source: DataSource = getSource()): string[] { return source === "official" ? [] : Storage.get<string[]>(hiddenKey(source)) ?? [] }
+export function visibleAccounts(accounts: Account[], source: DataSource = getSource()): Account[] {
+  const hidden = new Set(hiddenAccountIds(source))
+  return sortAccounts(accounts.filter(a => !hidden.has(a.id)).map(a => projectAntigravityAccount(a, source)), source)
+}
+export function cachedAccounts(): Account[] { return visibleAccounts(rawCachedAccounts(getSource())) }
+export function hideAccount(id: string, source: DataSource, scope = accountScope(source)): boolean {
+  if (source === "official" || getSource() !== source || accountScope(source) !== scope || !rawCachedAccounts(source).some(a => a.id === id)) return false
+  Storage.set(hiddenKey(source), [...new Set([...hiddenAccountIds(source), id])])
+  requestLocalWidgetProjection(source)
+  return true
+}
+export function restoreHiddenAccounts(source: DataSource, scope = accountScope(source)): boolean {
+  if (source === "official" || getSource() !== source || accountScope(source) !== scope) return false
+  Storage.remove(hiddenKey(source))
+  requestLocalWidgetProjection(source)
+  return true
+}
+export function saveVisibleAccountOrder(ids: string[], source: DataSource, scope = accountScope(source)): boolean {
+  if (getSource() !== source || accountScope(source) !== scope) return false
+  const full = sortAccounts(source === "official" ? managementAccounts() : rawCachedAccounts(source), source)
+  const hidden = new Set(hiddenAccountIds(source)), visible = full.filter(a => !hidden.has(a.id))
+  if (ids.length !== visible.length || new Set(ids).size !== ids.length || ids.some(id => !visible.some(a => a.id === id))) return false
+  let index = 0
+  saveAccountOrder(full.map(a => hidden.has(a.id) ? a.id : ids[index++]), source)
+  if (source !== "official") requestLocalWidgetProjection(source)
+  return true
 }
 export function widgetAccounts(accounts: Account[], parameter = ""): Account[] {
   // 参数序号与 App 账号列表从上到下一致，1 起算；支持英文/中文逗号或空格。
-  accounts = sortAccounts(accounts.map(a => projectAntigravityAccount(a, getSource())))
+  accounts = visibleAccounts(accounts)
   const numbers = parameter.split(/[,，\s]+/).filter(Boolean)
   if (numbers.length) {
     const picked: Account[] = []
@@ -156,13 +192,14 @@ export function getConfig() {
 
 export function saveConfig(baseUrl: string, managementKey: string) {
   const old = getConfig()
-  if (old.baseUrl !== baseUrl.trim().replace(/\/+$/, "") || old.managementKey !== managementKey.trim()) { Storage.remove(KEY_CACHE); Storage.remove(KEY_STATS) }
+  if (old.baseUrl !== baseUrl.trim().replace(/\/+$/, "") || old.managementKey !== managementKey.trim()) { Storage.remove(KEY_CACHE); Storage.remove(KEY_STATS); resetRemoteAccountScope("parrot") }
   Keychain.set(KEY_BASE, baseUrl.trim().replace(/\/+$/, ""))
   Keychain.set(KEY_MGMT, managementKey.trim())
   Keychain.remove(KEY_SESSION)
 }
 
 export function clearConfig() {
+  resetRemoteAccountScope("parrot")
   Keychain.remove(KEY_BASE)
   Keychain.remove(KEY_MGMT)
   Keychain.remove(KEY_SESSION)
@@ -182,7 +219,7 @@ class HttpError extends Error {
   }
 }
 
-async function loginRequest(baseUrl: string, managementKey: string): Promise<string> {
+async function loginRequest(baseUrl: string, managementKey: string, scope: number): Promise<string> {
   const resp = await fetch(`${baseUrl}/api/management/v1/auth/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -195,15 +232,16 @@ async function loginRequest(baseUrl: string, managementKey: string): Promise<str
   }
   const cred = body.data.credential as string
   const current = getConfig()
-  if (current.baseUrl === baseUrl && current.managementKey === managementKey) Keychain.set(KEY_SESSION, cred)
+  if (accountScope("parrot") === scope && current.baseUrl === baseUrl && current.managementKey === managementKey) Keychain.set(KEY_SESSION, cred)
   return cred
 }
 
-let parrotLogin: { url: string; key: string; promise: Promise<string> } | null = null
+let parrotLogin: { scope: number; url: string; key: string; promise: Promise<string> } | null = null
 function login(baseUrl: string, managementKey: string): Promise<string> {
-  if (parrotLogin?.url === baseUrl && parrotLogin.key === managementKey) return parrotLogin.promise
-  const promise = loginRequest(baseUrl, managementKey)
-  parrotLogin = { url: baseUrl, key: managementKey, promise }
+  const scope = accountScope("parrot")
+  if (parrotLogin?.scope === scope && parrotLogin.url === baseUrl && parrotLogin.key === managementKey) return parrotLogin.promise
+  const promise = loginRequest(baseUrl, managementKey, scope)
+  parrotLogin = { scope, url: baseUrl, key: managementKey, promise }
   promise.finally(() => { if (parrotLogin?.promise === promise) parrotLogin = null }).catch(() => {})
   return promise
 }
@@ -308,6 +346,7 @@ function statsOnly(data: ParrotStats): ParrotStats {
     monthByFamily: data.monthByFamily, fetchedAt: data.fetchedAt }
 }
 async function loadParrotStats(): Promise<{ data: ParrotStats | null; error: string | null }> {
+  const scope = accountScope("parrot")
   const { baseUrl, managementKey } = getConfig()
   // Older Parrot full cache can seed statistics, but its accounts never enter the composed result.
   const cached = Storage.get<ParrotStats>(KEY_STATS) ?? Storage.get<UsageData>(KEY_CACHE)
@@ -324,22 +363,23 @@ async function loadParrotStats(): Promise<{ data: ParrotStats | null; error: str
     let data: ParrotStats
     try { data = await fetchStats() }
     catch (e) {
-      if (!(e instanceof HttpError) || e.status !== 401) throw e
+      if (!(e instanceof HttpError) || e.status !== 401 || accountScope("parrot") !== scope) throw e
       Keychain.remove(KEY_SESSION)
       cred = await login(baseUrl, managementKey)
       data = await fetchStats()
     }
     const current = getConfig()
-    if (current.baseUrl !== baseUrl || current.managementKey !== managementKey) return { data: null, error: "Parrot统计配置已改变" }
+    if (accountScope("parrot") !== scope || current.baseUrl !== baseUrl || current.managementKey !== managementKey) return { data: null, error: "Parrot统计配置已改变" }
     Storage.set(KEY_STATS, data)
     return { data, error: null }
   } catch (e: any) {
-    const current = getConfig(), same = current.baseUrl === baseUrl && current.managementKey === managementKey
+    const current = getConfig(), same = accountScope("parrot") === scope && current.baseUrl === baseUrl && current.managementKey === managementKey
     return { data: same && cached?.today && cached?.month ? statsOnly(cached) : null, error: String(e?.message ?? "Parrot统计读取失败") }
   }
 }
 
 async function loadParrotQuota(): Promise<LoadResult> {
+  const scope = accountScope("parrot")
   const { baseUrl, managementKey } = getConfig()
   const rawCache = Storage.get<UsageData>(KEY_CACHE)
   const cached = rawCache ? { ...rawCache, accounts: sortAccounts(rawCache.accounts, "parrot") } : null
@@ -355,13 +395,14 @@ async function loadParrotQuota(): Promise<LoadResult> {
     } catch (e) {
       // 会话过期 → 重新登录一次
       if (e instanceof HttpError && e.status === 401) {
+        if (accountScope("parrot") !== scope) throw e
         Keychain.remove(KEY_SESSION)
         cred = await login(baseUrl, managementKey)
         data = await fetchAll(baseUrl, cred)
       } else throw e
     }
     const current = getConfig()
-    if (current.baseUrl !== baseUrl || current.managementKey !== managementKey) return { data: null, stale: false, error: "Parrot额度配置已改变" }
+    if (accountScope("parrot") !== scope || current.baseUrl !== baseUrl || current.managementKey !== managementKey) return { data: null, stale: false, error: "Parrot额度配置已改变" }
     data.accounts = syncAccountOrder(data.accounts, "parrot")
     Storage.set(KEY_CACHE, data)
     return { data, stale: false, error: null }
@@ -369,7 +410,7 @@ async function loadParrotQuota(): Promise<LoadResult> {
     const msg = e instanceof HttpError
       ? (e.status === 401 || e.code === "AUTHENTICATION_FAILED" ? "管理密钥无效" : e.code === "RATE_LIMITED" ? "登录过于频繁" : e.message)
       : String(e?.message ?? e)
-    const current = getConfig(), same = current.baseUrl === baseUrl && current.managementKey === managementKey
+    const current = getConfig(), same = accountScope("parrot") === scope && current.baseUrl === baseUrl && current.managementKey === managementKey
     return { data: same ? cached : null, stale: same && !!cached, error: msg }
   }
 }
@@ -437,6 +478,7 @@ export function mapSub2APIAccount(row: any, usage: any, credits: any): Account {
     resetCredits: sub2Count(codex ? usage?.rate_limit_reset_credits?.available_count : credits?.available_count) }
 }
 async function loadSub2APIQuota(): Promise<LoadResult> {
+  const scope = accountScope("sub2api")
   const cfg = getSub2APIConfig(), cached = Storage.get<UsageData>(KEY_SUB_CACHE)
   const fallback = cached ? { ...cached, accounts: sortAccounts(cached.accounts, "sub2api") } : null
   if (!cfg.baseUrl || !cfg.adminKey) return { data: null, stale: false, error: "Sub2API额度未配置" }
@@ -473,28 +515,29 @@ async function loadSub2APIQuota(): Promise<LoadResult> {
       if (quotaFailed && old) { account.fiveHour = old.fiveHour; account.sevenDay = old.sevenDay; if (row.platform === "openai") account.resetCredits = old.resetCredits }
       accounts.push(account)
     }
-    if (!sameSub2Config(cfg)) return { data: null, stale: false, error: "Sub2API额度配置已改变" }
+    if (accountScope("sub2api") !== scope || !sameSub2Config(cfg)) return { data: null, stale: false, error: "Sub2API额度配置已改变" }
     const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: syncAccountOrder(accounts, "sub2api"), fetchedAt: errors.length && cached ? cached.fetchedAt : Date.now() }
     Storage.set(KEY_SUB_CACHE, data); Storage.set(KEY_SUB_CARDS, cards)
     return { data, stale: errors.length > 0, error: errors.length ? errors.join("；") : null }
   } catch (e: any) {
-    return { data: sameSub2Config(cfg) ? fallback : null, stale: sameSub2Config(cfg) && !!fallback,
+    return { data: accountScope("sub2api") === scope && sameSub2Config(cfg) ? fallback : null, stale: accountScope("sub2api") === scope && sameSub2Config(cfg) && !!fallback,
       error: typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API账号列表网络或解析失败" }
   }
 }
-let usageFlight: { source: DataSource; stats: StatisticsSource; parrotURL: string | null; parrotKey: string | null; subURL: string | null; subKey: string | null; tz: string; promise: Promise<LoadResult> } | null = null
+let usageFlight: { scope: number; source: DataSource; stats: StatisticsSource; parrotURL: string | null; parrotKey: string | null; subURL: string | null; subKey: string | null; tz: string; promise: Promise<LoadResult> } | null = null
 export function loadUsage(): Promise<LoadResult> {
-  const source = getSource(), stats = getStatisticsSource(), pc = getConfig(), sc = getSub2APIConfig()
+  const source = getSource(), scope = accountScope(source), stats = getStatisticsSource(), pc = getConfig(), sc = getSub2APIConfig()
   const f = usageFlight
-  if (f && f.source === source && f.stats === stats && f.parrotURL === pc.baseUrl && f.parrotKey === pc.managementKey && f.subURL === sc.baseUrl && f.subKey === sc.adminKey && f.tz === sc.timezone) return f.promise
+  if (f && f.scope === scope && f.source === source && f.stats === stats && f.parrotURL === pc.baseUrl && f.parrotKey === pc.managementKey && f.subURL === sc.baseUrl && f.subKey === sc.adminKey && f.tz === sc.timezone) return f.promise
   const promise = (async (): Promise<LoadResult> => {
     const [quota, result] = await Promise.all([source === "official" ? loadOfficialUsage() : source === "sub2api" ? loadSub2APIQuota() : loadParrotQuota(), stats === "sub2api" ? loadSub2APIStats() : loadParrotStats()])
+    if (getSource() !== source || accountScope(source) !== scope) return { data: null, stale: false, error: "账号来源或配置已改变" }
     if (!quota.data) return quota
-    return { ...quota, data: { ...quota.data, today: result.data?.today ?? null, month: result.data?.month ?? null,
+    return { ...quota, data: { ...quota.data, accounts: visibleAccounts(quota.data.accounts, source), today: result.data?.today ?? null, month: result.data?.month ?? null,
       todayByFamily: result.data?.todayByFamily ?? {}, monthByFamily: result.data?.monthByFamily ?? {},
       statistics: { fetchedAt: result.data?.fetchedAt ?? null, stale: !!result.error && !!result.data, error: result.error } } }
   })()
-  usageFlight = { source, stats, parrotURL: pc.baseUrl, parrotKey: pc.managementKey, subURL: sc.baseUrl, subKey: sc.adminKey, tz: sc.timezone, promise }
+  usageFlight = { source, scope, stats, parrotURL: pc.baseUrl, parrotKey: pc.managementKey, subURL: sc.baseUrl, subKey: sc.adminKey, tz: sc.timezone, promise }
   promise.finally(() => { if (usageFlight?.promise === promise) usageFlight = null }).catch(() => {})
   return promise
 }
@@ -1763,19 +1806,22 @@ export function saveAntigravityMode(id: string, mode: AntigravityMode, source: D
   else Storage.remove(agModeKey(source))
 }
 const AG_LOCAL_WIDGET_UNTIL = "ai_usage_antigravity_local_widget_until_v1"
-export function requestAntigravityWidgetProjection() {
-  if (getSource() === "official") Storage.set(AG_LOCAL_WIDGET_UNTIL, Date.now() + getRefreshMinutes() * 60000)
+const localWidgetKey = (source: DataSource) => source === "official" ? AG_LOCAL_WIDGET_UNTIL : `ai_usage_local_widget_until_${source}_v1`
+export function requestLocalWidgetProjection(source: DataSource = getSource()) {
+  Storage.set(localWidgetKey(source), Date.now() + getRefreshMinutes() * 60000)
 }
+export function requestAntigravityWidgetProjection() { if (getSource() === "official") requestLocalWidgetProjection("official") }
 // Widget.reloadAll starts widget scripts too. During this explicit local-only reload,
 // every widget instance uses cached quota/statistics until its next scheduled refresh.
 // Manual App/intent refresh still calls loadUsage directly and is never suppressed.
-export function cachedAntigravityWidgetProjection(): LoadResult | null {
-  const until = Storage.get<number>(AG_LOCAL_WIDGET_UNTIL)
-  if (getSource() !== "official" || typeof until !== "number" || !Number.isFinite(until) || Date.now() >= until) return null
-  const cache = officialCached() ?? { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: managementAccounts(), fetchedAt: 0 }
+export function cachedAntigravityWidgetProjection(): LoadResult | null { return getSource() === "official" ? cachedLocalWidgetProjection() : null }
+export function cachedLocalWidgetProjection(): LoadResult | null {
+  const source = getSource(), until = Storage.get<number>(localWidgetKey(source))
+  if (typeof until !== "number" || !Number.isFinite(until) || Date.now() >= until) return null
+  const cache = (source === "official" ? officialCached() : Storage.get<UsageData>(source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE)) ?? { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: managementAccounts(), fetchedAt: 0 }
   const statisticsSource = getStatisticsSource()
   const stats = Storage.get<ParrotStats>(statisticsSource === "sub2api" ? KEY_SUB_STATS : KEY_STATS) ?? (statisticsSource === "parrot" ? Storage.get<UsageData>(KEY_CACHE) : null)
-  return { data: { ...cache, today: stats?.today ?? null, month: stats?.month ?? null, todayByFamily: stats?.todayByFamily ?? {}, monthByFamily: stats?.monthByFamily ?? {},
+  return { data: { ...cache, accounts: visibleAccounts(cache.accounts, source), today: stats?.today ?? null, month: stats?.month ?? null, todayByFamily: stats?.todayByFamily ?? {}, monthByFamily: stats?.monthByFamily ?? {},
     statistics: { fetchedAt: stats?.fetchedAt ?? null, stale: true, error: stats?.today && stats?.month ? null : `${statisticsSource === "parrot" ? "Parrot" : "Sub2API"}统计缓存未提供` } }, stale: true, error: null }
 }
 function antigravityWindows(groups: AntigravityQuota["groups"]): Pick<Account, "fiveHour" | "sevenDay"> {
