@@ -1,10 +1,13 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.49"
+export const VERSION = "1.50"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
+// Login/removal revisions invalidate delayed detail reads even if an ID is reused.
+const detailIdentityRevisions = new Map<string, number>()
+function changeDetailIdentity(id: string) { detailIdentityRevisions.set(id, (detailIdentityRevisions.get(id) ?? 0) + 1) }
 export function saveSource(source: DataSource) {
   if (source !== getSource()) { officialRenewalScope++; pendingCodexRenewals.clear(); ClaudeOAuth.clearRenewalCandidates() }
   Storage.set("ai_usage_source_v1", source)
@@ -528,6 +531,119 @@ async function loadSub2APIQuota(): Promise<LoadResult> {
       error: typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API账号列表网络或解析失败" }
   }
 }
+// Detail refresh never calls a list/full-source loader or statistics endpoint.
+export type AccountRefreshResult = { account: Account | null; error: string | null }
+class DetailRefreshError extends Error {}
+function officialDetailCredential(account: Account): unknown {
+  return account.provider === "claude" ? ClaudeOAuth.detailCredential(account.id)
+    : account.provider === "deepseek" ? dsCredentials().find(a => a.id === account.id)
+    : account.provider === "workbuddy" ? WorkBuddyCN.credentials().find(a => a.id === account.id)
+    : account.provider === "antigravity" ? Antigravity.credentials().find(a => a.id === account.id)
+    : credentials().find(a => a.id === account.id)
+}
+export async function refreshAccount(id: string, source: DataSource, scope = accountScope(source), active: () => boolean = () => true): Promise<AccountRefreshResult> {
+  const sourceRevision = officialRenewalScope, identity = detailIdentityRevisions.get(id) ?? 0
+  const pc = getConfig(), sc = getSub2APIConfig()
+  const key = source === "official" ? CACHE : source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE
+  const initial = Storage.get<UsageData>(key)
+  const old = initial?.accounts.find(a => a.id === id) ?? (source === "official" ? managementAccounts().find(a => a.id === id) : undefined)
+  const valid = () => active() && getSource() === source && officialRenewalScope === sourceRevision && accountScope(source) === scope && (detailIdentityRevisions.get(id) ?? 0) === identity &&
+    (source === "parrot" ? getConfig().baseUrl === pc.baseUrl && getConfig().managementKey === pc.managementKey : source !== "sub2api" || sameSub2Config(sc))
+  let expectedCredential: string | undefined
+  // Renewal may return a normalized record while Keychain preserves unrelated metadata.
+  const signature = (value: unknown) => {
+    const fields = old?.provider === "deepseek" ? ["id", "mode", "token"] : old?.provider === "workbuddy" ? ["id", "uid", "domain", "access", "refresh", "expiresAt"]
+      : old?.provider === "antigravity" ? ["id", "access", "refresh", "expiresAt"] : old?.provider === "claude" ? ["id", "accountId", "organizationId", "access", "refresh", "expiresAt", "scope"] : ["id", "accountId", "subject", "access", "refresh", "expiresAt"]
+    return value ? JSON.stringify(fields.map(field => (value as Record<string, unknown>)[field])) : undefined
+  }
+  const observe = (value: unknown) => {
+    if (!valid()) throw new DetailRefreshError("当前账号、来源或配置已改变，已丢弃迟到结果")
+    expectedCredential = signature(value)
+  }
+  const current = () => valid() && (source !== "official" || !!old && expectedCredential != null && signature(officialDetailCredential(old)) === expectedCredential)
+  let saveCards: (() => void) | undefined
+  try {
+    if (!old || !valid()) throw new DetailRefreshError("当前账号、来源或配置已改变，请返回后重试")
+    let account: Account | null
+    let warning: string | null = null
+    if (source === "official") {
+      const credential = officialDetailCredential(old)
+      if (!credential) throw new DetailRefreshError("当前账号已退出，请返回账号列表")
+      observe(credential)
+      if (old.provider === "claude") account = await ClaudeOAuth.readOne(id, observe, current)
+      else if (old.provider === "deepseek") account = await dsOfficial(credential as DeepSeekCredential)
+      else if (old.provider === "workbuddy") account = await WorkBuddyCN.read(credential as ReturnType<typeof WorkBuddyCN.credentials>[number], observe)
+      else if (old.provider === "antigravity") account = await Antigravity.read(credential as ReturnType<typeof Antigravity.credentials>[number], observe, current)
+      else if (old.provider === "openai" || old.provider === "codex") account = await fetchAccount(credential as Credential, credentials().findIndex(a => a.id === id), observe)
+      else throw new DetailRefreshError("此服务尚无已核实的单账号刷新接口")
+    } else if (source === "parrot") {
+      if (old.provider === "deepseek") throw new DetailRefreshError("Parrot DeepSeek仅核实了频道列表快照接口，无法安全单账号刷新；本次未发送请求")
+      if (!pc.baseUrl || !pc.managementKey) throw new DetailRefreshError("Parrot额度未配置")
+      let cred = Keychain.get(KEY_SESSION) || await login(pc.baseUrl, pc.managementKey)
+      const get = () => {
+        if (!valid()) throw new DetailRefreshError("当前账号、来源或配置已改变，已丢弃迟到结果")
+        return apiGet(pc.baseUrl!, `/oauth/accounts/${encodeURIComponent(id)}`, cred)
+      }
+      let detail: any
+      try { detail = await get() } catch (e) {
+        if (!(e instanceof HttpError) || e.status !== 401 || !valid()) throw e
+        Keychain.remove(KEY_SESSION); cred = await login(pc.baseUrl, pc.managementKey); detail = await get()
+      }
+      const rc = detail?.resetCreditCount ?? detail?.openai?.resetCreditCount
+      account = { ...old, fiveHour: old.provider === "workbuddy" ? emptyWindow() : toWindow(detail?.usageWindows, "fiveHour"),
+        sevenDay: old.provider === "workbuddy" ? emptyWindow() : toWindow(detail?.usageWindows, "sevenDay"), resetCredits: old.provider === "workbuddy" ? null : typeof rc === "number" ? rc : null,
+        ...(old.provider === "workbuddy" ? { credits: WorkBuddyCN.parrot(detail?.workbuddy, old.credits) } : {}) }
+      delete account.readError
+    } else {
+      if (!sc.baseUrl || !sc.adminKey) throw new DetailRefreshError("Sub2API额度未配置")
+      const n = Number(id.replace(/^sub2api:/, ""))
+      if (id !== `sub2api:${n}` || !Number.isSafeInteger(n) || n <= 0) throw new DetailRefreshError("Sub2API账号ID无效")
+      // Verified getById contract: frontend/src/api/admin/accounts.ts, same upstream as fixtures.
+      const row = await sub2Get(sc, `/accounts/${n}`)
+      if (!valid()) throw new DetailRefreshError("当前账号、来源或配置已改变，已丢弃迟到结果")
+      if (row?.id !== n) throw new DetailRefreshError("Sub2API单账号响应身份不匹配")
+      if (row.platform === "deepseek" && old.provider === "deepseek") account = await dsSub2(sc, row, old)
+      else {
+        const supported = old.provider === "openai" && row.platform === "openai" && row.type === "oauth" || old.provider === "claude" && row.platform === "anthropic" && ["oauth", "setup-token"].includes(row.type) || old.provider === "antigravity" && row.platform === "antigravity" && row.type === "oauth"
+        if (!supported) throw new DetailRefreshError("Sub2API当前账号类型不支持单账号额度读取")
+        const usage = await sub2Get(sc, row.platform === "openai" ? `/openai/accounts/${n}/quota` : `/accounts/${n}/usage`)
+        if (!valid()) throw new DetailRefreshError("当前账号、来源或配置已改变，已丢弃迟到结果")
+        if (row.platform === "antigravity" && (usage?.error_code || usage?.error || usage?.needs_reauth)) throw new DetailRefreshError("Sub2API Antigravity额度读取失败，可重试")
+        let credits: any = null
+        if (row.platform === "anthropic" && row.type === "oauth") {
+          const cached = Storage.get<Record<string, { count: number | null; at: number; error?: string }>>(KEY_SUB_CARDS)?.[id]
+          if (cached && Date.now() - cached.at < 3600000) { credits = { available_count: cached.count }; warning = cached.error ?? null }
+          else {
+            let card: { count: number | null; at: number; error?: string }
+            try { credits = await sub2Get(sc, `/accounts/${n}/claude/reset-credits`); card = { count: sub2Count(credits?.available_count), at: Date.now() } }
+            catch { warning = "Sub2API当前账号重置卡读取失败，保留此前数量"; credits = { available_count: cached?.count ?? old.resetCredits }; card = { count: credits.available_count, at: Date.now(), error: warning } }
+            saveCards = () => Storage.set(KEY_SUB_CARDS, { ...(Storage.get<Record<string, unknown>>(KEY_SUB_CARDS) ?? {}), [id]: card })
+          }
+        }
+        account = mapSub2APIAccount(row, usage, credits)
+      }
+    }
+    if (!current()) throw new DetailRefreshError("当前账号、来源或配置已改变，已丢弃迟到结果")
+    if (!account) throw new DetailRefreshError("当前账号登录已更新或移除，未保存结果")
+    const error = account.readError || (account.balance?.stale ? account.balance.error : null) || account.credits?.error
+    if (error) throw new DetailRefreshError(error)
+    // Merge into the LATEST snapshot synchronously, never the pre-request full snapshot.
+    const latest = Storage.get<UsageData>(key)
+    if (source !== "official" && !latest?.accounts.some(a => a.id === id)) throw new DetailRefreshError("当前账号已不在本机缓存中")
+    const next = { ...old, ...account }
+    delete next.readError
+    const accounts = latest?.accounts ?? []
+    Storage.set(key, { ...(latest ?? { today: null, month: null, todayByFamily: {}, monthByFamily: {}, fetchedAt: 0 }),
+      accounts: accounts.some(a => a.id === id) ? accounts.map(a => a.id === id ? next : a) : [...accounts, next] })
+    saveCards?.()
+    requestLocalWidgetProjection(source)
+    return { account: projectAntigravityAccount(next, source), error: warning || next.balance?.error || next.credits?.checkin?.error || null }
+  } catch (e: any) {
+    const safe = e instanceof DetailRefreshError ? e.message : e instanceof HttpError ? `Parrot当前账号读取失败（HTTP ${e.status}）` : /^(Codex|Claude|Antigravity|WorkBuddy|DeepSeek|官方|钥匙串|Sub2API)/.test(e?.message ?? "") ? e.message : "当前账号刷新失败，请重试"
+    return { account: null, error: safe }
+  }
+}
+
 let usageFlight: { scope: number; source: DataSource; stats: StatisticsSource; parrotURL: string | null; parrotKey: string | null; subURL: string | null; subKey: string | null; tz: string; promise: Promise<LoadResult> } | null = null
 export function loadUsage(): Promise<LoadResult> {
   const source = getSource(), scope = accountScope(source), stats = getStatisticsSource(), pc = getConfig(), sc = getSub2APIConfig()
@@ -677,7 +793,7 @@ export function officialCached(): UsageData | null {
 export function logoutOfficial(id: string) {
   if (id.startsWith("antigravity:")) { Antigravity.logout(id); saveAntigravityMode(id, "summary", "official"); if (!Antigravity.accounts().length) Storage.remove(AG_LOCAL_WIDGET_UNTIL) }
   else if (id.startsWith("workbuddy:")) WorkBuddyCN.logout(id)
-  else if (id.startsWith("deepseek:")) { if (!Keychain.set(DS_KEY, JSON.stringify(dsCredentials().filter(x => x.id !== id)))) throw new Error("DeepSeek钥匙串保存失败") }
+  else if (id.startsWith("deepseek:")) { if (!Keychain.set(DS_KEY, JSON.stringify(dsCredentials().filter(x => x.id !== id)))) throw new Error("DeepSeek钥匙串保存失败"); changeDetailIdentity(id) }
   else if (id.startsWith("claude:")) logoutClaude(id)
   else { persist(credentials().filter(x => x.id !== id)); forgetCodexRenewal(id) }
   saveWidgetName(id, "", "official")
@@ -851,7 +967,7 @@ async function renewalFailure(provider: string, id: string, response: any): Prom
 // Execution-local only: never persist a rotated candidate outside Keychain.
 const pendingCodexRenewals = new Map<string, { previous: string; next: Credential; scope: number; generation: number }>()
 const codexGenerations = new Map<string, number>()
-function forgetCodexRenewal(id: string) { pendingCodexRenewals.delete(id); codexGenerations.set(id, (codexGenerations.get(id) ?? 0) + 1) }
+function forgetCodexRenewal(id: string) { changeDetailIdentity(id); pendingCodexRenewals.delete(id); codexGenerations.set(id, (codexGenerations.get(id) ?? 0) + 1) }
 const refreshing = new Map<string, Promise<Credential>>()
 async function refreshToken(item: Credential, force = false): Promise<Credential> {
   const running = refreshing.get(item.id)
@@ -920,12 +1036,13 @@ export function mapOfficialUsage(b: any) {
   }
   return { fiveHour, sevenDay, resetCredits: resetCount(b?.rate_limit_reset_credits) }
 }
-async function fetchAccount(item: Credential, index: number): Promise<Account> {
+async function fetchAccount(item: Credential, index: number, observed?: (value: unknown) => void): Promise<Account> {
   let token = renewalDue(item.expiresAt) ? await refreshToken(item) : item
+  observed?.(token)
   async function get(path: string) {
     const send = () => request(WHAM + path, { headers: { Authorization: `Bearer ${token.access}`, "ChatGPT-Account-ID": token.accountId, Accept: "application/json" } })
     let r = await send()
-    if (r.status === 401) { token = await refreshToken(token, true); r = await send() }
+    if (r.status === 401) { token = await refreshToken(token, true); observed?.(token); r = await send() }
     return r
   }
   const r = await get("/usage")
@@ -948,8 +1065,8 @@ export async function loadOfficialUsage(): Promise<LoadResult> {
     const isolate = dsCredentials().length > 0 || WorkBuddyCN.credentials().length > 0 || Antigravity.credentials().length > 0
     const [codex, claude] = await Promise.all([Promise.all(items.map((item, i) => isolate ? fetchAccount(item, i).catch(() => quotaFallback(item.id, officialDisplay(item, i), "openai")) : fetchAccount(item, i))), loadClaudeAccounts(isolate)])
     const deepseek = (await Promise.all(dsCredentials().map(dsOfficial))).filter((a): a is Account => !!a)
-    const workbuddy = (await Promise.all(WorkBuddyCN.credentials().map(WorkBuddyCN.read))).filter((a): a is Account => !!a)
-    const antigravityReads = await Promise.all(Antigravity.credentials().map(Antigravity.read))
+    const workbuddy = (await Promise.all(WorkBuddyCN.credentials().map(item => WorkBuddyCN.read(item)))).filter((a): a is Account => !!a)
+    const antigravityReads = await Promise.all(Antigravity.credentials().map(item => Antigravity.read(item)))
     // Resolve against the latest completed in-process read without persisting diagnostics.
     const antigravity = antigravityReads.map(Antigravity.latestRead)
     const live = new Set(officialAccounts().map(a => a.id))
@@ -1065,6 +1182,7 @@ function persist(items: Credential[]) {
   try { saved = Keychain.set(KEY, JSON.stringify(items)) } catch { /* never expose native errors containing credentials */ }
   if (!saved) throw new Error("Claude钥匙串保存失败")
 }
+export function detailCredential(id: string) { return credentials().find(a => a.id === id) }
 export function claudeAccounts(): { id: string; name: string; email: string; provider: "claude" }[] {
   return credentials().map((a, i) => ({ id: a.id, name: a.email || `Claude账号 ${i + 1}（邮箱未提供）`, email: a.email, provider: "claude" as const }))
 }
@@ -1214,7 +1332,7 @@ export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive
 const pendingRenewals = new Map<string, { previous: string; next: Credential; scope: number; generation: number }>()
 const generations = new Map<string, number>()
 export function clearRenewalCandidates() { pendingRenewals.clear() }
-function forgetRenewal(id: string) { pendingRenewals.delete(id); generations.set(id, (generations.get(id) ?? 0) + 1) }
+function forgetRenewal(id: string) { changeDetailIdentity(id); pendingRenewals.delete(id); generations.set(id, (generations.get(id) ?? 0) + 1) }
 const refreshing = new Map<string, Promise<Credential>>()
 async function refresh(item: Credential, force = false): Promise<Credential> {
   const existing = refreshing.get(item.id)
@@ -1322,21 +1440,28 @@ export async function loadClaudeAccounts(isolate = false): Promise<Account[]> {
     return isolate ? job.catch(() => quotaFallback(item.id, item.email || "Claude账号", "claude")) : job
   }))
 }
-async function loadClaudeAccount(item: Credential): Promise<Account> {
+export async function readOne(id: string, observed: (value: unknown) => void, active: () => boolean): Promise<Account> {
+  const item = credentials().find(a => a.id === id)
+  if (!item) throw new Error("该Claude账号已退出")
+  return loadClaudeAccount(item, observed, active)
+}
+async function loadClaudeAccount(item: Credential, observed?: (value: unknown) => void, active?: () => boolean): Promise<Account> {
+  const check = () => { if (active && !active()) throw new Error("Claude当前账号或来源已改变，已丢弃结果") }
   {
     const limited = deadline(USAGE_LIMIT, item.id)
     if (limited) throw new Error(`Claude额度读取冷却中（此前GET /api/oauth/usage受限），${waitText(limited)}；本次未发送请求`)
     let current = renewalDue(item.expiresAt) ? await refresh(item) : item
+    observed?.(current)
     const getUsage = () => request(API + "/usage", { headers: { Authorization: `Bearer ${current.access}`,
       "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
-    let r = await getUsage()
-    if (r.status === 401) { current = await refresh(current, true); r = await getUsage() }
+    let r = await getUsage(); check()
+    if (r.status === 401) { current = await refresh(current, true); observed?.(current); r = await getUsage(); check() }
     if (r.status === 429 || r.status === 403) {
       const until = remember429(USAGE_LIMIT, item.id, r)
       throw new Error(`Claude额度读取受限（HTTP ${r.status}，GET /api/oauth/usage），${waitText(until)}；不自动重试`)
     }
     if (r.status !== 200) throw new Error(`Claude额度读取失败（HTTP ${r.status}，GET /api/oauth/usage）`)
-    const mapped = mapClaudeUsage(await json(r))
+    const mapped = mapClaudeUsage(await json(r)); check()
     const cards = Storage.get<CardCache>(CARDS) ?? {}, cached = cards[item.id]
     if (mapped.resetCredits != null) Storage.set(CARDS, { ...cards, [item.id]: { count: mapped.resetCredits, at: Date.now() } })
     else if (cached && typeof cached.at === "number" && Date.now() - cached.at < CARD_INTERVAL) mapped.resetCredits = cached.count
@@ -1345,13 +1470,15 @@ async function loadClaudeAccount(item: Credential): Promise<Account> {
       try {
         const cardResponse = await request(API + "/usage?cedar_ember=1&skip_spend=1", { headers: { Authorization: `Bearer ${current.access}`,
           "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
+        check()
         if (cardResponse.status === 429 || cardResponse.status === 403) remember429(CARDS, item.id, cardResponse)
         else if (cardResponse.status === 200) {
-          mapped.resetCredits = claudeResetCount(await json(cardResponse))
+          mapped.resetCredits = claudeResetCount(await json(cardResponse)); check()
           Storage.set(CARDS, { ...(Storage.get<CardCache>(CARDS) ?? {}), [item.id]: { count: mapped.resetCredits, at: Date.now() } })
         }
       } catch { /* optional card lookup must not block the successfully read quota */ }
     }
+    check()
     if (!credentials().some(a => a.id === item.id)) throw new Error("该Claude账号已退出")
     return { id: current.id, name: current.email || "Claude账号（邮箱未提供）", provider: "claude", enabled: true, available: true, ...mapped }
   }
@@ -1382,6 +1509,7 @@ export function addDeepSeekAccount(name: string, mode: "api" | "web", token: str
   if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function") throw new Error("当前Scripting不支持安全随机ID，请更新Scripting")
   const id = `deepseek:${Date.now().toString(36)}:${Crypto.generateSymmetricKey(256).toHexString()}`
   if (!Keychain.set(DS_KEY, JSON.stringify([...dsCredentials(), { id, name: name.trim(), mode, token: token.trim() }]))) throw new Error("DeepSeek钥匙串保存失败")
+  changeDetailIdentity(id)
   return id
 }
 function dsDecimal(value: any): string | null {
@@ -1612,7 +1740,7 @@ export function credentials(): Credential[] {
 }
 function persist(rows: Credential[]) { if (!Keychain.set(KEY, JSON.stringify(rows))) throw new WBError("WorkBuddy钥匙串保存失败") }
 export function accounts() { return credentials().map(c => ({ id: c.id, name: c.name || "WorkBuddy", email: "", provider: "workbuddy" as const })) }
-export function logout(id: string) { for (const d of flows) cancel(d); persist(credentials().filter(c => c.id !== id)); for (const key of pendingRefresh.keys()) if (key.startsWith(id + ":")) pendingRefresh.delete(key) }
+export function logout(id: string) { for (const d of flows) cancel(d); persist(credentials().filter(c => c.id !== id)); changeDetailIdentity(id); for (const key of pendingRefresh.keys()) if (key.startsWith(id + ":")) pendingRefresh.delete(key) }
 function same(c: Credential): boolean { return credentials().some(x => x.id === c.id && x.access === c.access && x.refresh === c.refresh) }
 function headers(c?: Credential, refresh = false): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json", "X-Requested-With": "XMLHttpRequest", Origin: BILLING, Referer: BILLING + "/", "User-Agent": "CLI/2.63.2 CodeBuddy/2.63.2", "X-IDE-Type": "CLI", "X-IDE-Name": "CLI", "X-IDE-Version": "2.63.2" }
@@ -1685,7 +1813,7 @@ export async function finish(d: Login, valid: () => boolean): Promise<void> {
     const name = typeof info.nickname === "string" && info.nickname.trim() ? info.nickname.trim().slice(0, 512) : "WorkBuddy"
     const rows = credentials(), previous = rows.find(c => c.id === id)
     const credential = { id, uid, domain: dom, name: previous?.name || name, access, refresh, expiresAt }
-    active(d, valid); persist([...rows.filter(c => c.id !== id), credential])
+    active(d, valid); persist([...rows.filter(c => c.id !== id), credential]); changeDetailIdentity(id)
   } finally { cancel(d) }
 }
 async function refresh(c: Credential): Promise<Credential> {
@@ -1740,11 +1868,12 @@ function normalize(p: any) {
   if (capacity != null && used != null && used > capacity) reliable = false
   return { name: typeof p.PackageName === "string" ? p.PackageName : "资源包", capacity, remaining, used, reliable, expiresAt: cnTime(p.PackageEndTime) ?? cnTime(p.EndTime) ?? epoch(p.DeductionEndTime), cycleEnd: cnTime(p.CycleEndTime) }
 }
-export async function read(c: Credential): Promise<Account | null> {
+export async function read(c: Credential, observed?: (value: unknown) => void): Promise<Account | null> {
   const make = (credits: WorkBuddyCredits, readError?: string): Account => ({ id: c.id, name: c.name, provider: "workbuddy", enabled: true, available: true, fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null, credits, ...(readError ? { readError } : {}) })
   try {
     let token = c, refreshed = false
     if (!c.expiresAt || c.expiresAt - Date.now() <= 300000) { token = await refresh(c); refreshed = true }
+    observed?.(token)
     const date = (ms: number) => new Date(ms + 8 * 3600000).toISOString().slice(0,19).replace("T", " ")
     const begin = date(Date.now()), end = date(Date.now() + 365 * 101 * 86400000)
     const packages: ReturnType<typeof normalize>[] = [], pages = new Set<string>(), accountIds = new Set<string>(), deadline = Date.now() + 60000
@@ -1755,7 +1884,7 @@ export async function read(c: Credential): Promise<Account | null> {
       const body = { PageSize: 100, PageNumber: page, ProductCode: "p_tcaca", Status: [0,3], PackageEndTimeRangeBegin: begin, PackageEndTimeRangeEnd: end }
       let b: any
       try { b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body) }
-      catch (e) { if (!(e instanceof WBError) || !e.invalid || refreshed) throw e; token = await refresh(token); refreshed = true; b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body) }
+      catch (e) { if (!(e instanceof WBError) || !e.invalid || refreshed) throw e; token = await refresh(token); observed?.(token); refreshed = true; b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body) }
       if (!same(token)) throw new WBError("WorkBuddy账号已退出或登录已更新")
       if (Date.now() >= deadline) throw new WBError("WorkBuddy积分分页读取超时，保留此前快照")
       const response = b.Response
@@ -1951,7 +2080,7 @@ export function credentials(): Credential[] {
 function persist(items: Credential[]) { if (!Keychain.set(KEY, JSON.stringify(items))) throw new Error("Antigravity钥匙串保存失败，保留原凭据") }
 export function accounts() { return credentials().map(c => ({ id: c.id, name: c.email, email: c.email, provider: "antigravity" as const })) }
 let loginEpoch = 0
-export function logout(id: string) { persist(credentials().filter(c => c.id !== id)); loginEpoch++; rotated.delete(id); completedReads.delete(id) }
+export function logout(id: string) { persist(credentials().filter(c => c.id !== id)); changeDetailIdentity(id); loginEpoch++; rotated.delete(id); completedReads.delete(id) }
 export type Login = {
   epoch: number;
   url: string; redirect: string; verifier: string; state: string; expiresAt: number;
@@ -2032,7 +2161,7 @@ export async function finish(d: Login, active: () => boolean) {
     const user = await json(profile)
     if (typeof user?.id !== "string" || !user.id || typeof user?.email !== "string" || !user.email) throw new Error("Antigravity账号资料缺少真实身份")
     check(); item.id = "antigravity:" + encodeURIComponent(user.id); item.email = user.email
-    const items = credentials(); persist([...items.filter(c => c.id !== item.id), item])
+    const items = credentials(); persist([...items.filter(c => c.id !== item.id), item]); changeDetailIdentity(item.id)
   } finally { cancel(d) }
 }
 const flights = new Map<string, Promise<Credential>>()
@@ -2075,9 +2204,10 @@ async function renew(item: Credential, force = false): Promise<Credential> {
 let readSequence = 0
 const completedReads = new Map<string, { sequence: number; account: Account }>()
 export function latestRead(account: Account): Account { return completedReads.get(account.id)?.account ?? account }
-export async function read(item: Credential): Promise<Account> {
+export async function read(item: Credential, observed?: (value: unknown) => void, active?: () => boolean): Promise<Account> {
   const sequence = ++readSequence
   const finish = (account: Account): Account => {
+    if (active && !active()) return account
     const latest = completedReads.get(item.id)
     if (!credentials().some(c => c.id === item.id)) { completedReads.delete(item.id); return account }
     if (latest && latest.sequence > sequence) return latest.account
@@ -2086,6 +2216,7 @@ export async function read(item: Credential): Promise<Account> {
   }
   try {
     let current = renewalDue(item.expiresAt) ? await renew(item) : item, retried = false
+    observed?.(current)
     const post = async (method: "loadCodeAssist" | "retrieveUserQuotaSummary", body: any) => {
       const projectState = method === "retrieveUserQuotaSummary" ? `；project ${body.project ? "已提供" : "未提供"}` : ""
       const send = async () => {
@@ -2093,7 +2224,7 @@ export async function read(item: Credential): Promise<Account> {
         catch { throw new Error(`Antigravity ${method}：网络请求失败（无 HTTP 状态${projectState}），保留登录；可重试`) }
       }
       let r = await send()
-      if (r.status === 401 && !retried) { retried = true; current = await renew(current, true); r = await send() }
+      if (r.status === 401 && !retried) { retried = true; current = await renew(current, true); observed?.(current); r = await send() }
       if (r.status !== 200) {
         // Do not echo Google messages, URLs, request IDs or arbitrary error fields.
         // Only these fixed protocol status names are safe to surface in cached details.

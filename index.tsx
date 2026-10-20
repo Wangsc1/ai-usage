@@ -1,4 +1,4 @@
-import { accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
+import { refreshAccount, requestLocalWidgetProjection, accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
@@ -84,17 +84,38 @@ function WidgetNamePage({ account, source, onSaved, expectedScope }: { account: 
   const [name, setName] = useState(getWidgetName(account.id, source))
   const [scope] = useState(expectedScope ?? accountScope(source))
   const [quotaMode, setQuotaMode] = useState<AntigravityMode>(account.provider === "antigravity" ? getAntigravityMode(account.id, source) : "summary")
-  const detailAccount = account.provider === "antigravity" && source === "official" && getSource() === source
-    ? managementAccounts().find(a => a.id === account.id) ?? account : account
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState("")
+  const [refreshed, setRefreshed] = useState<Account | null>(null)
+  const [refreshLife] = useState({ alive: true, running: false })
+  useEffect(() => () => { refreshLife.alive = false }, [])
+  const detailAccount = getSource() === source && accountScope(source) === scope
+    ? managementAccounts().find(a => a.id === account.id) ?? refreshed ?? account : refreshed ?? account
+  async function refresh() {
+    if (!refreshLife.alive || refreshLife.running) return
+    refreshLife.running = true; setRefreshing(true); setRefreshError("")
+    try {
+      const result = await refreshAccount(account.id, source, scope, () => refreshLife.alive)
+      if (!refreshLife.alive) return
+      setRefreshError(result.error ?? "")
+      if (result.account) {
+        setRefreshed(result.account); onSaved()
+        try { await Widget.reloadAll() } catch { if (refreshLife.alive) setRefreshError("账号已更新，小组件同步失败，请稍后重试") }
+      }
+    } catch { if (refreshLife.alive) setRefreshError("当前账号刷新失败，请重试") }
+    finally { refreshLife.running = false; if (refreshLife.alive) setRefreshing(false) }
+  }
   async function save() {
     if (getSource() !== source || accountScope(source) !== scope || (source !== "official" && !cachedAccounts().some(a => a.id === account.id))) return
     saveWidgetName(account.id, name, source)
     setName(name.trim())
+    requestLocalWidgetProjection(source)
     onSaved()
     await Widget.reloadAll()
     close()
   }
-  return <Form navigationTitle="账号详情" navigationBarTitleDisplayMode="inline">
+  return <Form navigationTitle="账号详情" navigationBarTitleDisplayMode="inline"
+    toolbar={{ primaryAction: <Button title={refreshing ? "刷新中…" : "刷新"} systemImage="arrow.clockwise" disabled={refreshing} action={refresh} /> }}>
     <Section header={<Text>小组件用户名</Text>}>
       <TextField title="自定义小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
       <Button title="保存" action={save} />
@@ -113,12 +134,12 @@ function WidgetNamePage({ account, source, onSaved, expectedScope }: { account: 
       </Picker> : null}
       {source !== "official" ? <Text>{antigravityModeHint(detailAccount, source)}</Text> : null}
     </Section> : null}
-    <AccountCacheSections account={detailAccount} source={source} />
+    <AccountCacheSections account={detailAccount} source={source} refreshError={refreshError} />
   </Form>
 }
 
 // Shared detail content consumes only the passed cached account and source-local cache timestamps.
-function AccountCacheSections({ account, source = getSource() }: { account: Account; source?: DataSource }) {
+function AccountCacheSections({ account, source = getSource(), refreshError = "" }: { account: Account; source?: DataSource; refreshError?: string }) {
   account = projectAntigravityAccount(account, source)
   const beijingTime = (at: number) => {
     const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
@@ -139,7 +160,7 @@ function AccountCacheSections({ account, source = getSource() }: { account: Acco
             <Text>{account.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(account.credits.remaining)}` : "积分未可靠提供"}</Text>
             <Text>{fmtWorkBuddyUsed(account.credits?.used, account.credits?.capacity)}</Text>
             <Text>{fmtWorkBuddyCheckin(account.credits?.checkin)}</Text>
-            {account.credits?.error || account.readError ? <Text>{account.credits?.error || account.readError}</Text> : null}
+            {refreshError || account.credits?.error || account.readError ? <Text>{refreshError || account.credits?.error || account.readError}</Text> : null}
           </Section>
           {(account.credits?.packages ?? []).map((p, i) => <Section key={String(i)} header={<Text>{p.name}</Text>}>
             <Text>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · ${fmtWorkBuddyUsed(p.used, p.capacity)}`}</Text>
@@ -155,7 +176,7 @@ function AccountCacheSections({ account, source = getSource() }: { account: Acco
         <Text>{`可用状态 ${b?.available == null ? "未提供" : b.available ? "可用" : "不可用"}`}</Text>
         <Text>{`余额采集时间 ${iso(b?.fetchedAt)}`}</Text>
         {b?.stale ? <Text>此前余额缓存</Text> : null}
-        {b?.error || account.readError ? <Text>{b?.error || account.readError}</Text> : null}
+        {refreshError || b?.error || account.readError ? <Text>{refreshError || b?.error || account.readError}</Text> : null}
         {!b?.money?.length ? <Text>余额未提供</Text> : null}
       </Section>
       {(b?.money ?? []).map((m, i) => <Section key={String(i)} header={<Text>{m.currency}</Text>}>
@@ -172,7 +193,7 @@ function AccountCacheSections({ account, source = getSource() }: { account: Acco
   }
   const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${account.provider === "antigravity" ? Math.round(v) : v}%` : "未提供"
   return <>
-    {account.readError ? <Section><Text>{account.readError}</Text></Section> : null}
+    {refreshError || account.readError ? <Section><Text>{refreshError || account.readError}</Text></Section> : null}
     {([["5 h", account.fiveHour], ["7 d", account.sevenDay]] as const).map(([label, w]) => <Section key={label} header={<Text>{label}</Text>}>
       <Text>{`剩余额度 ${percent(w?.remainingPercent)}`}</Text>
       <Text>{`已用额度 ${percent(w?.usedPercent)}`}</Text>
