@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.35"
+export const VERSION = "1.36"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -1887,6 +1887,9 @@ const CLIENT = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleuserco
 // Public installed-client secret, not a user credential.
 const SECRET = "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"
 const TOKEN = "https://oauth2.googleapis.com/token", BASE = "https://cloudcode-pa.googleapis.com/v1internal:"
+// Same-account live comparison: production summary omits Argon, daily returns all
+// three groups. Keep loadCodeAssist on production for project/tier discovery.
+const QUOTA_BASE = "https://daily-cloudcode-pa.googleapis.com/v1internal:"
 // loadCodeAssist and quota summary select the Antigravity product by this public client
 // profile (Parrot oauth/antigravity.py). A generic UA can yield HTTP 200 without
 // project/tier, followed by quota HTTP 403. Keep this scoped to these two reads.
@@ -2026,7 +2029,7 @@ export async function read(item: Credential): Promise<Account> {
     const post = async (method: "loadCodeAssist" | "retrieveUserQuotaSummary", body: any) => {
       const projectState = method === "retrieveUserQuotaSummary" ? `；project ${body.project ? "已提供" : "未提供"}` : ""
       const send = async () => {
-        try { return await request(BASE + method, { method: "POST", headers: { Authorization: `Bearer ${current.access}`, "Content-Type": "application/json", Accept: "application/json", "User-Agent": QUOTA_USER_AGENT }, body: JSON.stringify(body) }) }
+        try { return await request((method === "retrieveUserQuotaSummary" ? QUOTA_BASE : BASE) + method, { method: "POST", headers: { Authorization: `Bearer ${current.access}`, "Content-Type": "application/json", Accept: "application/json", "User-Agent": QUOTA_USER_AGENT }, body: JSON.stringify(body) }) }
         catch { throw new Error(`Antigravity ${method}：网络请求失败（无 HTTP 状态${projectState}），保留登录；可重试`) }
       }
       let r = await send()
