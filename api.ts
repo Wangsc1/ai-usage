@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.37"
+export const VERSION = "1.38"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -64,7 +64,6 @@ export type QuotaWindow = {
 }
 
 export type Account = {
-  antigravityRead?: AntigravityReadState
   antigravity?: AntigravityQuota
   readError?: string
   balance?: DeepSeekBalance
@@ -659,7 +658,11 @@ function officialSnapshot(): UsageData | null {
   const cache = Storage.get<UsageData>(CACHE)
   if (!cache) return null
   const names = new Map(officialAccounts().map(a => [a.id, a.name]))
-  return { ...cache, accounts: sortAccounts(cache.accounts.map(a => ({ ...a, name: names.get(a.id) ?? a.name })), "official") }
+  return { ...cache, accounts: sortAccounts(cache.accounts.map(a => {
+    const clean = { ...a } as Account & { antigravityRead?: unknown }
+    delete clean.antigravityRead // discard retired 1.37 diagnostic metadata, including fallback writes
+    return { ...clean, name: names.get(a.id) ?? a.name }
+  }), "official") }
 }
 export function officialCached(): UsageData | null {
   const cache = officialSnapshot()
@@ -923,12 +926,8 @@ export async function loadOfficialUsage(): Promise<LoadResult> {
     const deepseek = (await Promise.all(dsCredentials().map(dsOfficial))).filter((a): a is Account => !!a)
     const workbuddy = (await Promise.all(WorkBuddyCN.credentials().map(WorkBuddyCN.read))).filter((a): a is Account => !!a)
     const antigravityReads = await Promise.all(Antigravity.credentials().map(Antigravity.read))
-    // A slower full refresh must not overwrite a newer explicit account collection.
-    const latestAG = officialSnapshot()?.accounts ?? []
-    const antigravity = antigravityReads.map(a => {
-      const latest = latestAG.find(x => x.id === a.id)
-      return latest && (latest.antigravityRead?.startedAt ?? 0) > (a.antigravityRead?.startedAt ?? 0) ? latest : a
-    })
+    // Resolve against the latest completed in-process read without persisting diagnostics.
+    const antigravity = antigravityReads.map(Antigravity.latestRead)
     const live = new Set(officialAccounts().map(a => a.id))
     const accounts = syncAccountOrder([...codex, ...claude, ...deepseek, ...workbuddy, ...antigravity].filter(a => live.has(a.id)), "official")
     const providerErrors = accounts.flatMap(a => a.readError ? [`${a.name}：${a.readError}`] : [])
@@ -1785,29 +1784,6 @@ export function workBuddyBrandImage(muted = false): UIImage | { light: UIImage; 
   return workBuddyOriginalImage ?? (workBuddyOriginalImage = decode(WB_PNG_ORIGINAL))
 }
 
-// Account-local, non-sensitive observation. Unknown upstream labels are never persisted here.
-export type AntigravityReadState = {
-  version: string; startedAt: number; completedAt: number; lastSuccessAt: number | null;
-  host: "daily"; loadHTTP: number | null; summaryHTTP: number | null;
-  project: boolean | null; groupCount: number | null; groupNames: string[];
-  outcome: "response" | "failed"; retainedCache: boolean;
-}
-// Explicit diagnostic refresh bypasses usageFlight and local-only widget reload suppression.
-// Merge only this live account into the latest canonical snapshot; never save a selected window.
-export async function refreshAntigravityAccount(id: string): Promise<boolean> {
-  if (getSource() !== "official") return false
-  const credential = Antigravity.credentials().find(a => a.id === id)
-  if (!credential) return false
-  const result = await Antigravity.read(credential)
-  if (getSource() !== "official" || !Antigravity.credentials().some(a => a.id === id)) return false
-  const cache = officialSnapshot(), old = cache?.accounts.find(a => a.id === id)
-  if ((old?.antigravityRead?.startedAt ?? 0) > (result.antigravityRead?.startedAt ?? 0)) return false
-  const data: UsageData = cache ?? { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: [], fetchedAt: 0 }
-  const accounts = data.accounts.some(a => a.id === id) ? data.accounts.map(a => a.id === id ? result : a) : [...data.accounts, result]
-  Storage.set(CACHE, { ...data, accounts, fetchedAt: Date.now() })
-  requestAntigravityWidgetProjection()
-  return true
-}
 export type AntigravityQuota = {
   tier: string | null; creditAmount: number | null; minimumCreditAmount: number | null;
   groups: { name: string; buckets: { name: string; window: string; remainingPercent: number | null; resetsAt: string | null }[] }[]
@@ -1932,7 +1908,7 @@ export function credentials(): Credential[] {
 function persist(items: Credential[]) { if (!Keychain.set(KEY, JSON.stringify(items))) throw new Error("Antigravity钥匙串保存失败，保留原凭据") }
 export function accounts() { return credentials().map(c => ({ id: c.id, name: c.email, email: c.email, provider: "antigravity" as const })) }
 let loginEpoch = 0
-export function logout(id: string) { persist(credentials().filter(c => c.id !== id)); loginEpoch++; rotated.delete(id) }
+export function logout(id: string) { persist(credentials().filter(c => c.id !== id)); loginEpoch++; rotated.delete(id); completedReads.delete(id) }
 export type Login = {
   epoch: number;
   url: string; redirect: string; verifier: string; state: string; expiresAt: number;
@@ -2053,10 +2029,18 @@ async function renew(item: Credential, force = false): Promise<Credential> {
   flights.set(item.id, job)
   try { return await job } finally { if (flights.get(item.id) === job) flights.delete(item.id) }
 }
+let readSequence = 0
+const completedReads = new Map<string, { sequence: number; account: Account }>()
+export function latestRead(account: Account): Account { return completedReads.get(account.id)?.account ?? account }
 export async function read(item: Credential): Promise<Account> {
-  const previous = officialSnapshot()?.accounts.find(a => a.id === item.id)?.antigravityRead
-  const observation: AntigravityReadState = { version: VERSION, startedAt: Date.now(), completedAt: 0, lastSuccessAt: previous?.lastSuccessAt ?? null,
-    host: "daily", loadHTTP: null, summaryHTTP: null, project: null, groupCount: null, groupNames: [], outcome: "failed", retainedCache: false }
+  const sequence = ++readSequence
+  const finish = (account: Account): Account => {
+    const latest = completedReads.get(item.id)
+    if (!credentials().some(c => c.id === item.id)) { completedReads.delete(item.id); return account }
+    if (latest && latest.sequence > sequence) return latest.account
+    completedReads.set(item.id, { sequence, account })
+    return account
+  }
   try {
     let current = renewalDue(item.expiresAt) ? await renew(item) : item, retried = false
     const post = async (method: "loadCodeAssist" | "retrieveUserQuotaSummary", body: any) => {
@@ -2066,11 +2050,7 @@ export async function read(item: Credential): Promise<Account> {
         catch { throw new Error(`Antigravity ${method}：网络请求失败（无 HTTP 状态${projectState}），保留登录；可重试`) }
       }
       let r = await send()
-      if (method === "loadCodeAssist") observation.loadHTTP = r.status
-      else observation.summaryHTTP = r.status
       if (r.status === 401 && !retried) { retried = true; current = await renew(current, true); r = await send() }
-      if (method === "loadCodeAssist") observation.loadHTTP = r.status
-      else observation.summaryHTTP = r.status
       if (r.status !== 200) {
         // Do not echo Google messages, URLs, request IDs or arbitrary error fields.
         // Only these fixed protocol status names are safe to surface in cached details.
@@ -2092,7 +2072,6 @@ export async function read(item: Credential): Promise<Account> {
       const value = load?.[key]; if (typeof value === "string" && value.trim()) { project = value.trim(); break }
       if (typeof value?.id === "string" && value.id.trim()) { project = value.id.trim(); break }
     }
-    observation.project = !!project
     const diagnostics: string[] = []
     if (!project) diagnostics.push("Antigravity loadCodeAssist（HTTP 200）：未返回 project；不自动开通项目，保留登录")
     let summary: any = null
@@ -2100,22 +2079,13 @@ export async function read(item: Credential): Promise<Account> {
     catch (e: any) { diagnostics.push(typeof e?.message === "string" && e.message.startsWith("Antigravity") ? e.message : "Antigravity retrieveUserQuotaSummary：续期或本机凭据处理失败，保留登录；可重试") }
     if (!credentials().some(c => c.id === item.id)) throw new Error("Antigravity账号已退出")
     const mapped = mapAntigravityQuota(load, summary)
-    observation.completedAt = Date.now()
-    if (summary) {
-      observation.outcome = "response"; observation.lastSuccessAt = observation.completedAt
-      observation.groupCount = Array.isArray(summary.groups) ? summary.groups.length : 0
-      observation.groupNames = (Array.isArray(summary.groups) ? summary.groups : []).map((g: any) =>
-        Object.values(AG_GROUP_NAMES).includes(g?.displayName) ? g.displayName : "其他分组")
-    }
     if (summary && !mapped.antigravity?.groups.length) diagnostics.push("Antigravity retrieveUserQuotaSummary（HTTP 200）：未提供额度分组，窗口未知")
-    return { id: item.id, name: current.email, provider: "antigravity", enabled: true, available: true, resetCredits: null, ...mapped, antigravityRead: observation, ...(diagnostics.length ? { readError: diagnostics.join("；") } : {}) }
+    return finish({ id: item.id, name: current.email, provider: "antigravity", enabled: true, available: true, resetCredits: null, ...mapped, ...(diagnostics.length ? { readError: diagnostics.join("；") } : {}) })
   } catch (e: any) {
     const fallback = quotaFallback(item.id, item.email, "antigravity")
-    observation.completedAt = Date.now(); observation.retainedCache = true
-    fallback.antigravityRead = observation
     // Only locally authored diagnostics; transport/JSON failures use shared redacted errors.
     fallback.readError = typeof e?.message === "string" && e.message.startsWith("Antigravity") ? e.message : "Antigravity额度读取失败，保留原缓存与登录；可重试"
-    return fallback
+    return finish(fallback)
   }
 }
 }
