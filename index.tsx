@@ -1,4 +1,4 @@
-import { accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
+import { refreshAntigravityAccount, accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
@@ -83,6 +83,8 @@ function WidgetNamePage({ account, source, onSaved, expectedScope }: { account: 
   const close = Navigation.useDismiss()
   const [name, setName] = useState(getWidgetName(account.id, source))
   const [scope] = useState(expectedScope ?? accountScope(source))
+  const [collecting, setCollecting] = useState(false)
+  const [collected, setCollected] = useState<number | null>(null)
   const [quotaMode, setQuotaMode] = useState<AntigravityMode>(account.provider === "antigravity" ? getAntigravityMode(account.id, source) : "summary")
   const detailAccount = account.provider === "antigravity" && source === "official" && getSource() === source
     ? managementAccounts().find(a => a.id === account.id) ?? account : account
@@ -114,6 +116,29 @@ function WidgetNamePage({ account, source, onSaved, expectedScope }: { account: 
       {source !== "official" ? <Text>{antigravityModeHint(detailAccount, source)}</Text> : null}
     </Section> : null}
     <AccountCacheSections account={detailAccount} source={source} />
+    {account.provider === "antigravity" && source === "official" ? <Section header={<Text>官方额度采集状态（诊断）</Text>}>
+      <Text>{collected != null && collected === detailAccount.antigravityRead?.completedAt ? "当前页：本次网络采集结果" : "当前页：本机缓存快照"}</Text>
+      <Text>{`采集代码 ${detailAccount.antigravityRead?.version ?? "旧缓存未记录"}`}</Text>
+      <Text>{`请求开始 ${detailAccount.antigravityRead?.startedAt ? new Date(detailAccount.antigravityRead.startedAt).toISOString() : "未记录"}`}</Text>
+      <Text>请求 profile：hub/2.22.0 · Scripting fetch（未核实系统缓存/实际出站头）</Text>
+      <Text>{`最后尝试 ${detailAccount.antigravityRead?.completedAt ? new Date(detailAccount.antigravityRead.completedAt).toISOString() : "未记录"}`}</Text>
+      <Text>{`最后成功 ${detailAccount.antigravityRead?.lastSuccessAt ? new Date(detailAccount.antigravityRead.lastSuccessAt).toISOString() : "未记录"}`}</Text>
+      <Text>{`summary 请求主机 daily · HTTP ${detailAccount.antigravityRead?.summaryHTTP ?? "未取得"} · load HTTP ${detailAccount.antigravityRead?.loadHTTP ?? "未取得"}`}</Text>
+      <Text>{`project ${detailAccount.antigravityRead?.project == null ? "未记录" : detailAccount.antigravityRead.project ? "已提供" : "未提供"}`}</Text>
+      <Text>{`返回分组 ${detailAccount.antigravityRead?.groupCount ?? "未知"}：${detailAccount.antigravityRead?.groupNames.join("、") || "未记录"}`}</Text>
+      <Text>{detailAccount.antigravityRead?.outcome === "response" ? "已取得有效响应；不代表包含 Argon" : detailAccount.antigravityRead?.retainedCache ? "采集失败，保留此前缓存" : "尚无成功响应记录"}</Text>
+      <Button title={collecting ? "采集中…" : "立即网络采集"} disabled={collecting} action={async () => {
+        if (collecting || getSource() !== source) return
+        setCollecting(true)
+        try {
+          if (await refreshAntigravityAccount(account.id)) {
+            setCollected(managementAccounts().find(a => a.id === account.id)?.antigravityRead?.completedAt ?? null)
+            onSaved()
+            await Widget.reloadAll()
+          }
+        } finally { setCollecting(false) }
+      }} />
+    </Section> : null}
   </Form>
 }
 
