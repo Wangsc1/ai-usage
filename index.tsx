@@ -170,7 +170,7 @@ function AccountCacheSections({ account, source = getSource() }: { account: Acco
       </Section>)}
     </>
   }
-  const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${v}%` : "未提供"
+  const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${account.provider === "antigravity" ? Math.round(v) : v}%` : "未提供"
   return <>
     {account.readError ? <Section><Text>{account.readError}</Text></Section> : null}
     {([["5 h", account.fiveHour], ["7 d", account.sevenDay]] as const).map(([label, w]) => <Section key={label} header={<Text>{label}</Text>}>
