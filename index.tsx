@@ -277,9 +277,12 @@ function SettingsView() {
   const [busy, setBusy] = useState(false)
   const [browserError, setBrowserError] = useState("")
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
-  const [, setAccounts] = useState<Account[]>(cachedAccounts())
+  const localAccounts = cachedAccounts()
+  const [, setAccounts] = useState<Account[]>(localAccounts)
   const listScope = accountScope(source)
-  const visible = getSource() === source ? cachedAccounts() : []
+  const visible = getSource() === source ? localAccounts : []
+  const sortedLogins = sortAccounts(logins, "official")
+  const loginAccountById = new Map((source === "official" && logins.length ? managementAccounts() : []).map(a => [a.id, a]))
   const hiddenCount = hiddenAccountIds(source).length
   const [agBrowser, setAGBrowser] = useState<AntigravityLogin | null>(null)
 
@@ -290,8 +293,7 @@ function SettingsView() {
     saveSource(value as DataSource)
     setSource(value as DataSource)
     setAccounts(cachedAccounts())
-    await test()
-    await Widget.reloadAll()
+    if (!await test()) await Widget.reloadAll()
   }
 
   async function addOfficial() {
@@ -462,19 +464,22 @@ function SettingsView() {
     }
   }
 
-  async function test() {
+  async function test(): Promise<boolean> {
+    let reloaded = false
     const requestSource = getSource(), requestScope = accountScope(requestSource), requestStats = getStatisticsSource()
     setBusy(true)
     try {
       const r = await loadUsage()
       // A late refresh from the previous source must not replace this source's account list.
-      if (!auth.alive || getSource() !== requestSource || accountScope(requestSource) !== requestScope || getStatisticsSource() !== requestStats) return
+      if (!auth.alive || getSource() !== requestSource || accountScope(requestSource) !== requestScope || getStatisticsSource() !== requestStats) return false
       if (r.data) {
         setAccounts(cachedAccounts())
         await Widget.reloadAll()
+        reloaded = true
       }
     } catch { /* failures keep the existing cached list */ }
     setBusy(false)
+    return reloaded
   }
 
   // Same remove-then-insert contract as the official editable_list onMove example; persisted by stable ID.
@@ -540,12 +545,11 @@ function SettingsView() {
             logoutOfficial(a.id)
             setLogins(officialAccounts())
             setAccounts(cachedAccounts())
-            await test()
-            await Widget.reloadAll()
+            if (!await test()) await Widget.reloadAll()
           } catch { /* local removal failure leaves the row in place */ }
         }} />
         ] }}>
-          <NavigationLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
+          <NavigationLink destination={<WidgetNamePage account={loginAccountById.get(a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
             <VStack alignment="leading" spacing={3}>
               <AccountLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed />
               <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
@@ -646,8 +650,8 @@ function SettingsView() {
           <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
         {!claude && !codexBrowser && !workbuddy && !agBrowser && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-        {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortAccounts(logins, "official")[i], i)} />
-          : sortAccounts(logins, "official").map(loginRow)}
+        {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortedLogins[i], i)} />
+          : sortedLogins.map(loginRow)}
         {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={() => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}

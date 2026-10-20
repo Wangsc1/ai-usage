@@ -1,6 +1,6 @@
 // Local simulation only; never contacts a network or reads real credentials.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
-const ts = require(process.env.TYPESCRIPT_PATH || '/tmp/chk/node_modules/typescript')
+const ts = require(process.env.TYPESCRIPT_PATH || 'typescript')
 const root = path.resolve(__dirname, '..')
 let now = 1800000000000, handler, calls = [], reads = []
 const kc = new Map(), storage = new Map(), storageWrites = []
@@ -197,8 +197,8 @@ async function main() {
     if(family==='systemSmall')assert.ok(!allTexts.includes('匿名2'))
     if(family==='systemLarge'){
       assert.ok(texts.includes('Parrot今日/本月统计未提供'));assert.ok(!texts.includes('$0.00'))
-      const labels=tree.filter(x=>x.type==='HStack' && x.props.spacing===1 && Array.isArray(x.props.children) && x.props.children[0]?.props?.frame?.width===20)
-      assert.equal(labels.length,8);assert.ok(labels.every(x=>x.props.children[1].props.frame.width===65))
+      const labels=tree.filter(x=>x.type==='HStack' && x.props.spacing===0 && Array.isArray(x.props.children) && ['5h','7d'].includes(x.props.children[0]?.props?.children))
+      assert.equal(labels.length,8);assert.ok(labels.every(x=>x.props.children.length===2 && x.props.children.every(t=>t.type==='Text' && t.props.font===9 && t.props.monospaced && t.props.lineLimit===1)));assert.ok(labels.every(x=>x.props.children[1].props.children.startsWith(' · ')))
     }
   }
   // Original Parrot managementKey grant and actual toMetric total, then six-column JSX.
@@ -644,14 +644,16 @@ async function main() {
   const manualRefresh=ui=>{const p=ui.find(x=>x.type==='Picker'&&x.props.title==='统计来源');assert.ok(p,'statistics Picker present');return p.props.onChanged(p.props.value)}
   let ui=render()
   assert.ok(!ui.some(x=>x.type==='Toggle'))
-  assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='目前账号'))
+  assert.ok(ui.some(x=>x.type==='Section'&&expand(x.props.header).includes('目前账号')))
   assert.ok(!ui.some(x=>x.type==='Section'&&x.props.header?.props?.children==='小组件账号（最多4个）'))
   assert.deepEqual(linesIn(ui).slice(0,2).map(l=>[l.n,l.icon,l.name]),[['1.','codex','匿名0'],['2.','codex','匿名1']]);assert.ok(!ui.some(x=>typeof x==='string'&&/^\d+\. Codex/.test(x)),'text brand label replaced by icon')
   assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('已停用')))
   assert.ok(linesIn(ui).every(l=>l.frame.width===17&&l.frame.height===17&&l.resizable===true),'icon 17pt resizable')
   assert.ok(ui.filter(isLine).every(h=>h.props.children.every(c=>c.props.foregroundStyle===undefined)),'account line colors unchanged')
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
-  // Read-only Form list + NavigationLink to a separate ScrollView page using ReorderableForEach (no List/Form drag).
+  // Native list editing is preferred; absent exports retain the separate long-press page.
+  assert.ok(ui.some(x=>x.type==='ForEach' && typeof x.props.onMove==='function'));assert.ok(expand(ui.find(x=>x.type==='Section'&&expand(x.props.header).includes('目前账号')).props.header).some(x=>x?.type==='EditButton'))
+  const nativeSettingsView=SettingsView;SettingsView=loadSettingsWith(['EditButton','ForEach']);ui=render()
   const indexSource=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','onMove={busy','EditMode'])assert.ok(!indexSource.includes(old),old)
   assert.ok(!ui.some(x=>x.type==='ForEach'||x.type==='EditButton'||x?.props?.onDrag||x?.props?.onDrop))
@@ -700,7 +702,7 @@ async function main() {
   const officialOrder=JSON.stringify(storage.get('ai_usage_official_order_v1'))
   api.saveSource('official');move([0],3) // stale Parrot page after source switch writes nothing
   assert.equal(JSON.stringify(storage.get('ai_usage_parrot_order_v1')),order);assert.equal(JSON.stringify(storage.get('ai_usage_official_order_v1')),officialOrder)
-  api.saveSource('parrot')
+  api.saveSource('parrot');SettingsView=nativeSettingsView
   storage.set('ai_usage_cache_v1',{...data,accounts:statusAccounts});api.saveAccountOrder(statusAccounts.map(a=>a.id))
   states.length=0
   const statusUI=render()
@@ -746,7 +748,7 @@ async function main() {
   const title=expand(AccountTitle({acc:email,font:12}));assert.ok(title.includes('real'));assert.ok(!title.includes(alias))
   scripting.Widget.parameter='';assert.ok(expand(Root({data:{...data,accounts:[]},stale:false,error:null})).includes('账号未配置'))
   // Real TextField state/edit/save interaction; editing alone does not persist.
-  const {WidgetNamePage}=load('index.tsx');states.length=0
+  const {WidgetNamePage}=load('index.tsx');storage.set('ai_usage_cache_v1',{...data,accounts});states.length=0
   let callbacks=0,reloads=0;scripting.Widget.reloadAll=async()=>{reloads++}
   let dismissed=0;scripting.Navigation={...scripting.Navigation,useDismiss:()=>()=>{dismissed++}}
   const editor=()=>{hook=0;return expand(WidgetNamePage({account:accounts[0],source:'parrot',onSaved:()=>callbacks++}))}
@@ -1123,13 +1125,13 @@ async function main() {
       assert.equal(wireHeaders.get('content-type'),'application/json')
       assert.equal(b.client_id,'9d1c250a-e61b-44d9-88ed-5944d1962f5e');assert.ok(!b.client_secret)
       if(b.grant_type==='authorization_code'){
-        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.11.11')
+        assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),`ai-usage/${api.VERSION}`)
         assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent'])
         assert.deepEqual(Object.keys(b).sort(),['grant_type','code','redirect_uri','client_id','code_verifier','state'].sort())
         assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false)
         lastExchange=b;if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)
         if(claudePostFailure)return resp(401,{error:'do-not-expose-code-or-token'})
-      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),'ai-usage/1.11.11');assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
+      }else{assert.deepEqual([...wireHeaders.keys()].sort(),['accept','content-type','user-agent']);assert.equal(wireHeaders.get('accept'),'application/json');assert.equal(wireHeaders.get('user-agent'),`ai-usage/${api.VERSION}`);assert.deepEqual(Object.keys(b).sort(),['grant_type','refresh_token','client_id','scope'].sort());assert.equal(wireHeaders.has('cookie'),false);assert.equal(wireHeaders.has('authorization'),false);assert.equal(b.grant_type,'refresh_token');lastRefreshBody=b;assert.ok(b.scope.includes('user:profile'));refreshCount++;if(claudeRefreshFailure)return resp(400,{error:'sensitive-refresh'});if(holdToken)await new Promise(resolve=>releaseClaudeRequest=resolve)}
       return resp(200,{access_token:'mock-claude-access-'+claudeAccount,refresh_token:omitRefresh?undefined:'mock-claude-refresh-'+refreshCount,expires_in:3600,scope:grantedClaudeScope})
     }
     if(u==='https://api.anthropic.com/api/oauth/profile'){
@@ -1674,7 +1676,7 @@ async function main() {
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
   for(let i=0;i<20&&!releaseClaudeRequest;i++)await Promise.resolve();assert.ok(releaseClaudeRequest)
   const headerPost=calls.slice(before).find(x=>x.url==='https://platform.claude.com/v1/oauth/token')
-  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),'ai-usage/1.11.11')
+  assert.ok(headerPost);assert.equal(new Headers(headerPost.options.headers).get('user-agent'),`ai-usage/${api.VERSION}`)
   assert.equal(new Headers(headerPost.options.headers).get('accept'),'application/json')
   assert.equal(headerBrowser.disposed,0);assert.equal(headerBrowser.dismissed,0);assert.equal(headerServer.stops,0)
   headerServer.handlers['/callback'](callback(headerAttempt.state,'mock-headers-code'))
@@ -1685,7 +1687,7 @@ async function main() {
   assert.ok(api.officialAccounts().some(a=>a.email==='headers-auto@example.test'))
 
   assert.equal(calls.slice(before).filter(x=>x.url==='https://platform.claude.com/v1/oauth/token').length,1)
-  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest ai-usage/1.11.11 UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
+  console.log('PASS: actual global fetch POST with record HeadersInit interpreted case-insensitively via WHATWG Headers; honest versioned ai-usage UA+JSON Accept on initial exchange and renewal; six initial JSON fields and four renewal fields unchanged; Codex headers unchanged; no Cookie/spoof/auth extras; browser/listener retained until exchange completes; one POST')
   // Failed Claude exchange keeps the presented page open; only saved success triggers auto-return.
   const oldPresentBrowser=presentBrowser;let closeFailedClaude;presentBrowser=()=>new Promise(resolve=>closeFailedClaude=resolve)
   authUI=await startClaudeUI();const failedClaude=uiAttempt(),failedClaudeServer=claudeServers.at(-1),failedClaudeKC=kc.get('ai_usage_claude_oauth_v1')
@@ -1807,7 +1809,7 @@ async function main() {
       const header=dataSection.props.header;assert.equal(header.props.frame.maxWidth,'infinity');assert.deepEqual(Array.from(header.props.children,n=>n.type),['Text','Spacer','Text']);assert.equal(header.props.children[2].props.children,api.VERSION);assert.equal(dataSection.props.footer,undefined);assert.deepEqual(Array.from(dataSection.props.children,n=>n.props.title),['账号来源','统计来源']);assert.ok(!ui.some(n=>n?.type==='Section'&&n.props.header?.props.children==='统计来源'));assert.ok(!ui.some(n=>n?.type==='Button'&&['测试连接','测试Sub2API连接'].includes(n.props.title)))
       assert.equal(ui.find(x=>x.type==='Picker'&&x.props.title==='账号来源').props.value,selected)
       assert.ok(!ui.some(x=>x.type==='Section'&&x.props.header?.props.children==='当前状态'))
-      for(const title of ['刷新预览',...(selected==='official'?[]:['目前账号'])])assert.ok(ui.some(x=>x.type==='Section'&&x.props.header?.props.children===title))
+      for(const title of ['刷新预览',...(selected==='official'?[]:['目前账号'])])assert.ok(ui.some(x=>x.type==='Section'&&expand(x.props.header).includes(title)))
       if(selected==='official')assert.ok(ui.some(x=>x.type==='Section'&&(x.props.header?.props.children==='登录账号'||x.props.header?.props.children?.[0]?.props?.children==='登录账号')))
       assert.ok(ui.some(x=>x.type==='Button'&&x.props.title==='预览组件'))
       {const sec=ui.find(x=>x.type==='Section'&&x.props.header?.props.children==='刷新预览');assert.ok(sec,'merged section');assert.ok(!ui.some(x=>x.type==='Section'&&['组件刷新','预览组件'].includes(x.props.header?.props.children)),'old section titles gone')}
@@ -2073,7 +2075,7 @@ async function main() {
     scripting.Widget.reloadAll=reload;scripting.Widget.present=present
     // App exposes independent selectors, saved-key redaction, Sub2API save/reload, and does not modify quota when choosing stats.
     states.length=0;let ui=render();const selectors=ui.filter(x=>x.type==='Picker');assert.ok(selectors.some(x=>x.props.title==='统计来源'))
-    const quotaSelector=selectors.find(x=>x.props.title==='账号来源');assert.deepEqual(Array.from(quotaSelector.props.children,n=>n.props.tag),['official','parrot','sub2api'],'OAuth,API first; selected source unchanged');assert.ok(expand(quotaSelector).some(n=>n?.type==='Text'&&n.props.tag==='official'&&n.props.children==='OAuth,API'));assert.ok(!expand(quotaSelector).includes('官方（Codex/Claude OAuth、DeepSeek）'));assert.ok(expand(quotaSelector).some(x=>x==='Sub2API'));assert.ok(!selectors.some(x=>x.props.title==='来源'));assert.ok(expand(quotaSelector).includes('Parrot'));assert.ok(!expand(quotaSelector).includes('Parrot密钥'))
+    const quotaSelector=selectors.find(x=>x.props.title==='账号来源');assert.deepEqual(Array.from(quotaSelector.props.children,n=>n.props.tag),['official','parrot','sub2api'],'OAuth,API,Token first; selected source unchanged');assert.ok(expand(quotaSelector).some(n=>n?.type==='Text'&&n.props.tag==='official'&&n.props.children==='OAuth,API,Token'));assert.ok(!expand(quotaSelector).includes('官方（Codex/Claude OAuth、DeepSeek）'));assert.ok(expand(quotaSelector).some(x=>x==='Sub2API'));assert.ok(!selectors.some(x=>x.props.title==='来源'));assert.ok(expand(quotaSelector).includes('Parrot'));assert.ok(!expand(quotaSelector).includes('Parrot密钥'))
     assert.ok(ui.some(x=>x.type==='TextField'&&x.props.title==='Sub2API管理员密钥'&&x.props.value==='mock******'))
     assert.ok(!ui.some(x=>typeof x==='string'&&x.includes('mock-admin')))
     ui.find(x=>x.type==='TextField'&&x.props.title==='Sub2API地址').props.onChanged('https://sub.example.test/')
@@ -2218,7 +2220,7 @@ async function main() {
       if(u==='https://auth.openai.com/oauth/token'||u==='https://platform.claude.com/v1/oauth/token'){
         const body=JSON.parse(o.body),p=u.includes('openai.com')?'Codex':'Claude';posted.push({p,body})
         assert.equal(body.grant_type,'refresh_token');assert.equal(o.headers['Content-Type'],'application/json');const headers=new Headers(o.headers)
-        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),'ai-usage/1.11.11');assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
+        if(p==='Claude'){assert.equal(headers.get('accept'),'application/json');assert.equal(headers.get('user-agent'),`ai-usage/${api.VERSION}`);assert.deepEqual([...headers.keys()].sort(),['accept','content-type','user-agent']);assert.deepEqual(Object.keys(body).sort(),['grant_type','refresh_token','client_id','scope'].sort())}
         else {assert.equal(headers.get('accept'),null);assert.equal(headers.get('user-agent'),null);assert.deepEqual([...headers.keys()],['content-type']);assert.deepEqual(Object.keys(body).sort(),['grant_type','client_id','refresh_token'].sort())}
         assert.equal(body.refresh_token,'mock-refresh-old');if(p==='Claude')assert.equal(body.scope,'user:profile')
         if(hold)await new Promise(resolve=>{releaseRenewal=resolve})
@@ -2651,7 +2653,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     const ds=api.addDeepSeekAccount('Manage DeepSeek','api','SYNTHETIC-MANAGE')
     api.saveAccountOrder([ds,'manage-codex','claude:manage:org'],'official');states.length=0
     const before=calls.length;let managementUI=render();assert.equal(calls.length,before);assert.equal(api.cachedAccounts().length,0)
-    assert.ok(!managementUI.some(n=>n?.type==='Section'&&n.props.header?.props.children==='目前账号'))
+    assert.ok(!managementUI.some(n=>n?.type==='Section'&&expand(n.props.header).includes('目前账号')))
     const rows=()=>render().filter(n=>n?.type==='HStack'&&n.props.trailingSwipeActions)
     const ids=()=>Array.from(rows(),n=>n.key),labels=()=>rows().map(n=>{const l=lineOf(expand(n).find(isLine));return l.n+' '+l.icon+' '+l.name})
     assert.deepEqual(ids(),[ds,'manage-codex','claude:manage:org']);assert.deepEqual(labels(),['1. deepseek Manage DeepSeek','2. codex manage@codex.test','3. claude manage@claude.test'])
@@ -2692,7 +2694,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     const deleting=rows()[1];assert.equal(deleting.key,ds);assert.equal(deleting.props.action,undefined);assert.equal(deleting.props.onTapGesture,undefined);await deleting.props.trailingSwipeActions.actions[0].props.action()
     assert.deepEqual(ids(),['claude:manage:org','manage-codex']);assert.deepEqual(labels(),['1. claude manage@claude.test','2. codex manage@codex.test']);assert.equal(api.getWidgetName('claude:manage:org','official'),'Management Alias');assert.ok(!api.cachedAccounts().some(n=>n.id===ds))
     const added=api.addDeepSeekAccount('New Manage','api','SYNTHETIC-MANAGE-NEW');states.length=0;assert.deepEqual(ids(),['claude:manage:org','manage-codex',added]);assert.ok(labels()[2].startsWith('3. deepseek'))
-    for(const source of ['parrot','sub2api']){api.saveSource(source);states.length=0;assert.ok(render().some(n=>n?.type==='Section'&&n.props.header?.props.children==='目前账号'));assert.ok(!render().some(n=>n?.type==='Section'&&(n.props.header?.props.children==='登录账号'||n.props.header?.props.children?.[0]?.props?.children==='登录账号')))}
+    for(const source of ['parrot','sub2api']){api.saveSource(source);states.length=0;assert.ok(render().some(n=>n?.type==='Section'&&expand(n.props.header).includes('目前账号')));assert.ok(!render().some(n=>n?.type==='Section'&&(n.props.header?.props.children==='登录账号'||n.props.header?.props.children?.[0]?.props?.children==='登录账号')))}
     kc.clear();for(const[k,v]of previousKC)kc.set(k,v);storage.clear();for(const[k,v]of previousStore)storage.set(k,v);handler=previousHandler;states.length=0
     console.log('PASS: official only duplicate Section removed; sorted continuous three-provider labels; no-usage metadata supports existing name editor and header EditButton + same-page ForEach.onMove (exports present) and original long-press sub-page (exports missing); actual move persists+updates login list; aliases retained; widget sequence matches; reordered swipe deletes exact ID and renumbers; new IDs append; nonofficial module retained; local operations no network')
   }
@@ -2728,16 +2730,18 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
       const ui=render();assert.deepEqual(linesIn(ui).map(l=>[l.n,l.icon,l.name]),[['1.','claude','IcoA'],['2.','deepseek','IcoB'],['3.','codex','IcoC']].map(r=>r),src+' list')
       assert.ok(!ui.some(x=>typeof x==='string'&&/^\d+\. (Claude|Codex|DeepSeek)/.test(x)))}
     api.saveSource(savedSource)
-    // Widget ProviderIcon: identical SVG nodes to the pre-change source (muted and normal), via baseline module.
-    const baseWidget=(()=>{const code=fs.readFileSync('/tmp/ai-usage-11026-baseline/widget.tsx','utf8').replace(/\nrun\(\)\s*$/,'\nexport { ProviderIcon }');const out=ts.transpileModule(code,{fileName:'old-widget.tsx',compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'scripting'}});const m={exports:{}};const req=n=>n==='scripting'?scripting:n==='scripting/jsx-runtime'?{jsx,jsxs:jsx,Fragment:'Fragment'}:load(n.replace('./','')+(fs.existsSync(path.join(root,n.replace('./','')+'.tsx'))?'.tsx':'.ts'));vm.runInContext(`(function(require,module,exports){${out.outputText}\n})`,context)(req,m,m.exports);return m.exports})()
-    const {ProviderIcon:OldIcon}=baseWidget;load('widget.tsx')
-    // The new widget module's ProviderIcon is exercised through Root elsewhere; here compare directly through exported test hook.
+    // Assert the current public icon contract without an untracked /tmp historical checkout.
     const NewIcon=load('widget.tsx').ProviderIcon;assert.equal(typeof NewIcon,'function')
-    for(const provider of ['claude','openai','mystery'])for(const muted of [false,true])assert.equal(JSON.stringify(NewIcon({provider,size:13,muted})),JSON.stringify(OldIcon({provider,size:13,muted})),'widget icon '+provider+' muted='+muted)
-    // DeepSeek is the only intentional change: same shape, fill recolored to the confirmed blue; widget and settings share one constant.
-    for(const muted of [false,true]){const n=NewIcon({provider:'deepseek',size:13,muted}),o=OldIcon({provider:'deepseek',size:13,muted});assert.equal(n.props.code.includes('#4D6BFE'),true);assert.equal(n.props.code.includes('#3c3c43'),false);assert.equal(n.props.code,o.props.code.replace('#3c3c43','#4D6BFE'),'only the fill colour differs');assert.deepEqual(n.props.frame,o.props.frame)}
+    for(const provider of ['claude','openai','mystery','deepseek'])for(const muted of [false,true]){
+      const n=NewIcon({provider,size:13,muted});assert.deepEqual({...n.props.frame},{width:13,height:13})
+      if(provider==='mystery'){assert.equal(n.type,'Image');assert.equal(n.props.systemName,'sparkle');assert.equal(n.props.font,13*0.85);assert.deepEqual({...n.props.foregroundStyle},muted?{light:'#5E6068',dark:'#8E8E93'}:{light:'#1C1C1E',dark:'#FFFFFF'})}
+      else {assert.equal(n.type,'SVG');assert.equal(n.props.resizable,true)
+        const expected=provider==='deepseek'?api.DEEPSEEK_SVG:!muted?(provider==='claude'?api.CLAUDE_SVG:api.OPENAI_SVG):{light:api.iconSvg(provider==='claude'?api.CLAUDE_PATH:api.OPENAI_PATH,'#5E6068'),dark:api.iconSvg(provider==='claude'?api.CLAUDE_PATH:api.OPENAI_PATH,'#8E8E93')}
+        assert.equal(JSON.stringify(n.props.code),JSON.stringify(expected))
+      }
+    }
     assert.equal(api.DEEPSEEK_SVG.includes('fill="#4D6BFE"'),true);assert.equal(expand(AccountLine({index:0,provider:'deepseek',name:'X'})).find(n=>n?.type==='SVG').props.code,api.DEEPSEEK_SVG,'settings list uses the same blue icon')
-    console.log('PASS: settings account line = number + shared brand SVG(17pt resizable) + name for codex(OpenAI light/dark)/claude/deepseek in official and Parrot/Sub2API lists; unknown provider falls back to text; widget ProviderIcon JSON output identical to pre-change for all providers x muted')
+    console.log('PASS: settings account line = number + shared brand SVG(17pt resizable) + name for codex(OpenAI light/dark)/claude/deepseek in official and Parrot/Sub2API lists; unknown provider falls back to text; widget ProviderIcon exact shared-path/fill/frame contract for all providers x muted')
   }
   // Official Codex browser PKCE: only documented global APIs, never real sockets/network.
   {
@@ -2840,7 +2844,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     api.saveSource('official');states.length=0
     let tree=render();const row=tree.find(n=>n?.type==='HStack'&&n.props.children?.[2]?.type==='Picker'&&n.props.children[2].props.title==='')
     assert.ok(row);assert.equal(row.props.frame.maxWidth,'infinity');assert.deepEqual(Array.from(row.props.children,n=>n.type),['Button','Spacer','Picker']);assert.equal(row.props.children[0].props.title,'添加账号');assert.equal(row.props.children[2].props.pickerStyle,'menu');assert.equal(row.props.children[2].props.value,'codex');assert.equal(row.props.children[2].props.disabled,false)
-    assert.deepEqual(Array.from(row.props.children[2].props.children,n=>n.props.tag),['codex','claude','deepseek','workbuddy']);assert.ok(!tree.some(n=>n?.type==='Picker'&&n.props.title==='登录服务'))
+    assert.deepEqual(Array.from(row.props.children[2].props.children,n=>n.props.tag),['antigravity','codex','claude','deepseek','workbuddy']);assert.ok(!tree.some(n=>n?.type==='Picker'&&n.props.title==='登录服务'))
     row.props.children[2].props.onChanged('claude');assert.equal(render().find(n=>n?.type==='Picker'&&n.props.title==='').props.value,'claude')
     render().find(n=>n?.type==='Picker'&&n.props.title==='').props.onChanged('deepseek');assert.ok(!render().some(n=>n?.type==='Button'&&n.props.title==='保存'));await render().find(n=>n?.type==='Button'&&n.props.title==='添加账号').props.action();assert.ok(render().some(n=>n?.type==='Button'&&n.props.title==='保存'))
     kc.set('ai_usage_official_oauth_v1',JSON.stringify([{id:'swipe-codex',accountId:'swipe-codex',name:'Swipe Codex',email:'swipe@codex.test',access:token('swipe-codex','swipe-user'),refresh:'SYNTHETIC-REFRESH',expiresAt:now+3600000}]))
@@ -2913,6 +2917,6 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
   console.log('PASS: deferred load cannot block presentation; timeout visible in UI/unlocks retry; close-before-load late rejection handled; timers cleared and dispose once')
   console.log('PASS: new ephemeral WebView per attempt; finally dispose normal/load/present failure; callback auto-refresh; cancel/source/dismiss guards; retryable embedded failure; Safari fallback entries removed')
   console.log('PASS: aliases stable-ID persistence/source isolation/trim+Emoji+long names/prototype IDs/fallback/6 widget cases per source/refresh+order stability/zero accounts/editor save/reset/official logout+Parrot clear isolation; remote records unchanged')
-  console.log('PASS: browser-established credential dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/native-update metadata; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; old onDrag/EditButton removed; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude exact-zero account gray title+SVG/LCD/percent/lit bars; enabled/available/stale not gray triggers; App foreground unchanged')
+  console.log('PASS: browser-established credential dedup; refresh/401/rotation; duration mapping/reset cards; source isolation/logout; 3 widget trees; syntax/version/native-update metadata; stable-ID sorting/default first accounts including disabled/parameters/pruning; obsolete selections ignored and never written; no UI Toggles; large label gap/six stat columns; Parrot grant/total; read-only Form list + NavigationLink to ScrollView/LazyVGrid ReorderableForEach (dragPreview rounded, active highlight) down/up/multi/end/no-op/invalid/cross-source/persistence; legacy onDrag removed/native EditButton and fallback retained; one-decimal rounding; fixedSize intrinsic 6-column HStack/one column owns both periods/leading/no edge Spacer/uniform font factor and width budget; dual-arrow refresh icon in 3 families; Small one-account 4 stats/uncompressed shared columns/equal internal Spacers/summary scope; Small two-account no stats; official missing; Codex/Claude exact-zero account gray title+SVG/LCD/percent/lit bars; enabled/available/stale not gray triggers; App foreground unchanged')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

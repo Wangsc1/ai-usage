@@ -198,7 +198,7 @@ Parrot／Sub2API 左滑点“隐藏”只在本机隐藏账号，不删除服务
 
 - 地址、管理密钥／会话和官方令牌只保存在本机脚本隔离的 Keychain，默认不开启 iCloud 同步；Codex、Claude、Antigravity、WorkBuddy凭据分别保存。排序、名称、额度和统计使用本机缓存，切换来源不会跨源拼接账号或重置卡。授权码、state 与 PKCE 仅用于本次内存流程，不写日志或持久保存。
 - Parrot 和 Sub2API 管理密钥具有高权限。不要公开密钥、token、完整授权码或带凭据的备份；HTTP 会明文传输服务凭据，建议 HTTPS。
-- 官方账号直接访问相应官方服务：Codex 使用 `auth.openai.com`、`chatgpt.com`；Claude 授权页使用 `claude.com`，令牌与资料／额度使用 `platform.claude.com`、`api.anthropic.com`；Antigravity 授权与接口固定使用 `accounts.google.com`、`oauth2.googleapis.com`、`www.googleapis.com`、`cloudcode-pa.googleapis.com`。WorkBuddy国内个人认证与续期使用 `copilot.tencent.com`，积分使用 `www.codebuddy.cn`，token只发送到这两个固定已核实国内域名。不把官方 token 发给 Parrot、Sub2API 或 GitHub，不复制浏览器 Cookie 或其他应用的登录文件。
+- 官方账号直接访问相应官方服务：Codex 使用 `auth.openai.com`、`chatgpt.com`；Claude 授权页使用 `claude.com`，令牌与资料／额度使用 `platform.claude.com`、`api.anthropic.com`；Antigravity 授权与接口固定使用 `accounts.google.com`、`oauth2.googleapis.com`、`www.googleapis.com`、`cloudcode-pa.googleapis.com`、`daily-cloudcode-pa.googleapis.com`。WorkBuddy国内个人认证与续期使用 `copilot.tencent.com`，积分使用 `www.codebuddy.cn`，token只发送到这两个固定已核实国内域名。不把官方 token 发给 Parrot、Sub2API 或 GitHub，不复制浏览器 Cookie 或其他应用的登录文件。
 - 只读取真实汇总额度，模型专属限额、钱包余额和额外付费金额不充当汇总额度或重置卡。字段缺失、无权限或查询失败保持未知，不凭空填零。
 - 本项目是第三方脚本，不是 OpenAI、Anthropic、Google 或腾讯WorkBuddy官方客户端。官方授权、接口版本、风控、组织权限和 Scripting／iOS 兼容性可能变化；当前不支持需要专用路由的 FedRAMP 账号。
 - 临时浏览器、Codex／Claude／Antigravity 本机回调、后台刷新、锁屏着色和字体效果均受设备与系统限制，不能保证每次登录成功或刷新准点。

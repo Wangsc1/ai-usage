@@ -1,10 +1,14 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.48"
+export const VERSION = "1.49"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
-export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
+let officialRenewalScope = 0
+export function saveSource(source: DataSource) {
+  if (source !== getSource()) { officialRenewalScope++; pendingCodexRenewals.clear(); ClaudeOAuth.clearRenewalCandidates() }
+  Storage.set("ai_usage_source_v1", source)
+}
 
 // Statistics selection is independent of account/quota source. Existing installs default to Parrot.
 export type StatisticsSource = "parrot" | "sub2api"
@@ -635,7 +639,9 @@ function credentials(): Credential[] {
   } catch { throw new Error("官方登录记录损坏，请重新添加账号") }
 }
 function persist(items: Credential[]) {
-  if (!Keychain.set(KEY, JSON.stringify(items))) throw new Error("钥匙串保存失败")
+  let saved = false
+  try { saved = Keychain.set(KEY, JSON.stringify(items)) } catch { /* no native errors containing credentials */ }
+  if (!saved) throw new Error("钥匙串保存失败")
 }
 function officialDisplay(item: Credential, index: number): string {
   return item.email || `账号 ${index + 1}（邮箱未提供）`
@@ -673,7 +679,7 @@ export function logoutOfficial(id: string) {
   else if (id.startsWith("workbuddy:")) WorkBuddyCN.logout(id)
   else if (id.startsWith("deepseek:")) { if (!Keychain.set(DS_KEY, JSON.stringify(dsCredentials().filter(x => x.id !== id)))) throw new Error("DeepSeek钥匙串保存失败") }
   else if (id.startsWith("claude:")) logoutClaude(id)
-  else persist(credentials().filter(x => x.id !== id))
+  else { persist(credentials().filter(x => x.id !== id)); forgetCodexRenewal(id) }
   saveWidgetName(id, "", "official")
   const cache = officialSnapshot()
   if (cache) Storage.set(CACHE, { ...cache, accounts: cache.accounts.filter(a => a.id !== id) })
@@ -736,6 +742,7 @@ function saveOfficialCredential(body: any) {
   item.id = old?.id ?? `official-${Date.now()}-${Math.random().toString(36).slice(2)}`
   item.name = item.name || old?.name || `账号 ${Math.max(0, ...items.map(x => Number(x.name.match(/\d+$/)?.[0]) || 0)) + 1}`
   persist(old ? items.map(x => x.id === item.id ? item : x) : [...items, item])
+  forgetCodexRenewal(item.id)
 }
 export type CodexBrowserLogin = {
   url: string; redirect: string; verifier: string; state: string; expiresAt: number;
@@ -841,13 +848,27 @@ async function renewalFailure(provider: string, id: string, response: any): Prom
   try { const body = await response.json(); invalid = body?.error === "invalid_grant" || body?.error?.type === "invalid_grant" } catch { /* unclassified */ }
   return new Error(invalid ? `${provider}续期失败：登录已失效（invalid_grant），请重新添加该账号` : `${provider}续期失败（HTTP ${response.status}），尚不能确认登录失效；保留登录，下次刷新再尝试`)
 }
+// Execution-local only: never persist a rotated candidate outside Keychain.
+const pendingCodexRenewals = new Map<string, { previous: string; next: Credential; scope: number; generation: number }>()
+const codexGenerations = new Map<string, number>()
+function forgetCodexRenewal(id: string) { pendingCodexRenewals.delete(id); codexGenerations.set(id, (codexGenerations.get(id) ?? 0) + 1) }
 const refreshing = new Map<string, Promise<Credential>>()
 async function refreshToken(item: Credential, force = false): Promise<Credential> {
   const running = refreshing.get(item.id)
   if (running) return running
   const job = (async () => {
     const current = credentials().find(x => x.id === item.id)
-    if (!current) throw new Error("该官方账号已退出")
+    if (!current) { pendingCodexRenewals.delete(item.id); throw new Error("该官方账号已退出") }
+    const scope = officialRenewalScope, generation = codexGenerations.get(item.id) ?? 0
+    const candidate = pendingCodexRenewals.get(item.id)
+    if (candidate) {
+      if (candidate.previous !== JSON.stringify(current) || candidate.scope !== scope || candidate.generation !== generation) pendingCodexRenewals.delete(item.id)
+      else {
+        if (candidate.next.expiresAt <= Date.now()) throw new Error("Codex轮换令牌未能保存且已过期，请重新添加该账号")
+        persist(credentials().map(x => x.id === item.id ? { ...x, ...candidate.next } : x))
+        pendingCodexRenewals.delete(item.id); return candidate.next
+      }
+    }
     if (current.access !== item.access || current.refresh !== item.refresh || (!force && current.expiresAt !== item.expiresAt && !renewalDue(current.expiresAt))) return current
     const until = renewalDeadline("Codex", item.id)
     if (until) throw new Error(renewalWait("Codex", until))
@@ -868,7 +889,10 @@ async function refreshToken(item: Credential, force = false): Promise<Credential
     const items = credentials(), latest = items.find(x => x.id === item.id)
     if (!latest) throw new Error("该官方账号已退出")
     if (latest.access !== current.access || latest.refresh !== current.refresh) return latest
+    if (officialRenewalScope !== scope || (codexGenerations.get(item.id) ?? 0) !== generation) throw new Error("Codex账号来源或登录已改变，请重试")
+    pendingCodexRenewals.set(item.id, { previous: JSON.stringify(latest), next, scope, generation })
     persist(items.map(x => x.id === item.id ? { ...x, ...next } : x))
+    pendingCodexRenewals.delete(item.id)
     return next
   })()
   refreshing.set(item.id, job)
@@ -1044,7 +1068,7 @@ function persist(items: Credential[]) {
 export function claudeAccounts(): { id: string; name: string; email: string; provider: "claude" }[] {
   return credentials().map((a, i) => ({ id: a.id, name: a.email || `Claude账号 ${i + 1}（邮箱未提供）`, email: a.email, provider: "claude" as const }))
 }
-export function logoutClaude(id: string) { persist(credentials().filter(a => a.id !== id)); forgetClaudeUsageState(id) }
+export function logoutClaude(id: string) { persist(credentials().filter(a => a.id !== id)); forgetRenewal(id); forgetClaudeUsageState(id) }
 const base64url = (data: any): string => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 function active(d: ClaudeLogin) {
   if (d.cancelled || Date.now() >= d.expiresAt) throw new Error("Claude本次授权已取消或过期，请重新开始")
@@ -1181,17 +1205,33 @@ export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive
     if (index < 0) items.push(item)
     else { if (!item.email) item.email = items[index].email; items[index] = item }
     persist(items)
+    forgetRenewal(id)
     loginProgress(d, item.email ? `Claude ${item.email}` : "Claude 邮箱未提供")
     return id
   } finally { cancelClaudeLogin(d) }
 }
+// Keep the protocol independent; only retry saving the already-rotated in-memory token.
+const pendingRenewals = new Map<string, { previous: string; next: Credential; scope: number; generation: number }>()
+const generations = new Map<string, number>()
+export function clearRenewalCandidates() { pendingRenewals.clear() }
+function forgetRenewal(id: string) { pendingRenewals.delete(id); generations.set(id, (generations.get(id) ?? 0) + 1) }
 const refreshing = new Map<string, Promise<Credential>>()
 async function refresh(item: Credential, force = false): Promise<Credential> {
   const existing = refreshing.get(item.id)
   if (existing) return existing
   const job = (async () => {
     const current = credentials().find(a => a.id === item.id)
-    if (!current) throw new Error("该Claude账号已退出")
+    if (!current) { pendingRenewals.delete(item.id); throw new Error("该Claude账号已退出") }
+    const scope = officialRenewalScope, generation = generations.get(item.id) ?? 0
+    const candidate = pendingRenewals.get(item.id)
+    if (candidate) {
+      if (candidate.previous !== JSON.stringify(current) || candidate.scope !== scope || candidate.generation !== generation) pendingRenewals.delete(item.id)
+      else {
+        if (candidate.next.expiresAt <= Date.now()) throw new Error("Claude轮换令牌未能保存且已过期，请重新添加该账号")
+        persist(credentials().map(a => a.id === item.id ? { ...a, ...candidate.next } : a))
+        pendingRenewals.delete(item.id); return candidate.next
+      }
+    }
     if (current.access !== item.access || current.refresh !== item.refresh || (!force && current.expiresAt !== item.expiresAt && !renewalDue(current.expiresAt))) return current
     const until = renewalDeadline("Claude", item.id)
     if (until) throw new Error(renewalWait("Claude", until))
@@ -1210,7 +1250,10 @@ async function refresh(item: Credential, force = false): Promise<Credential> {
     const next = { ...current, ...tokenBody(await json(r), current) }, items = credentials(), latest = items.find(a => a.id === item.id)
     if (!latest) throw new Error("该Claude账号已退出")
     if (latest.access !== current.access || latest.refresh !== current.refresh) return latest
-    persist(items.map(a => a.id === item.id ? { ...a, ...next } : a)); return next
+    if (officialRenewalScope !== scope || (generations.get(item.id) ?? 0) !== generation) throw new Error("Claude账号来源或登录已改变，请重试")
+    pendingRenewals.set(item.id, { previous: JSON.stringify(latest), next, scope, generation })
+    persist(items.map(a => a.id === item.id ? { ...a, ...next } : a))
+    pendingRenewals.delete(item.id); return next
   })()
   refreshing.set(item.id, job)
   try { return await job } finally { refreshing.delete(item.id) }

@@ -1,6 +1,6 @@
 // Offline execution of the production TS/TSX. All tokens, cookies and accounts are synthetic fixtures.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict')
-const ts=require(process.env.TYPESCRIPT_PATH||'/tmp/chk/node_modules/typescript'),root=path.resolve(__dirname,'..')
+const ts=require(process.env.TYPESCRIPT_PATH||'typescript'),root=path.resolve(__dirname,'..')
 let now=1800000000000,handler,failSave=false,calls=[],timers=new Map(),seq=1,states=[],hook=0,effects=[],browserClosed=0,disposed=0,closeBrowser
 const kc=new Map(),store=new Map(),modules={}
 class Clock extends Date {constructor(...a){super(...(a.length?a:[now]))}static now(){return now}}

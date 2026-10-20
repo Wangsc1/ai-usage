@@ -1,6 +1,6 @@
 // Offline Antigravity display-mode regression. Production TS/TSX, synthetic credentials only.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),crypto=require('node:crypto'),assert=require('node:assert/strict')
-const ts=require(process.env.TYPESCRIPT_PATH||'/tmp/chk/node_modules/typescript'),root=path.resolve(__dirname,'..')
+const ts=require(process.env.TYPESCRIPT_PATH||'typescript'),root=path.resolve(__dirname,'..')
 let now=1800000000000,handler,calls=[],states=[],hook=0,effects=[],timers=new Map(),seq=1,servers=[],failSave=false,closeBrowser,disposed=0
 const kc=new Map(),store=new Map(),modules={}
 class Clock extends Date{constructor(...a){super(...(a.length?a:[now]))}static now(){return now}}

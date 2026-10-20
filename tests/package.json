@@ -1,0 +1,7 @@
+{
+  "name": "ai-usage-offline-tests",
+  "private": true,
+  "scripts": { "test": "node run.cjs" },
+  "devDependencies": { "typescript": "5.9.3" },
+  "engines": { "node": ">=18" }
+}

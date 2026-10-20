@@ -1,9 +1,9 @@
 // Production SettingsView + shared browser lifecycle, offline. No protocol/network changes mocked here.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict')
-const ts=require(process.env.TYPESCRIPT_PATH||'/tmp/chk/node_modules/typescript'),root=path.resolve(__dirname,'..')
+const ts=require(process.env.TYPESCRIPT_PATH||'typescript'),root=path.resolve(__dirname,'..')
 let states=[],hook=0,effects=[],source='official',flows=[],accounts=[],instances=[],timers=new Map(),seq=0,mode='pending',rejectLoad,resolveLoad,finishExchange,holdExchange=false,loginError=false
 const api=new Proxy({
- getSource:()=>source,saveSource:s=>{source=s},officialAccounts:()=>accounts,cachedAccounts:()=>[],getConfig:()=>({}),getSub2APIConfig:()=>({}),getStatisticsSource:()=> 'parrot',getRefreshMinutes:()=>30,accountScope:()=>0,hiddenAccountIds:()=>[],claudeCooldownUntil:()=>0,REFRESH_OPTIONS:[],loadUsage:async()=>({data:null}),sortAccounts:a=>a,
+ getSource:()=>source,saveSource:s=>{source=s},officialAccounts:()=>accounts,managementAccounts:()=>accounts,cachedAccounts:()=>[],getConfig:()=>({}),getSub2APIConfig:()=>({}),getStatisticsSource:()=> 'parrot',getRefreshMinutes:()=>30,accountScope:()=>0,hiddenAccountIds:()=>[],claudeCooldownUntil:()=>0,REFRESH_OPTIONS:[],loadUsage:async()=>({data:null}),sortAccounts:a=>a,
 },{get:(o,k)=>k in o?o[k]: /^begin.*Login$/.test(k)?(...args)=>{const flow={url:'https://fixture.invalid/'+k,consumed:false,cancelled:false,progress:'',callback:args[0]};flows.push(flow);return k==='beginWorkBuddyLogin'?Promise.resolve(flow):flow}: /^cancel.*Login$/.test(k)?d=>{d.cancelled=true}: /^finish.*Login$/.test(k)?async(d,...args)=>{d.consumed=true;if(loginError)throw Error("fixture login network error");const valid=args.at(-1);if(holdExchange)await new Promise(r=>finishExchange=r);if(!d.cancelled&&valid())accounts.push({id:'fixture',provider:'fixture'});}:()=>undefined})
 const scripting=new Proxy({Navigation:{useDismiss:()=>()=>{},present:()=>{throw Error('independent presentation forbidden')}},Widget:{reloadAll:async()=>{}},useState:v=>{const i=hook++;if(!(i in states))states[i]=v;return [states[i],v=>states[i]=typeof v==='function'?v(states[i]):v]},useEffect:f=>effects.push(f)},{get:(o,k)=>k in o?o[k]:k})
 const context=vm.createContext({console,Map,Set,Promise,Math,Number,Date,

@@ -1,6 +1,6 @@
 // Offline cleanup regression; optional CLEANUP_BASELINE_DIR compares fully expanded trees.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
-const ts = require(process.env.TYPESCRIPT_PATH || '/tmp/chk/node_modules/typescript')
+const ts = require(process.env.TYPESCRIPT_PATH || 'typescript')
 const root = path.resolve(__dirname, '..'), now = 1800000000000
 function runtime(dir) {
   const modules = {}, store = new Map()
@@ -38,7 +38,7 @@ function runtime(dir) {
   return { load, scripting, snapshot: n => JSON.stringify(expand(n)) }
 }
 const current = runtime(root), api = current.load('api.ts'), app = current.load('index.tsx'), widget = current.load('widget.tsx')
-assert.equal(api.VERSION, '1.48')
+assert.equal(api.VERSION, '1.49')
 assert.equal(api.VERSION, JSON.parse(fs.readFileSync(path.join(root, 'script.json'))).version)
 const index = fs.readFileSync(path.join(root, 'index.tsx'), 'utf8')
 assert.ok(!index.includes('const VERSION ='))
@@ -63,7 +63,7 @@ for (const at of [null, undefined, NaN, Infinity, -1, 0, 8640000000000001]) {
   assert.ok(detail({ ...account, provider: 'deepseek', balance: { fetchedAt: at, money: [] } }).includes('余额采集时间 未提供'))
 }
 assert.ok(detail({ ...account, provider: 'deepseek', balance: { fetchedAt: 1, money: [] } }).includes('余额采集时间 1970-01-01 08:00:00'))
-console.log('PASS cleanup: shared 1.48 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
+console.log('PASS cleanup: shared 1.49 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
 if (process.env.CLEANUP_BASELINE_DIR) {
   const baselineDir = process.env.CLEANUP_BASELINE_DIR, previous = runtime(baselineDir), oldApi = previous.load('api.ts'), oldApp = previous.load('index.tsx'), oldWidget = previous.load('widget.tsx')
   assert.equal(svg, oldApi.WORKBUDDY_SVG ?? fs.readFileSync(path.join(baselineDir, 'assets/workbuddy-original.svg'), 'utf8'), 'SVG source preserved byte-for-byte')
