@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.34"
+export const VERSION = "1.35"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 export function saveSource(source: DataSource) { Storage.set("ai_usage_source_v1", source) }
@@ -1782,17 +1782,18 @@ export type AntigravityQuota = {
   tier: string | null; creditAmount: number | null; minimumCreditAmount: number | null;
   groups: { name: string; buckets: { name: string; window: string; remainingPercent: number | null; resetsAt: string | null }[] }[]
 }
-export type AntigravityMode = "summary" | "gemini" | "claude_gpt"
+export type AntigravityMode = "summary" | "gemini" | "claude_gpt" | "argon"
 export const ANTIGRAVITY_MODES = [
   { value: "summary", label: "最低剩余额度汇总" },
   { value: "gemini", label: "Gemini Models" },
   { value: "claude_gpt", label: "Claude and GPT models" },
+  { value: "argon", label: "Gemini 4 Argon" },
 ] as const
 // The verified public parser exposes displayName, not a stable provider group ID.
 // Match these real group names exactly (after whitespace trimming), never their order.
-const AG_GROUP_NAMES = { gemini: "Gemini Models", claude_gpt: "Claude and GPT models" }
+const AG_GROUP_NAMES = { gemini: "Gemini Models", claude_gpt: "Claude and GPT models", argon: "Gemini 4 Argon" }
 const agModeKey = (source: DataSource) => `ai_usage_antigravity_mode_${source}_v1`
-function isAntigravityMode(value: any): value is AntigravityMode { return value === "summary" || value === "gemini" || value === "claude_gpt" }
+function isAntigravityMode(value: any): value is AntigravityMode { return value === "summary" || value === "gemini" || value === "claude_gpt" || value === "argon" }
 export function getAntigravityMode(id: string, source: DataSource = getSource()): AntigravityMode {
   const modes = Storage.get<Record<string, AntigravityMode>>(agModeKey(source)) ?? {}
   return Object.prototype.hasOwnProperty.call(modes, id) && isAntigravityMode(modes[id]) ? modes[id] : "summary"
