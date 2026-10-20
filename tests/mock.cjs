@@ -848,10 +848,10 @@ async function main() {
   const instances=[];let presentBrowser=async()=>{},loadBrowser=async()=>true
   context.WebViewController=class {
     constructor(options){this.options=options;this.disposed=0;this.dismissed=0;this.urls=[];instances.push(this)}
-    async loadURL(url){this.urls.push(url);return loadBrowser(this)}
-    async present(options){this.presentation=options;await presentBrowser(this)}
-    dismiss(){this.dismissed++}
-    dispose(){this.disposed++}
+    async loadURL(url){const destination=render().find(n=>n.type==='Form').props.navigationDestination;if(destination?.isPresented&&destination.content.props.controller===this)Promise.resolve(presentBrowser(this)).then(()=>destination.onChanged(false));this.urls.push(url);return loadBrowser(this)}
+    present(){throw Error('modal forbidden')}
+    dismiss(){throw Error('modal forbidden')}
+    dispose(){this.disposed++;this.dismissed++}
   }
   assert.equal(scripting.WebViewController,undefined)
   // The old module-import construction fails despite a valid GLOBAL API.
@@ -859,13 +859,18 @@ async function main() {
   const legacyModule={exports:{}}
   vm.runInContext(`(function(require,module,exports){${legacy}})`,context)(()=>scripting,legacyModule,legacyModule.exports)
   assert.throws(()=>legacyModule.exports.open(),/not a constructor/);assert.equal(instances.length,0)
-  const {presentIsolatedAuthorization}=load('index.tsx')
+  const {presentIsolatedAuthorization:isolatedAuthorization}=load('index.tsx')
+  const presentIsolatedAuthorization=(register,url)=>isolatedAuthorization(register,url,destination=>{
+    const shown=presentBrowser(destination.controller)
+    Promise.resolve(shown).then(()=>destination.onBack(),()=>destination.onBack())
+    return ()=>{}
+  })
   for(let i=0;i<2;i++)await presentIsolatedAuthorization(undefined,'https://auth.openai.com/oauth/authorize?synthetic=1')
   assert.notEqual(instances[0],instances[1])
   for(const b of instances){assert.equal(b.options.ephemeral,true);assert.deepEqual(b.urls,['https://auth.openai.com/oauth/authorize?synthetic=1']);assert.equal(b.disposed,1)}
   for(const failure of ['loadFalse','loadThrow','presentThrow']){
     loadBrowser=async()=>{if(failure==='loadThrow')throw new Error('mock-load');return failure!=='loadFalse'}
-    presentBrowser=async()=>{if(failure==='presentThrow')throw new Error('mock-present');await new Promise(()=>{})}
+    presentBrowser=()=>{if(failure==='presentThrow')throw new Error('mock-push');return new Promise(()=>{})}
     await assert.rejects(()=>presentIsolatedAuthorization(undefined,'https://auth.openai.com/oauth/authorize?synthetic=1'));assert.equal(instances.at(-1).disposed,1)
   }
   // Real delayed navigation: the former await-load-before-present would NEVER invoke present in this test.
@@ -2743,7 +2748,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     context.HttpResponseBody={html:html=>html};context.HttpResponse={ok:body=>({statusCode:200,body})}
     context.HttpServer=class{constructor(){this.port=null;this.stops=0;this.handlers={};servers.push(this)}registerHandler(p,h){this.handlers[p]=h}start(o){assert.equal(this.listenAddressIPv4,'127.0.0.1');assert.equal(o.forceIPv4,true);assert.ok([1455,1457].includes(o.port));this.options=o;this.port=bindMode==='wrong'?7777:o.port;return bindMode==='fail'||bindMode==='fallback'&&o.port===1455?'in use':null}stop(){this.stops++;this.port=null}}
     let closeView,holdView=false
-    context.WebViewController=class{constructor(o){assert.deepEqual({...o},{ephemeral:true});this.disposed=0;this.dismissed=0;views.push(this)}loadURL(url){this.url=url;return Promise.resolve(true)}present(){return holdView?new Promise(r=>closeView=r):Promise.resolve()}dismiss(){this.dismissed++}dispose(){this.disposed++}}
+    context.WebViewController=class{constructor(o){assert.deepEqual({...o},{ephemeral:true});this.disposed=0;this.dismissed=0;views.push(this)}loadURL(url){this.url=url;const d=render().find(n=>n.type==='Form').props.navigationDestination;closeView=()=>d.onChanged(false);if(!holdView)Promise.resolve().then(closeView);return Promise.resolve(true)}present(){throw Error('modal forbidden')}dismiss(){throw Error('modal forbidden')}dispose(){this.disposed++;this.dismissed++}}
     const req=(d,extra=[])=>({method:'GET',queryParams:[{key:'state',value:d.state},{key:'code',value:'SYNTHETIC-CODE'},...extra]})
     const callback=d=>servers.find(s=>s.port===Number(d.redirect.split(':')[2].split('/')[0])).handlers['/auth/callback']
     const secretFree=(response,secrets)=>{assert.equal(response.statusCode,200);assert.equal(response.then,undefined);for(const v of secrets)if(v)assert.ok(!response.body.includes(v));assert.ok(!/code=|state=|token=/.test(response.body))}

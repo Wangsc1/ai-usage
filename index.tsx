@@ -2,7 +2,7 @@ import { accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, sav
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
-  SecureField, SVG, Image, Text, TextField, Widget, VStack, useState, useEffect,
+  SecureField, SVG, Image, Text, TextField, Widget, WebView, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
 import { VERSION, getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
@@ -197,34 +197,35 @@ function AccountCacheSections({ account, source = getSource() }: { account: Acco
 }
 
 const UNSUPPORTED_BROWSER = "当前Scripting不支持WebViewController临时浏览器，请更新Scripting"
-async function presentIsolatedAuthorization(register: ((release: (() => void) | null) => void) | undefined, url: string) {
-  // loadURL resolves on navigation completion, not on initiating the load. Present BEFORE waiting
-  // for a login/redirect page, otherwise its pending navigation can hide the modal indefinitely.
+type AuthorizationDestination = { controller: WebViewController; onBack: () => void }
+type PushAuthorization = (destination: AuthorizationDestination) => () => void
+async function presentIsolatedAuthorization(register: ((release: (() => void) | null) => void) | undefined, url: string, push: PushAuthorization) {
+  // Push before waiting for loadURL: redirects/login pages may never complete loading.
   // WebViewController is a GLOBAL API in the official WebView example, not a scripting module export.
   if (typeof WebViewController !== "function") throw new Error(UNSUPPORTED_BROWSER)
   const browser = new WebViewController({ ephemeral: true })
   let released = false
+  let pop: (() => void) | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let stop!: () => void
   const cancelled = new Promise<void>(resolve => { stop = resolve })
   const release = () => { if (!released) {
     released = true; stop()
-    // Documented dismiss(): void closes presentation; dispose() also dismisses if still shown.
-    // Guard for older runtimes and always release resources exactly once.
-    try { if (typeof browser.dismiss === "function") browser.dismiss() } finally { browser.dispose() }
+    // Embedded WebView navigation belongs to the same stack, never the controller's modal API.
+    try { pop?.() } finally { browser.dispose() }
   } }
   register?.(release)
   try {
     const failure = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error("授权页面加载超时，请重试")), 20000)
     })
-    const shown = browser.present({ fullscreen: true, navigationTitle: "官方授权（临时会话）" })
+    pop = push({ controller: browser, onBack: release })
     const loading = browser.loadURL(url).then(ok => {
       if (timer != null) clearTimeout(timer)
       if (!ok && !released) throw new Error("授权页面加载失败，请重试")
       return new Promise<void>(() => {}) // Loading success is NOT dismissal or authorization success.
     })
-    await Promise.race([shown, loading, failure, cancelled])
+    await Promise.race([loading, failure, cancelled])
   } finally {
     if (timer != null) clearTimeout(timer)
     release()
@@ -237,6 +238,11 @@ function maskedKey(value: string): string {
 }
 function SettingsView() {
   const close = Navigation.useDismiss()
+  const [authorization, setAuthorization] = useState<AuthorizationDestination | null>(null)
+  const pushAuthorization: PushAuthorization = destination => {
+    setAuthorization(destination)
+    return () => setAuthorization(current => current === destination ? null : current)
+  }
   const [source, setSource] = useState<DataSource>(getSource())
   const [loginProvider, setLoginProvider] = useState("codex")
   const [claude, setClaude] = useState<ClaudeLogin | null>(null)
@@ -329,7 +335,7 @@ function SettingsView() {
     auth.running = true; setBusy(true); setBrowserError("")
     try {
       // Presentation starts before polling; its own ephemeral cookies are never copied into fetch.
-      const shown = presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url)
+      const shown = presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url, pushAuthorization)
       const completed = finishWorkBuddyLogin(d, valid).then(() => {
         if (!valid()) return
         saved = true; setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null
@@ -358,7 +364,7 @@ function SettingsView() {
     const epoch = auth.epoch
     const valid = () => auth.alive && auth.codex === d && auth.epoch === epoch
     auth.running = true; setBusy(true); setBrowserError("")
-    try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url) }
+    try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url, pushAuthorization) }
     catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Codex授权页") + "，请重试登录") }
     finally { if (auth.alive && epoch === auth.epoch && !d.consumed) { auth.running = false; setBusy(false) } }
   }
@@ -391,7 +397,7 @@ function SettingsView() {
     const epoch = auth.epoch
     const valid = () => auth.alive && auth.antigravity === d && auth.epoch === epoch
     auth.running = true; setBusy(true); setBrowserError("")
-    try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url); if (valid()) { stopAuth(); setBusy(false) } }
+    try { await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url, pushAuthorization); if (valid()) { stopAuth(); setBusy(false) } }
     catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Antigravity授权页") + "，请重试登录") }
     finally { if (auth.alive && epoch === auth.epoch && !d.consumed) { auth.running = false; setBusy(false) } }
   }
@@ -441,7 +447,7 @@ function SettingsView() {
     const valid = () => auth.alive && auth.claude === d && auth.epoch === epoch && getSource() === "official"
     auth.running = true; setBusy(true); setBrowserError("")
     try {
-      await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url)
+      await presentIsolatedAuthorization(release => { auth.releaseBrowser = release }, d.url, pushAuthorization)
       if (valid() && !d.consumed && d.code) await completeClaude(d)
     } catch (e: any) { if (valid()) {
       const message = e?.message === UNSUPPORTED_BROWSER || e?.message?.startsWith("授权页面加载") ? e.message : "无法打开Claude授权页，请重试"
@@ -549,6 +555,16 @@ function SettingsView() {
 
   return <NavigationStack>
     <Form
+      navigationDestination={{
+        isPresented: authorization != null,
+        onChanged: value => { if (!value) authorization?.onBack() },
+        content: authorization ? <WebView
+          controller={authorization.controller}
+          frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+          navigationTitle="官方授权（临时会话）"
+          navigationBarTitleDisplayMode="inline"
+        /> : <Text />,
+      }}
       navigationTitle={"AI 用量"}
       navigationBarTitleDisplayMode={"inline"}
       toolbar={{

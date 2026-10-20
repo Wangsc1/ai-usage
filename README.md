@@ -57,6 +57,8 @@ DeepSeek频道通过管理接口自动分页发现，无需逐账号填写API Ke
 
 #### Codex
 
+官方网页授权使用隔离的临时会话，在同一导航栈中左右进出；可用系统左上返回按钮或边缘右滑返回，不使用独立模态网页。
+
 1. 点“添加账号”准备浏览器 OAuth + PKCE 登录，再点“点击登录”打开 App 内临时浏览器。
 2. 登录目标 ChatGPT 账号。本机收到有效回调并成功保存登录后，自动关闭授权页返回设置列表并刷新；关闭网页本身不代表授权成功，未收到回调时可再次点“点击登录”。
 3. 本机等待期限为15分钟（不是 OpenAI 公布的授权有效期）；取消、切换服务／来源或退出设置会结束本次登录。
@@ -90,7 +92,7 @@ Claude 使用官方 OAuth 权限组合，包含资料、订阅推理、Claude Co
 #### WorkBuddy（国内个人）
 
 1. 账号来源选 **OAuth,API,Token**，在“添加账号”右侧选 **WorkBuddy**，点“添加账号”再点“点击登录”。
-2. 在独立临时浏览器中登录腾讯WorkBuddy个人身份。服务返回令牌并成功保存本机Keychain后，自动关闭网页返回App并读取真实积分。
+2. 在导航栈内的临时授权页登录腾讯WorkBuddy个人身份。服务返回令牌并成功保存本机Keychain后，自动关闭网页返回App并读取真实积分。
 3. 本机等待期限为10分钟，不是官方公布的授权有效期。取消、关闭网页、退出设置或切换服务／来源会结束本次尝试；迟到响应不会保存账号。企业身份和国际版不支持。
 
 - 使用已核实开源实现的国内 **CLI** 客户端私有 `state → token → account` 协议，不是公开第三方OAuth或API Key接口。认证固定访问 `copilot.tencent.com`，积分固定访问 `www.codebuddy.cn`；不跟随API重定向、不复制浏览器或其他应用Cookie，仅在同一state流程内保留该接口自身返回的临时Cookie。参考 [Parrot认证实现](https://github.com/danger-dream/Parrot/blob/25b93d344b7cfc81dce0c210cb579ada4d8b48a1/src/oauth/workbuddy/auth.py)。私有接口和客户端profile可能变化或受到风控，不能保证每次登录成功。
