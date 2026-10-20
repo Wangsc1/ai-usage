@@ -31,7 +31,7 @@ const ids=xs=>Array.from(xs,a=>a.id)
 const usage=accounts=>({accounts,today:null,month:null,todayByFamily:{},monthByFamily:{},fetchedAt:now-1000})
 const remoteIds=s=>s==='sub2api'?['sub2api:1','sub2api:2','sub2api:3','sub2api:4']:['p1','p2','p3','p4']
 function seed(s,n=4){reset();native=true;delete modules['index.tsx'];app=load('index.tsx');api.saveSource(s);if(s==='parrot'){api.saveConfig('https://parrot.example','FIXTURE-KEY');kc.set('parrot_session_credential','FIXTURE-SESSION')}if(s==='sub2api')api.saveSub2APIConfig('https://sub.example','FIXTURE-KEY','Asia/Shanghai');const accounts=(s==='official'?['antigravity:1','antigravity:2','antigravity:3','antigravity:4']:remoteIds(s)).slice(0,n).map(account);if(s==='official'){for(const a of accounts)a.provider='antigravity';kc.set(KEY,JSON.stringify(accounts.map(a=>({id:a.id,email:a.name,access:'FIXTURE',refresh:'FIXTURE',expiresAt:now+3600000}))))}store.set(cacheKey(s),usage(accounts));return accounts}
-function walk(v,out=[]){if(v==null||v===false)return out;if(Array.isArray(v)){v.forEach(x=>walk(x,out));return out}if(typeof v!=='object'){out.push(v);return out}if(Object.hasOwn(v,'type')&&typeof v.type==='function'){if(v.type.name==='FullScreenLink')out.push(v);return walk(v.type(v.props),out)};out.push(v);if(v.type==='GeometryReader'&&typeof v.props.children==='function')walk(v.props.children({size:scripting.Widget.displaySize}),out);else walk(v.props?.children,out);if(v.type==='ForEach'&&v.props.itemBuilder)for(let i=0;i<v.props.count;i++)walk(v.props.itemBuilder(i),out);if(v.type==='ReorderableForEach'&&v.props.builder)for(let i=0;i<v.props.data.length;i++)walk(v.props.builder(v.props.data[i],i),out);if(v.props?.header)walk(v.props.header,out);if(v.props?.toolbar?.primaryAction)walk(v.props.toolbar.primaryAction,out);return out}
+function walk(v,out=[]){if(v==null||v===false)return out;if(Array.isArray(v)){v.forEach(x=>walk(x,out));return out}if(typeof v!=='object'){out.push(v);return out}if(Object.hasOwn(v,'type')&&typeof v.type==='function')return walk(v.type(v.props),out);out.push(v);if(v.type==='GeometryReader'&&typeof v.props.children==='function')walk(v.props.children({size:scripting.Widget.displaySize}),out);else walk(v.props?.children,out);if(v.type==='ForEach'&&v.props.itemBuilder)for(let i=0;i<v.props.count;i++)walk(v.props.itemBuilder(i),out);if(v.type==='ReorderableForEach'&&v.props.builder)for(let i=0;i<v.props.data.length;i++)walk(v.props.builder(v.props.data[i],i),out);if(v.props?.header)walk(v.props.header,out);if(v.props?.toolbar?.primaryAction)walk(v.props.toolbar.primaryAction,out);return out}
 function render(){hook=0;return walk(app.SettingsView())}
 const find=(tree,type)=>tree.find(n=>n?.type===type)
 const button=(tree,title)=>{const n=tree.find(n=>n?.type==='Button'&&n.props.title===title);assert.ok(n,title);return n}
@@ -58,7 +58,7 @@ function network(s){return async(u,o={})=>{
 }}
 async function main(){
  for(const s of ['official','parrot','sub2api']){
-  const accounts=seed(s);localReloads();if(s==='official')api.requestLocalWidgetProjection(s);let tree=render(),rows=swipes(tree);assert.equal(rows.length,4);assert.ok(find(tree,'EditButton'));const each=find(tree,'ForEach');assert.equal(each.props.count,4);assert.equal(typeof each.props.onMove,'function');assert.equal(rows[0].props.trailingSwipeActions.actions[0].props.title,s==='official'?'删除':'隐藏');assert.equal(rows[0].props.trailingSwipeActions.allowsFullSwipe,false);assert.equal(rows[0].props.children[0].type.name,'FullScreenLink');assert.equal(rows[0].props.children[0].props.destination.type,app.WidgetNamePage)
+  const accounts=seed(s);localReloads();if(s==='official')api.requestLocalWidgetProjection(s);let tree=render(),rows=swipes(tree);assert.equal(rows.length,4);assert.ok(find(tree,'EditButton'));const each=find(tree,'ForEach');assert.equal(each.props.count,4);assert.equal(typeof each.props.onMove,'function');assert.equal(rows[0].props.trailingSwipeActions.actions[0].props.title,s==='official'?'删除':'隐藏');assert.equal(rows[0].props.trailingSwipeActions.allowsFullSwipe,false);assert.equal(rows[0].props.children[0].type,'NavigationLink');assert.equal(rows[0].props.children[0].props.destination.type,app.WidgetNamePage)
   each.props.onMove([0],4);assert.deepEqual(ids(api.managementAccounts()),[accounts[1].id,accounts[2].id,accounts[3].id,accounts[0].id]);each.props.onMove([0],4);await flush() // stale remote snapshot rejected
   if(s!=='official'){assert.equal(reloads,1);assert.equal(calls.length,0);assert.equal(presentations.length,7)}
   // Reset order and verify multi-index ORIGINAL destination semantics; edit metadata survives render.
@@ -79,7 +79,7 @@ async function main(){
  console.log('PASS 3-source native EditButton/ForEach+swipe+detail rows; original-offset and multi-index moves/invalid-index guards; remote local-only hide/restore-all, multiple/all-hidden empty state, canonical cache/order/config retained; App and 7 widget families x numeric parameters agree, no network')
  // Fallback long-press callbacks use post-removal destination offsets, not SwiftUI offsets.
  for(const s of ['official','parrot','sub2api']){
-  const accounts=seed(s);native=false;delete modules['index.tsx'];app=load('index.tsx');localReloads();if(s==='official')api.requestLocalWidgetProjection(s);const tree=render();assert.equal(find(tree,'EditButton'),undefined);assert.equal(find(tree,'ForEach'),undefined);const link=tree.find(n=>n?.type?.name==='FullScreenLink'&&n.props.destination?.type===app.AccountOrderPage);assert.ok(link);const ordered=walk(link.props.destination),reorder=find(ordered,'ReorderableForEach');assert.ok(reorder);reorder.props.onMove([0],2);await flush();assert.deepEqual(ids(api.managementAccounts()),[accounts[1].id,accounts[2].id,accounts[0].id,accounts[3].id]);if(s!=='official')assert.equal(calls.length,0);api.saveSource(s==='parrot'?'sub2api':'parrot');const snapshot=JSON.stringify(store.get('ai_usage_'+s+'_order_v1'));reorder.props.onMove([0],1);assert.equal(JSON.stringify(store.get('ai_usage_'+s+'_order_v1')),snapshot)
+  const accounts=seed(s);native=false;delete modules['index.tsx'];app=load('index.tsx');localReloads();if(s==='official')api.requestLocalWidgetProjection(s);const tree=render();assert.equal(find(tree,'EditButton'),undefined);assert.equal(find(tree,'ForEach'),undefined);const link=tree.find(n=>n?.type==='NavigationLink'&&n.props.destination?.type===app.AccountOrderPage);assert.ok(link);const ordered=walk(link.props.destination),reorder=find(ordered,'ReorderableForEach');assert.ok(reorder);reorder.props.onMove([0],2);await flush();assert.deepEqual(ids(api.managementAccounts()),[accounts[1].id,accounts[2].id,accounts[0].id,accounts[3].id]);if(s!=='official')assert.equal(calls.length,0);api.saveSource(s==='parrot'?'sub2api':'parrot');const snapshot=JSON.stringify(store.get('ai_usage_'+s+'_order_v1'));reorder.props.onMove([0],1);assert.equal(JSON.stringify(store.get('ai_usage_'+s+'_order_v1')),snapshot)
  }
  console.log('PASS 3-source capability fallback keeps swipe/detail and long-press ordering; post-removal offsets and late-source guard')
  for(const s of ['parrot','sub2api']){
@@ -112,37 +112,23 @@ async function main(){
  console.log('PASS source+deployment isolation, unchanged config retention/changed config cleanup, GET-only refresh and stale fallback retain hiding/full cache; late list response cannot revive hidden rows; old rows/restore/move/details and ABA configuration responses rejected')
  // Official left-swipe still logs out only that local account; not a hidden record.
  const accounts=seed('official',2);localReloads();handler=async(u,o)=>u.endsWith(':loadCodeAssist')?ok({cloudaicompanionProject:'fixture'}):u.endsWith(':retrieveUserQuotaSummary')?ok({groups:[]}):(()=>{throw Error('offline stats')})();const tree=render();await swipes(tree)[0].props.trailingSwipeActions.actions[0].props.action();assert.deepEqual(ids(api.officialAccounts()),[accounts[1].id]);assert.deepEqual(Array.from(api.hiddenAccountIds('official')),[]);assert.deepEqual(ids(api.cachedAccounts()),[accounts[1].id]);console.log('PASS actual official destructive swipe retains local logout, other credentials/cache survive; never converts official removal to hiding')
- // Exercise every real row/sort entry, not just a static modal flag.
- const shown=[];let dismissed=0,exited=0
- scripting.DragGesture=options=>({onEnded:handler=>({options,handler})})
+ // All child entries must stay on the root native stack, never present another modal.
+ const shown=[];let exited=0
  scripting.Navigation.present=async options=>{shown.push(options)}
- scripting.Navigation.useDismiss=()=>()=>{dismissed++}
  scripting.Script={exit:()=>{exited++}}
  for(const source of ['official','parrot','sub2api']){
   seed(source,2);native=false;delete modules['index.tsx'];app=load('index.tsx');localReloads()
-  const links=render().filter(n=>n?.type?.name==='FullScreenLink')
-  assert.equal(links.length,3,'two detail entries and one sort entry')
-  for(const link of links){
-   const entry=link.type(link.props);assert.equal(entry.type,'Button')
-   const before=shown.length;await entry.props.action();assert.equal(shown.length,before+1)
-   const modal=shown.at(-1);assert.equal(modal.modalPresentationStyle,'fullScreen')
-   assert.equal(modal.element.props.children,link.props.destination,'keep destination props/callbacks')
-   const chrome=modal.element.type(modal.element.props)
-   assert.equal(chrome.type,'NavigationStack')
-   const close=chrome.props.children.props.toolbar.cancellationAction
-   assert.equal(close.props.systemImage,'chevron.left');assert.equal(close.props.title,'返回');const d=dismissed;close.props.action();assert.equal(dismissed,d+1)
-   assert.equal(exited,0,'closing child never exits root script')
-   const gesture=chrome.props.children.props.simultaneousGesture
-   assert.equal(gesture.options.coordinateSpace,'local');assert.equal(gesture.options.minDistance,30)
-   const swipe=(x,dx,dy)=>gesture.handler({startLocation:{x,y:100},translation:{width:dx,height:dy}})
-   const beforeSwipe=dismissed
-   for(const args of [[100,120,0],[0,-120,0],[0,79,0],[0,100,80],[33,100,0],[-1,100,0],[0,0,120]])swipe(...args)
-   assert.equal(dismissed,beforeSwipe,'non-edge, left, short and vertical drags do not dismiss')
-   swipe(0,100,5);swipe(32,80,-40);assert.equal(dismissed,beforeSwipe+2,'edge-right swipe closes every child')
-  }
+  const tree=render(),links=tree.filter(n=>n?.type==='NavigationLink')
+  assert.equal(links.length,3,'two account details plus fallback sort')
+  assert.equal(links.filter(n=>n.props.destination.type===app.WidgetNamePage).length,2)
+  assert.equal(links.filter(n=>n.props.destination.type===app.AccountOrderPage).length,1)
+  assert.equal(tree.filter(n=>n?.type==='NavigationStack').length,1,'children inherit the root stack')
+  assert.equal(shown.length,0,'opening native destinations does not present independent modals')
  }
- await app.runApp();assert.equal(shown.at(-1).modalPresentationStyle,'fullScreen');assert.equal(exited,1)
- console.log('PASS full-screen root + all three sources detail/sort entries; dedicated close dismisses child, root exits only after its own presentation; native motion needs device verification')
+ await app.runApp();assert.equal(shown.length,1);assert.equal(shown[0].modalPresentationStyle,'fullScreen');assert.equal(exited,1)
+ const sourceText=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
+ assert.ok(!sourceText.includes('DragGesture')&&!sourceText.includes('FullScreenLink'),'no custom swipe-dismiss recognizer')
+ console.log('PASS native NavigationLink children on one root stack across all sources; full-screen root retained; no custom swipe dismissal; device must verify interactive animation')
  console.log('PASS account visibility suite complete; production TS/TSX, no real network/credentials; not native gesture/pixel proof')
 }
 main().catch(e=>{console.error(e);process.exitCode=1})

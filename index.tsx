@@ -1,7 +1,7 @@
 import { accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
-  Button, DragGesture, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationStack, Picker, Script, Section,
+  Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
@@ -33,34 +33,6 @@ function AccountLine({ index, provider, name, fixed = false }: { index: number; 
   </HStack>
 }
 const accountLabel = (a: Account, i: number) => `${i + 1}. ${providerWord(a.provider)} · ${a.name}`
-
-// Independent native full-screen presentations: slide up on entry, dismiss down.
-function FullScreenPage({ children }: { children: any }) {
-  const close = Navigation.useDismiss()
-  return <NavigationStack>
-    <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
-      simultaneousGesture={DragGesture({ minDistance: 30, coordinateSpace: "local" }).onEnded(d => {
-        // Edge-only, deliberate horizontal travel: leave scrolling, controls and sorting alone.
-        const { width: dx, height: dy } = d.translation
-        if (d.startLocation.x >= 0 && d.startLocation.x <= 32 && dx >= 80 && Math.abs(dy) <= dx / 2) close()
-      })}
-      toolbar={{ cancellationAction: <Button title="返回" systemImage="chevron.left" action={close} /> }}>
-      {children}
-    </VStack>
-  </NavigationStack>
-}
-
-function FullScreenLink({ destination, children }: { destination: any; children: any }) {
-  return <Button buttonStyle="plain" action={async () => {
-    await Navigation.present({ element: <FullScreenPage>{destination}</FullScreenPage>, modalPresentationStyle: "fullScreen" })
-  }}>
-    <HStack>
-      {children}
-      <Spacer />
-      <Image systemName="chevron.right" foregroundStyle="tertiaryLabel" />
-    </HStack>
-  </Button>
-}
 
 // Separate ScrollView: ReorderableForEach stays outside List/Form.
 function AccountOrderPage({ source, onSaved, expectedScope }: { source: DataSource; onSaved: (next: Account[]) => void; expectedScope?: number }) {
@@ -536,12 +508,12 @@ function SettingsView() {
       await Widget.reloadAll()
     }} />
   ] }}>
-    <FullScreenLink destination={<WidgetNamePage account={a} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
+    <NavigationLink destination={<WidgetNamePage account={a} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
       <VStack alignment="leading" spacing={3}>
         <AccountLine index={i} provider={a.provider} name={a.name} />
         <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, source) || "使用原名（点此设置）"}</Text>
       </VStack>
-    </FullScreenLink>
+    </NavigationLink>
     <Spacer />
   </HStack>
 
@@ -566,12 +538,12 @@ function SettingsView() {
           } catch { /* local removal failure leaves the row in place */ }
         }} />
         ] }}>
-          <FullScreenLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
+          <NavigationLink destination={<WidgetNamePage account={managementAccounts().find(item => item.id === a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
             <VStack alignment="leading" spacing={3}>
               <AccountLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed />
               <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
             </VStack>
-          </FullScreenLink>
+          </NavigationLink>
           <Spacer />
         </HStack>
 
@@ -660,16 +632,16 @@ function SettingsView() {
         {!claude && !codexBrowser && !workbuddy && !agBrowser && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
         {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortAccounts(logins, "official")[i], i)} />
           : sortAccounts(logins, "official").map(loginRow)}
-        {!NATIVE_SORT && logins.length > 1 ? <FullScreenLink destination={<AccountOrderPage key="official" source="official" onSaved={() => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
+        {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={() => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
           <Text>账号排序</Text>
-        </FullScreenLink> : null}
+        </NavigationLink> : null}
       </Section> : null}
 
       {source !== "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>目前账号</Text><Spacer />{NATIVE_SORT && visible.length > 1 ? <EditButton /> : null}</HStack>}>
         {NATIVE_SORT ? <ForEach count={visible.length} onMove={moveRemoteAccounts} itemBuilder={i => remoteRow(visible[i], i)} /> : visible.map(remoteRow)}
-        {!NATIVE_SORT && visible.length > 1 ? <FullScreenLink destination={<AccountOrderPage key={source} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
+        {!NATIVE_SORT && visible.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
           <Text>账号排序</Text>
-        </FullScreenLink> : null}
+        </NavigationLink> : null}
         {hiddenCount > 0 ? <Button title={`恢复全部隐藏账号（${hiddenCount}）`} disabled={busy} action={async () => {
           if (busy || !restoreHiddenAccounts(source, listScope)) return
           setAccounts(cachedAccounts())
