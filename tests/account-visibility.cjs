@@ -114,6 +114,7 @@ async function main(){
  const accounts=seed('official',2);localReloads();handler=async(u,o)=>u.endsWith(':loadCodeAssist')?ok({cloudaicompanionProject:'fixture'}):u.endsWith(':retrieveUserQuotaSummary')?ok({groups:[]}):(()=>{throw Error('offline stats')})();const tree=render();await swipes(tree)[0].props.trailingSwipeActions.actions[0].props.action();assert.deepEqual(ids(api.officialAccounts()),[accounts[1].id]);assert.deepEqual(Array.from(api.hiddenAccountIds('official')),[]);assert.deepEqual(ids(api.cachedAccounts()),[accounts[1].id]);console.log('PASS actual official destructive swipe retains local logout, other credentials/cache survive; never converts official removal to hiding')
  // Exercise every real row/sort entry, not just a static modal flag.
  const shown=[];let dismissed=0,exited=0
+ scripting.DragGesture=options=>({onEnded:handler=>({options,handler})})
  scripting.Navigation.present=async options=>{shown.push(options)}
  scripting.Navigation.useDismiss=()=>()=>{dismissed++}
  scripting.Script={exit:()=>{exited++}}
@@ -131,6 +132,13 @@ async function main(){
    const close=chrome.props.children.props.toolbar.cancellationAction
    assert.equal(close.props.systemImage,'chevron.left');assert.equal(close.props.title,'返回');const d=dismissed;close.props.action();assert.equal(dismissed,d+1)
    assert.equal(exited,0,'closing child never exits root script')
+   const gesture=chrome.props.children.props.simultaneousGesture
+   assert.equal(gesture.options.coordinateSpace,'local');assert.equal(gesture.options.minDistance,30)
+   const swipe=(x,dx,dy)=>gesture.handler({startLocation:{x,y:100},translation:{width:dx,height:dy}})
+   const beforeSwipe=dismissed
+   for(const args of [[100,120,0],[0,-120,0],[0,79,0],[0,100,80],[33,100,0],[-1,100,0],[0,0,120]])swipe(...args)
+   assert.equal(dismissed,beforeSwipe,'non-edge, left, short and vertical drags do not dismiss')
+   swipe(0,100,5);swipe(32,80,-40);assert.equal(dismissed,beforeSwipe+2,'edge-right swipe closes every child')
   }
  }
  await app.runApp();assert.equal(shown.at(-1).modalPresentationStyle,'fullScreen');assert.equal(exited,1)

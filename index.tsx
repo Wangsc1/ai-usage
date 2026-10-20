@@ -1,7 +1,7 @@
 import { accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
-  Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationStack, Picker, Script, Section,
+  Button, DragGesture, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
@@ -39,6 +39,11 @@ function FullScreenPage({ children }: { children: any }) {
   const close = Navigation.useDismiss()
   return <NavigationStack>
     <VStack spacing={0} frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
+      simultaneousGesture={DragGesture({ minDistance: 30, coordinateSpace: "local" }).onEnded(d => {
+        // Edge-only, deliberate horizontal travel: leave scrolling, controls and sorting alone.
+        const { width: dx, height: dy } = d.translation
+        if (d.startLocation.x >= 0 && d.startLocation.x <= 32 && dx >= 80 && Math.abs(dy) <= dx / 2) close()
+      })}
       toolbar={{ cancellationAction: <Button title="返回" systemImage="chevron.left" action={close} /> }}>
       {children}
     </VStack>
