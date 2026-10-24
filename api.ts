@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.52"
+export const VERSION = "1.53"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
@@ -581,7 +581,62 @@ export class WidgetCacheInvalid extends Error {}
 export type WidgetDiagnostic = { version: 1; phase: "init" | "settings" | "cache" | "load" | "prepare" | "present"; elapsedMs: number; outcome: "fresh" | "cache" | "text" | "present_error"; errorType: "none" | "timeout" | "cache_invalid" | "read_stopped" | "runtime" | "intent_init" | "present_error" }
 export function recordWidgetDiagnostic(entry: WidgetDiagnostic) {
   // One bounded overwrite, fixed fields/enums only. Never persist Error/name/message/URL/response.
-  try { Storage.set("ai_usage_widget_diagnostic_v1", { version: 1, phase: entry.phase, elapsedMs: Math.max(0, Math.min(86400000, Math.round(entry.elapsedMs))), outcome: entry.outcome, errorType: entry.errorType }) } catch { /* diagnostics cannot block a render */ }
+  try { Storage.set("ai_usage_widget_diagnostic_v1", { version: 1, phase: diagnosticEnum(entry.phase, diagnosticPhases, "init"), elapsedMs: Number.isFinite(entry.elapsedMs) ? Math.max(0, Math.min(86400000, Math.round(entry.elapsedMs))) : 0, outcome: diagnosticEnum(entry.outcome, diagnosticOutcomes.slice(1), "text"), errorType: diagnosticEnum(entry.errorType, diagnosticErrors, "runtime") }) } catch { /* diagnostics cannot block a render */ }
+}
+
+
+// Local evidence only: no account/source identifiers, exception strings or server content.
+const DIAGNOSTIC_HISTORY = "ai_usage_widget_diagnostic_history_v1"
+let widgetDiagnosticSequence = 0
+const diagnosticPhases = ["init", "settings", "cache", "load", "prepare", "present"]
+const diagnosticOutcomes = ["pending", "fresh", "cache", "text", "present_error"]
+const diagnosticErrors = ["none", "timeout", "cache_invalid", "read_stopped", "runtime", "intent_init", "present_error"]
+const diagnosticFamilies = ["systemSmall", "systemMedium", "systemLarge", "systemExtraLarge", "accessoryInline", "accessoryCircular", "accessoryRectangular"]
+export type WidgetExecutionDiagnostic = {
+  id: string; scriptVersion: string; startedAt: number | null; family: string; phase: string;
+  outcome: string; errorType: string; elapsedMs: number; beforePresent: boolean; returned: boolean; legacy: boolean
+}
+const diagnosticEnum = (v: unknown, values: string[], fallback: string) => typeof v === "string" && values.includes(v) ? v : fallback
+function cleanWidgetDiagnostic(v: any): WidgetExecutionDiagnostic | null {
+  if (!v || typeof v !== "object" || typeof v.id !== "string" || !/^[0-9-]{1,40}$/.test(v.id)) return null
+  return { id: v.id, scriptVersion: typeof v.scriptVersion === "string" && /^1\.\d{1,3}$/.test(v.scriptVersion) ? v.scriptVersion : "未知",
+    startedAt: typeof v.startedAt === "number" && Number.isFinite(v.startedAt) && v.startedAt > 0 && v.startedAt < 8640000000000000 ? v.startedAt : null,
+    family: diagnosticEnum(v.family, diagnosticFamilies, "未知"), phase: diagnosticEnum(v.phase, diagnosticPhases, "init"),
+    outcome: diagnosticEnum(v.outcome, diagnosticOutcomes, "pending"), errorType: diagnosticEnum(v.errorType, diagnosticErrors, "runtime"),
+    elapsedMs: typeof v.elapsedMs === "number" && Number.isFinite(v.elapsedMs) ? Math.max(0, Math.min(86400000, Math.round(v.elapsedMs))) : 0,
+    beforePresent: v.beforePresent === true, returned: v.returned === true, legacy: v.legacy === true }
+}
+export function readWidgetDiagnostics(): WidgetExecutionDiagnostic[] {
+  try {
+    const raw = Storage.get<any>(DIAGNOSTIC_HISTORY)
+    if (Array.isArray(raw)) return raw.slice(0, 10).map(cleanWidgetDiagnostic).filter((x): x is WidgetExecutionDiagnostic => x != null)
+    const old = Storage.get<any>("ai_usage_widget_diagnostic_v1")
+    if (!old || old.version !== 1) return []
+    return [cleanWidgetDiagnostic({ ...old, id: "0", scriptVersion: "1.52", legacy: true })!]
+  } catch { return [] }
+}
+export function beginWidgetDiagnostic(family: unknown, startedAt: number) {
+  const entry = cleanWidgetDiagnostic({ id: `${startedAt}-${++widgetDiagnosticSequence}-${Math.floor(Math.random() * 1000000)}`, scriptVersion: VERSION,
+    startedAt, family, phase: "init", outcome: "pending", errorType: "none" })!
+  const write = () => {
+    try {
+      // Storage has no atomic merge: concurrent extension instances can lose one another's writes.
+      const previous = readWidgetDiagnostics().filter(x => x.id !== entry.id && !x.legacy)
+      Storage.set(DIAGNOSTIC_HISTORY, [cleanWidgetDiagnostic(entry), ...previous].slice(0, 10))
+    } catch { /* diagnostics never block execution */ }
+  }
+  write()
+  return {
+    stage(phase: WidgetDiagnostic["phase"]) { entry.phase = phase; entry.elapsedMs = Date.now() - startedAt; write() },
+    result(result: WidgetDiagnostic) { entry.phase = result.phase; entry.elapsedMs = result.elapsedMs; entry.outcome = result.outcome; entry.errorType = result.errorType; write() },
+    beforePresent() { entry.beforePresent = true; entry.elapsedMs = Date.now() - startedAt; write() },
+    returned() { entry.returned = true; entry.elapsedMs = Date.now() - startedAt; write() },
+  }
+}
+export function widgetDiagnosticTime(value: number | null): string {
+  if (value == null) return "时间未记录（旧记录）"
+  try { return new Date(value + 8 * 3600000).toISOString().slice(0, 19).replace("T", " ") + " 北京时间" }
+  catch { return "时间不可用" }
 }
 
 const widgetObject = (x: any) => x != null && typeof x === "object" && !Array.isArray(x)

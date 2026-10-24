@@ -1,6 +1,6 @@
 import { antigravityBrandImage } from "./api"
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { visibleAccounts, WidgetRead, WidgetReadStopped, WidgetCacheInvalid, WidgetDiagnostic, recordWidgetDiagnostic, widgetCacheSnapshot, validateWidgetData, getSource, accountScope, loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
+import { visibleAccounts, beginWidgetDiagnostic, WidgetRead, WidgetReadStopped, WidgetCacheInvalid, WidgetDiagnostic, recordWidgetDiagnostic, widgetCacheSnapshot, validateWidgetData, getSource, accountScope, loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
 import { RefreshUsageIntent, widgetIntentReady } from "./app_intents"
 
@@ -593,21 +593,25 @@ function prepareWidget(data: UsageData, source: ReturnType<typeof getSource>, sc
 }
 async function run() {
   const started = Date.now()
+  // Earliest executable point after module imports; a missing entry is not proof of no launch.
+  let family: unknown
+  try { family = Widget.family } catch {}
+  const diagnostic = beginWidgetDiagnostic(family, started)
   let phase: WidgetDiagnostic["phase"] = "init", errorType: WidgetDiagnostic["errorType"] = "none"
   let outcome: WidgetDiagnostic["outcome"] = "text", minutes = 15, node: VirtualNode
   let read: WidgetRead | undefined, timer: ReturnType<typeof setTimeout> | undefined, timedOut = false
   try {
     if (widgetIntentReady === false) { errorType = "intent_init"; throw new Error() }
-    phase = "settings"; minutes = getRefreshMinutes()
-    phase = "cache"; const initial = widgetCacheSnapshot()
+    phase = "settings"; diagnostic.stage(phase); minutes = getRefreshMinutes()
+    phase = "cache"; diagnostic.stage(phase); const initial = widgetCacheSnapshot()
     let data = initial.data, error: string | null = null
     if (!initial.local) {
-      phase = "load"; read = new WidgetRead()
+      phase = "load"; diagnostic.stage(phase); read = new WidgetRead()
       const expiry = new Promise<never>((_, reject) => { timer = setTimeout(() => { timedOut = true; read!.cancel(); reject(new WidgetReadStopped()) }, WIDGET_LOAD_BUDGET_MS) })
       const result = await Promise.race([Promise.resolve().then(() => loadUsage(read)).then(result => { read!.check(); return result }), expiry])
       data = result.data; error = result.error; outcome = result.stale ? "cache" : "fresh"
     } else outcome = "cache"
-    phase = "prepare"
+    phase = "prepare"; diagnostic.stage(phase)
     node = data ? <Root data={prepareWidget(data, initial.source, initial.scope)} error={error} prepared /> : <Text>{accountEmptyText(error)}</Text>
   } catch (e) {
     if (errorType !== "intent_init") errorType = timedOut ? "timeout" : e instanceof WidgetCacheInvalid ? "cache_invalid" : e instanceof WidgetReadStopped ? "read_stopped" : "runtime"
@@ -628,10 +632,13 @@ async function run() {
     // Also stop other Promise.all branches after an early failure. No app/detail global state is changed.
     read?.cancel()
   }
-  recordWidgetDiagnostic({ version: 1, phase, elapsedMs: Date.now() - started, outcome, errorType })
-  // Widget.present is void and destroys the host context. Exactly one attempt, no post-present work.
-  try { Widget.present(node!, { reloadPolicy: { policy: "after", date: new Date(Date.now() + minutes * 60000) } }) }
-  catch { recordWidgetDiagnostic({ version: 1, phase: "present", elapsedMs: Date.now() - started, outcome: "present_error", errorType: "present_error" }) }
+  const result: WidgetDiagnostic = { version: 1, phase, elapsedMs: Date.now() - started, outcome, errorType }
+  recordWidgetDiagnostic(result)
+  diagnostic.result(result)
+  diagnostic.beforePresent()
+  // One void present attempt. The host may destroy context immediately; missing return proves nothing.
+  try { Widget.present(node!, { reloadPolicy: { policy: "after", date: new Date(Date.now() + minutes * 60000) } }); diagnostic.returned() }
+  catch { const failure: WidgetDiagnostic = { version: 1, phase: "present", elapsedMs: Date.now() - started, outcome: "present_error", errorType: "present_error" }; recordWidgetDiagnostic(failure); diagnostic.result(failure) }
 }
 
 run()
