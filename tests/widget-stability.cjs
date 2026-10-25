@@ -9,7 +9,7 @@ const cacheKey=s=>s==='official'?'ai_usage_official_cache_v1':s==='sub2api'?'ai_
 const localKey=s=>s==='official'?'ai_usage_antigravity_local_widget_until_v1':`ai_usage_local_widget_until_${s}_v1`
 function host({source='sub2api',cached,local=false,registerFail=false}={}){
  let now=1800000000000,next=1,throwGet='',throwKey='',writeFailure=false,presentFailure=false,decodeFailure=false,handler,renderInside=true
- const store=new Map([['ai_usage_source_v1',source]]),kc=new Map(),modules={},timers=new Map(),calls=[],presents=[],writes=[],keyReads=[]
+ const store=new Map([['ai_usage_source_v1',source]]),kc=new Map(),modules={},timers=new Map(),calls=[],presents=[],writes=[],keyReads=[],storeReads=[]
  if(cached!==undefined)store.set(cacheKey(source),clone(cached))
  if(local)store.set(localKey(source),now+60000)
  const response=(status,b={})=>({status,headers:{get:()=>null},json:async()=>b})
@@ -42,7 +42,7 @@ function host({source='sub2api',cached,local=false,registerFail=false}={}){
  class Clock extends Date{constructor(...a){super(...(a.length?a:[now]))}static now(){return now}}
  const context=vm.createContext({console,Date:Clock,Map,Set,WeakMap,Math,Promise,Intl,
   setTimeout:(fn,ms)=>{const id=next++;timers.set(id,{fn,at:now+ms,ms});return id},clearTimeout:id=>timers.delete(id),
-  Storage:{get:k=>{if(throwGet==='*'||throwGet===k)throw Error('SECRET-Storage /?key=SECRET');return store.has(k)?clone(store.get(k)):null},set:(k,v)=>{if(writeFailure&&(k===DIAG||k==='ai_usage_widget_diagnostic_history_v1'))throw Error('SECRET-diagnostic-write');store.set(k,clone(v));writes.push({kind:'store',key:k});return true},remove:k=>{store.delete(k);writes.push({kind:'remove',key:k})}},
+  Storage:{get:k=>{storeReads.push(k);if(throwGet==='*'||throwGet===k)throw Error('SECRET-Storage /?key=SECRET');return store.has(k)?clone(store.get(k)):null},set:(k,v)=>{if(writeFailure&&(k===DIAG||k==='ai_usage_widget_diagnostic_history_v1'))throw Error('SECRET-diagnostic-write');store.set(k,clone(v));writes.push({kind:'store',key:k});return true},remove:k=>{store.delete(k);writes.push({kind:'remove',key:k})}},
   Keychain:{get:k=>{keyReads.push(k);if(throwKey==='*'||throwKey===k)throw Error('SECRET-Keychain /?token=SECRET');return kc.get(k)||null},set:(k,v)=>{kc.set(k,v);writes.push({kind:'keychain',key:k});return true},remove:k=>{kc.delete(k);writes.push({kind:'keychain-remove',key:k})}},
   Data:{fromBase64String:s=>({toRawString:()=>Buffer.from(s,'base64').toString()})},UIImage:{fromBase64String:()=>decodeFailure?null:{image:'fixture'}},
   fetch:async(u,o={})=>{calls.push({u,o});return handler(u,o)}
@@ -51,7 +51,7 @@ function host({source='sub2api',cached,local=false,registerFail=false}={}){
  function expand(node){if(node==null||typeof node!=='object')return node;if(Array.isArray(node))return node.map(expand);if(typeof node.type==='function')return expand(node.type(node.props));if(node.type==='GeometryReader'&&typeof node.props.children==='function')return expand(node.props.children({size:scripting.Widget.displaySize}));return {type:node.type,props:Object.fromEntries(Object.entries(node.props||{}).map(([k,v])=>[k,typeof v==='function'?'[function]':expand(v)]))}}
  const api=load('api.ts'),widget=load('widget.tsx')
  async function tick(ms=widget.WIDGET_LOAD_BUDGET_MS){now+=ms;for(const [id,t]of [...timers])if(t.at<=now){timers.delete(id);t.fn()}await flush()}
- return {load,api,widget,store,kc,timers,calls,presents,writes,keyReads,response,seedOfficial,tick,run:()=>widget.run(),expand,scripting,handler:()=>handler,setHandler:f=>handler=f,
+ return {load,api,widget,store,kc,timers,calls,presents,writes,keyReads,storeReads,response,seedOfficial,tick,run:()=>widget.run(),expand,scripting,handler:()=>handler,setHandler:f=>handler=f,
   fault:(kind,key)=>{if(kind==='store')throwGet=key;if(kind==='key')throwKey=key;if(kind==='diagnostic')writeFailure=key;if(kind==='present')presentFailure=key;if(kind==='decode')decodeFailure=key;if(kind==='deferred')renderInside=!key},
   text:()=>JSON.stringify(presents.at(-1)?.tree),diagnostic:()=>store.get(DIAG)}
 }

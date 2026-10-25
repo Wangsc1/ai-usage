@@ -597,6 +597,21 @@ async function run() {
   let family: unknown
   try { family = Widget.family } catch {}
   const diagnostic = beginWidgetDiagnostic(family, started)
+  // Exact opt-in for this widget instance only. Static imports above still execute first.
+  if (Widget.parameter === "diag-text") {
+    const result: WidgetDiagnostic = { version: 1, phase: "text_control", elapsedMs: Date.now() - started, outcome: "text", errorType: "none" }
+    recordWidgetDiagnostic(result)
+    diagnostic.result(result)
+    diagnostic.beforePresent()
+    try {
+      Widget.present(<Text>AI Usage 纯文字对照</Text>, { reloadPolicy: { policy: "after", date: new Date(Date.now() + 15 * 60000) } })
+      diagnostic.returned() // Optional evidence only; host may destroy the context before this line.
+    } catch {
+      const failure: WidgetDiagnostic = { ...result, elapsedMs: Date.now() - started, outcome: "present_error", errorType: "present_error" }
+      recordWidgetDiagnostic(failure); diagnostic.result(failure)
+    }
+    return
+  }
   let phase: WidgetDiagnostic["phase"] = "init", errorType: WidgetDiagnostic["errorType"] = "none"
   let outcome: WidgetDiagnostic["outcome"] = "text", minutes = 15, node: VirtualNode
   let read: WidgetRead | undefined, timer: ReturnType<typeof setTimeout> | undefined, timedOut = false
