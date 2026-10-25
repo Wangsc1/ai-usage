@@ -127,8 +127,10 @@ function LargeSegBar({ remaining, muted = false }: { remaining: number | null; m
 }
 
 // ---------- 图标 / 名称 ----------
+// Set by run() on every widget execution; never shared across separate runs/instances.
+let iconFallbackOccurred = false
 // 图标路径来自 Simple Icons（CC0）
-function ProviderIcon({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
+function ProviderIconImage({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
   // SVG paths have explicit fills; changing only the parent's foregroundStyle cannot gray them.
   const graySvg = (path: string) => ({ light: iconSvg(path, SUB.light), dark: iconSvg(path, SUB.dark) })
   if (provider === "antigravity") return <Image image={antigravityBrandImage(muted)} renderingMode="original" resizable frame={{ width: size, height: size }} />
@@ -137,6 +139,17 @@ function ProviderIcon({ provider, size, muted = false }: { provider: string; siz
   if (provider === "claude") return <SVG code={muted ? graySvg(CLAUDE_PATH) : CLAUDE_SVG} resizable frame={{ width: size, height: size }} />
   if (provider === "openai") return <SVG code={muted ? graySvg(OPENAI_PATH) : OPENAI_SVG} resizable frame={{ width: size, height: size }} />
   return <Image systemName="sparkle" font={size * 0.85} foregroundStyle={muted ? SUB : FG} frame={{ width: size, height: size }} />
+}
+// Only catches synchronous build-time throws (e.g. brand image base64 decode failure). A native
+// renderer failure after a valid element is handed to the host is outside JS reach and not covered.
+function ProviderIcon(props: { provider: string; size: number; muted?: boolean }) {
+  try { return ProviderIconImage(props) }
+  catch {
+    iconFallbackOccurred = true
+    const letter = (providerName(props.provider)[0] || "?").toUpperCase()
+    return <Text font={props.size * 0.7} fontWeight="bold" foregroundStyle={props.muted ? SUB : FG}
+      frame={{ width: props.size, height: props.size, alignment: "center" as any }}>{letter}</Text>
+  }
 }
 
 const preparedNames = new WeakMap<Account, string>()
@@ -615,6 +628,7 @@ async function run() {
   let phase: WidgetDiagnostic["phase"] = "init", errorType: WidgetDiagnostic["errorType"] = "none"
   let outcome: WidgetDiagnostic["outcome"] = "text", minutes = 15, node: VirtualNode
   let read: WidgetRead | undefined, timer: ReturnType<typeof setTimeout> | undefined, timedOut = false
+  iconFallbackOccurred = false
   try {
     if (widgetIntentReady === false) { errorType = "intent_init"; throw new Error() }
     phase = "settings"; diagnostic.stage(phase); minutes = getRefreshMinutes()
@@ -652,7 +666,17 @@ async function run() {
   diagnostic.result(result)
   diagnostic.beforePresent()
   // One void present attempt. The host may destroy context immediately; missing return proves nothing.
-  try { Widget.present(node!, { reloadPolicy: { policy: "after", date: new Date(Date.now() + minutes * 60000) } }); diagnostic.returned() }
+  try {
+    Widget.present(node!, { reloadPolicy: { policy: "after", date: new Date(Date.now() + minutes * 60000) } })
+    diagnostic.returned()
+    // Root/AccountTitle/ProviderIcon are only actually called while present() walks the tree, so a
+    // per-account icon fallback can only be known after this line. Best-effort like returned() above:
+    // the host may already have destroyed the context, and this never overrides a worse failure.
+    if (iconFallbackOccurred && errorType === "none") {
+      const upgraded: WidgetDiagnostic = { ...result, errorType: "icon_fallback" }
+      recordWidgetDiagnostic(upgraded); diagnostic.result(upgraded)
+    }
+  }
   catch { const failure: WidgetDiagnostic = { version: 1, phase: "present", elapsedMs: Date.now() - started, outcome: "present_error", errorType: "present_error" }; recordWidgetDiagnostic(failure); diagnostic.result(failure) }
 }
 

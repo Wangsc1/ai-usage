@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.54"
+export const VERSION = "1.55"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
@@ -578,7 +578,7 @@ async function loadSub2APIQuota(read?: WidgetRead): Promise<LoadResult> {
 }
 // Validate only data required by widget renderers before any delayed JSX child runs.
 export class WidgetCacheInvalid extends Error {}
-export type WidgetDiagnostic = { version: 1; phase: "init" | "settings" | "cache" | "load" | "prepare" | "present" | "text_control"; elapsedMs: number; outcome: "fresh" | "cache" | "text" | "present_error"; errorType: "none" | "timeout" | "cache_invalid" | "read_stopped" | "runtime" | "intent_init" | "present_error" }
+export type WidgetDiagnostic = { version: 1; phase: "init" | "settings" | "cache" | "load" | "prepare" | "present" | "text_control"; elapsedMs: number; outcome: "fresh" | "cache" | "text" | "present_error"; errorType: "none" | "timeout" | "cache_invalid" | "read_stopped" | "runtime" | "intent_init" | "present_error" | "icon_fallback" }
 export function recordWidgetDiagnostic(entry: WidgetDiagnostic) {
   // One bounded overwrite, fixed fields/enums only. Never persist Error/name/message/URL/response.
   try { Storage.set("ai_usage_widget_diagnostic_v1", { version: 1, phase: diagnosticEnum(entry.phase, diagnosticPhases, "init"), elapsedMs: Number.isFinite(entry.elapsedMs) ? Math.max(0, Math.min(86400000, Math.round(entry.elapsedMs))) : 0, outcome: diagnosticEnum(entry.outcome, diagnosticOutcomes.slice(1), "text"), errorType: diagnosticEnum(entry.errorType, diagnosticErrors, "runtime") }) } catch { /* diagnostics cannot block a render */ }
@@ -590,7 +590,7 @@ const DIAGNOSTIC_HISTORY = "ai_usage_widget_diagnostic_history_v1"
 let widgetDiagnosticSequence = 0
 const diagnosticPhases = ["init", "settings", "cache", "load", "prepare", "present", "text_control"]
 const diagnosticOutcomes = ["pending", "fresh", "cache", "text", "present_error"]
-const diagnosticErrors = ["none", "timeout", "cache_invalid", "read_stopped", "runtime", "intent_init", "present_error"]
+const diagnosticErrors = ["none", "timeout", "cache_invalid", "read_stopped", "runtime", "intent_init", "present_error", "icon_fallback"]
 const diagnosticFamilies = ["systemSmall", "systemMedium", "systemLarge", "systemExtraLarge", "accessoryInline", "accessoryCircular", "accessoryRectangular"]
 export type WidgetExecutionDiagnostic = {
   id: string; scriptVersion: string; startedAt: number | null; family: string; phase: string;

@@ -126,9 +126,14 @@ async function main(){
  {
   const h=host({cached:data(),local:true});h.fault('present',true);await done(h);assert.equal(h.diagnostic().errorType,'present_error');assert.equal(h.presents.length,1,'no speculative second present')
  }
- // Deferred native/child rendering is outside the synchronous run catch: document, do not fake a guarantee.
+ // ProviderIcon's own try/catch degrades a base64 decode failure to a text initial even when the host
+ // walks the tree later (deferred render), independent of run()'s synchronous try. But a true native
+ // paint-time failure deep inside Image/SVG after a *valid* element is handed to the host is beyond any
+ // JS try and cannot be synthesized in this offline harness; it is explicitly not covered or claimed here.
  {
-  const a=account('antigravity:fixture','antigravity'),h=host({source:'official',cached:data([a]),local:true});h.fault('deferred',true);await done(h);h.fault('decode',true);assert.throws(()=>h.expand(h.presents[0].node),/图标解码失败/);assert.equal(h.diagnostic().errorType,'none')
+  const a=account('antigravity:fixture','antigravity'),h=host({source:'official',cached:data([a]),local:true});h.fault('deferred',true);await done(h);assert.equal(h.diagnostic().errorType,'none','icon fallback is unknown until the deferred tree is actually walked')
+  h.fault('decode',true);const tree=h.expand(h.presents[0].node)
+  assert.doesNotThrow(()=>JSON.stringify(tree));assert.equal(JSON.stringify(tree).includes('图标解码失败'),false,'ProviderIcon catches the decode failure instead of letting it escape')
  }
  await new Promise(r=>setImmediate(r));process.removeListener('unhandledRejection',onRejection);assert.deepEqual(unhandled,[])
  console.log('PASS production widget cold/warm normal; rejection/request-timeout/never-resolve/stuck statistics; safe credential-free cache, malformed data, Storage/Keychain/settings failures, intent-init failure; local selection/order/hidden/aliases/Antigravity original precision; bounded redacted diagnostics and failed writes')

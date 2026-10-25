@@ -27,7 +27,7 @@ async function main(){
   assert.ok(h.writes.every(x=>allowed.has(x.key)),'only diagnostics may be written')
   assert.equal(JSON.stringify([...h.store].filter(([k])=>!allowed.has(k))),previous,'source, cache, preferences unchanged')
   if(failure==='none'||failure==='intent-registration'){
-   const entry=h.api.readWidgetDiagnostics()[0];assert.equal(entry.phase,'text_control');assert.equal(entry.outcome,'text');assert.equal(entry.scriptVersion,'1.54');assert.equal(entry.family,family);assert.equal(entry.beforePresent,true);assert.equal(entry.returned,true);assert.equal(entry.errorType,'none')
+   const entry=h.api.readWidgetDiagnostics()[0];assert.equal(entry.phase,'text_control');assert.equal(entry.outcome,'text');assert.equal(entry.scriptVersion,'1.55');assert.equal(entry.family,family);assert.equal(entry.beforePresent,true);assert.equal(entry.returned,true);assert.equal(entry.errorType,'none')
   }
  }
  {

@@ -15,7 +15,7 @@ async function main(){
   let before;const original=h.scripting.Widget.present;h.scripting.Widget.present=(...args)=>{before=rows(h)[0];return original(...args)}
   await h.tick();await task
   const entry=rows(h)[0];assert.equal(rows(h).length,1,'all stages update one invocation');assert.equal(entry.id,id);assert.equal(entry.errorType,'timeout');assert.equal(entry.elapsedMs,15000)
-  assert.equal(before.beforePresent,true);assert.equal(before.returned,false,'pre-present evidence persisted before native call');assert.equal(entry.returned,true,'only records synchronous native return, not rendering success');assert.equal(entry.scriptVersion,'1.54');assert.equal(entry.family,'systemSmall')
+  assert.equal(before.beforePresent,true);assert.equal(before.returned,false,'pre-present evidence persisted before native call');assert.equal(entry.returned,true,'only records synchronous native return, not rendering success');assert.equal(entry.scriptVersion,'1.55');assert.equal(entry.family,'systemSmall')
  }
  {
   const h=host({cached:data(),local:true});const snapshots=[];const start=h.api.beginWidgetDiagnostic('systemMedium',Date.now());snapshots.push(rows(h)[0]);start.stage('cache');snapshots.push(rows(h)[0]);start.stage('prepare');snapshots.push(rows(h)[0])
