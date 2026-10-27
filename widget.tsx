@@ -1,8 +1,8 @@
 import { antigravityBrandImage } from "./api"
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { visibleAccounts, beginWidgetDiagnostic, WidgetRead, WidgetReadStopped, WidgetCacheInvalid, WidgetDiagnostic, recordWidgetDiagnostic, widgetCacheSnapshot, validateWidgetData, getSource, accountScope, loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
+import { visibleAccounts, cachedLocalWidgetProjection, loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
-import { RefreshUsageIntent, widgetIntentReady } from "./app_intents"
+import { RefreshUsageIntent } from "./app_intents"
 
 // ---------- 配色（浅色 / 深色自动切换） ----------
 type DC = { light: string; dark: string }
@@ -127,10 +127,8 @@ function LargeSegBar({ remaining, muted = false }: { remaining: number | null; m
 }
 
 // ---------- 图标 / 名称 ----------
-// Set by run() on every widget execution; never shared across separate runs/instances.
-let iconFallbackOccurred = false
 // 图标路径来自 Simple Icons（CC0）
-function ProviderIconImage({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
+function ProviderIcon({ provider, size, muted = false }: { provider: string; size: number; muted?: boolean }) {
   // SVG paths have explicit fills; changing only the parent's foregroundStyle cannot gray them.
   const graySvg = (path: string) => ({ light: iconSvg(path, SUB.light), dark: iconSvg(path, SUB.dark) })
   if (provider === "antigravity") return <Image image={antigravityBrandImage(muted)} renderingMode="original" resizable frame={{ width: size, height: size }} />
@@ -140,22 +138,9 @@ function ProviderIconImage({ provider, size, muted = false }: { provider: string
   if (provider === "openai") return <SVG code={muted ? graySvg(OPENAI_PATH) : OPENAI_SVG} resizable frame={{ width: size, height: size }} />
   return <Image systemName="sparkle" font={size * 0.85} foregroundStyle={muted ? SUB : FG} frame={{ width: size, height: size }} />
 }
-// Only catches synchronous build-time throws (e.g. brand image base64 decode failure). A native
-// renderer failure after a valid element is handed to the host is outside JS reach and not covered.
-function ProviderIcon(props: { provider: string; size: number; muted?: boolean }) {
-  try { return ProviderIconImage(props) }
-  catch {
-    iconFallbackOccurred = true
-    const letter = (providerName(props.provider)[0] || "?").toUpperCase()
-    return <Text font={props.size * 0.7} fontWeight="bold" foregroundStyle={props.muted ? SUB : FG}
-      frame={{ width: props.size, height: props.size, alignment: "center" as any }}>{letter}</Text>
-  }
-}
 
-const preparedNames = new WeakMap<Account, string>()
-const preparedSelections = new WeakMap<UsageData, Account[]>()
 function shortName(acc: Account) {
-  return (preparedNames.has(acc) ? preparedNames.get(acc) : getWidgetName(acc.id)) || acc.name.replace(/@.*$/, "")
+  return getWidgetName(acc.id) || acc.name.replace(/@.*$/, "")
 }
 
 function providerName(p: string) {
@@ -545,8 +530,8 @@ function AccessoryInline({ acc }: { acc: Account }) {
   if (acc.provider === "deepseek") return <Text lineLimit={1}>{`DeepSeek ${acc.balance?.money.map(m => `账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`).join(" · ") || "余额未提供"}${acc.balance?.available === false ? " 不可用" : ""}${acc.balance?.error ? " 读取失败" : ""}`}</Text>
   return <Text lineLimit={1} foregroundStyle={isQuotaExhausted(acc) ? SUB : undefined}>{`${providerName(acc.provider)} 5h ${fmtPct(acc.fiveHour.remainingPercent)} · 周 ${fmtPct(acc.sevenDay.remainingPercent)}`}</Text>
 }
-function AccessoryRoot({ data, error, family, prepared = false }: { data: UsageData | null; error: string | null; family: string; prepared?: boolean }) {
-  const acc = data ? (prepared ? preparedSelections.get(data) ?? [] : widgetAccounts(data.accounts, Widget.parameter ?? ""))[0] : undefined
+function AccessoryRoot({ data, error, family }: { data: UsageData | null; error: string | null; family: string }) {
+  const acc = data ? widgetAccounts(data.accounts, Widget.parameter ?? "")[0] : undefined
   if (!acc) return <Text font={11} lineLimit={2} multilineTextAlignment="center">
     {!data ? accountEmptyText(error) : data.accounts.length ? "请检查小组件参数" : "账号未配置"}
   </Text>
@@ -555,15 +540,15 @@ function AccessoryRoot({ data, error, family, prepared = false }: { data: UsageD
   return <AccessoryRectangular acc={acc} />
 }
 
-function Root({ data, error, prepared = false }: { data: UsageData | null; error: string | null; prepared?: boolean }) {
-  if (data && !prepared) data = { ...data, accounts: visibleAccounts(data.accounts) }
-  if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} prepared={prepared} />
+function Root({ data, error }: { data: UsageData | null; error: string | null }) {
+  if (data) data = { ...data, accounts: visibleAccounts(data.accounts) }
+  if (isAccessory(String(Widget.family ?? ""))) return <AccessoryRoot data={data} error={error} family={String(Widget.family)} />
   let body: VirtualNode
   let largeCredits = false
   if (!data) body = <Message text={accountEmptyText(error)} />
   else if (data.accounts.length === 0) body = <Message text="账号未配置" />
   else {
-    const selected = prepared ? preparedSelections.get(data) ?? [] : widgetAccounts(data.accounts, Widget.parameter ?? "")
+    const selected = widgetAccounts(data.accounts, Widget.parameter ?? "")
     const sorted = { ...data, accounts: selected }
     const f = Widget.family
     largeCredits = (f === "systemLarge" || f === "systemExtraLarge") && selected.slice(0, 4).some(acc => acc.provider === "workbuddy")
@@ -590,94 +575,11 @@ function Root({ data, error, prepared = false }: { data: UsageData | null; error
   </ZStack>
 }
 
-// An application budget, not an asserted iOS execution limit. Leave time for cache + render.
-export const WIDGET_LOAD_BUDGET_MS = 15000
-function prepareWidget(data: UsageData, source: ReturnType<typeof getSource>, scope: number): UsageData {
-  if (!validateWidgetData(data)) throw new WidgetCacheInvalid()
-  const accounts = visibleAccounts(data.accounts, source).map(account => {
-    const copy = { ...account }, name = getWidgetName(account.id, source)
-    if (typeof name !== "string") throw new WidgetCacheInvalid()
-    preparedNames.set(copy, name); return copy
-  })
-  if (getSource() !== source || accountScope(source) !== scope) throw new WidgetReadStopped()
-  const prepared = { ...data, accounts }
-  preparedSelections.set(prepared, widgetAccounts(accounts, Widget.parameter ?? ""))
-  return prepared
-}
 async function run() {
-  const started = Date.now()
-  // Earliest executable point after module imports; a missing entry is not proof of no launch.
-  let family: unknown
-  try { family = Widget.family } catch {}
-  const diagnostic = beginWidgetDiagnostic(family, started)
-  // Exact opt-in for this widget instance only. Static imports above still execute first.
-  if (Widget.parameter === "diag-text") {
-    const result: WidgetDiagnostic = { version: 1, phase: "text_control", elapsedMs: Date.now() - started, outcome: "text", errorType: "none" }
-    recordWidgetDiagnostic(result)
-    diagnostic.result(result)
-    diagnostic.beforePresent()
-    try {
-      Widget.present(<Text>AI Usage 纯文字对照</Text>, { reloadPolicy: { policy: "after", date: new Date(Date.now() + 15 * 60000) } })
-      diagnostic.returned() // Optional evidence only; host may destroy the context before this line.
-    } catch {
-      const failure: WidgetDiagnostic = { ...result, elapsedMs: Date.now() - started, outcome: "present_error", errorType: "present_error" }
-      recordWidgetDiagnostic(failure); diagnostic.result(failure)
-    }
-    return
-  }
-  let phase: WidgetDiagnostic["phase"] = "init", errorType: WidgetDiagnostic["errorType"] = "none"
-  let outcome: WidgetDiagnostic["outcome"] = "text", minutes = 15, node: VirtualNode
-  let read: WidgetRead | undefined, timer: ReturnType<typeof setTimeout> | undefined, timedOut = false
-  iconFallbackOccurred = false
-  try {
-    if (widgetIntentReady === false) { errorType = "intent_init"; throw new Error() }
-    phase = "settings"; diagnostic.stage(phase); minutes = getRefreshMinutes()
-    phase = "cache"; diagnostic.stage(phase); const initial = widgetCacheSnapshot()
-    let data = initial.data, error: string | null = null
-    if (!initial.local) {
-      phase = "load"; diagnostic.stage(phase); read = new WidgetRead()
-      const expiry = new Promise<never>((_, reject) => { timer = setTimeout(() => { timedOut = true; read!.cancel(); reject(new WidgetReadStopped()) }, WIDGET_LOAD_BUDGET_MS) })
-      const result = await Promise.race([Promise.resolve().then(() => loadUsage(read)).then(result => { read!.check(); return result }), expiry])
-      data = result.data; error = result.error; outcome = result.stale ? "cache" : "fresh"
-    } else outcome = "cache"
-    phase = "prepare"; diagnostic.stage(phase)
-    node = data ? <Root data={prepareWidget(data, initial.source, initial.scope)} error={error} prepared /> : <Text>{accountEmptyText(error)}</Text>
-  } catch (e) {
-    if (errorType !== "intent_init") errorType = timedOut ? "timeout" : e instanceof WidgetCacheInvalid ? "cache_invalid" : e instanceof WidgetReadStopped ? "read_stopped" : "runtime"
-    read?.cancel()
-    // Never reuse the initial source/cache: source/config/preferences may have changed while waiting.
-    try {
-      if (errorType === "cache_invalid" || errorType === "intent_init") throw new WidgetCacheInvalid()
-      const fallback = widgetCacheSnapshot()
-      if (!fallback.data) throw new WidgetCacheInvalid()
-      node = <Root data={prepareWidget(fallback.data, fallback.source, fallback.scope)} error={null} prepared />
-      outcome = "cache"
-    } catch {
-      node = <Text>{errorType === "timeout" ? "读取超时，暂无可用缓存，请在脚本中刷新" : "小组件数据暂不可用，请在脚本中检查并刷新"}</Text>
-      outcome = "text"
-    }
-  } finally {
-    if (timer != null) clearTimeout(timer)
-    // Also stop other Promise.all branches after an early failure. No app/detail global state is changed.
-    read?.cancel()
-  }
-  const result: WidgetDiagnostic = { version: 1, phase, elapsedMs: Date.now() - started, outcome, errorType }
-  recordWidgetDiagnostic(result)
-  diagnostic.result(result)
-  diagnostic.beforePresent()
-  // One void present attempt. The host may destroy context immediately; missing return proves nothing.
-  try {
-    Widget.present(node!, { reloadPolicy: { policy: "after", date: new Date(Date.now() + minutes * 60000) } })
-    diagnostic.returned()
-    // Root/AccountTitle/ProviderIcon are only actually called while present() walks the tree, so a
-    // per-account icon fallback can only be known after this line. Best-effort like returned() above:
-    // the host may already have destroyed the context, and this never overrides a worse failure.
-    if (iconFallbackOccurred && errorType === "none") {
-      const upgraded: WidgetDiagnostic = { ...result, errorType: "icon_fallback" }
-      recordWidgetDiagnostic(upgraded); diagnostic.result(upgraded)
-    }
-  }
-  catch { const failure: WidgetDiagnostic = { version: 1, phase: "present", elapsedMs: Date.now() - started, outcome: "present_error", errorType: "present_error" }; recordWidgetDiagnostic(failure); diagnostic.result(failure) }
+  const r = cachedLocalWidgetProjection() ?? await loadUsage()
+  Widget.present(<Root data={r.data} error={r.error} />, {
+    reloadPolicy: { policy: "after", date: new Date(Date.now() + getRefreshMinutes() * 60 * 1000) },
+  })
 }
 
 run()

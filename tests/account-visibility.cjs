@@ -119,8 +119,7 @@ async function main(){
  for(const source of ['official','parrot','sub2api']){
   seed(source,2);native=false;delete modules['index.tsx'];app=load('index.tsx');localReloads()
   const tree=render(),links=tree.filter(n=>n?.type==='NavigationLink')
-  assert.equal(links.length,4,'two account details, fallback sort and local diagnostic page')
-  assert.equal(links.filter(n=>n.props.destination.type.name==='WidgetDiagnosticsPage').length,1)
+  assert.equal(links.length,3,'two account details plus fallback sort')
   assert.equal(links.filter(n=>n.props.destination.type===app.WidgetNamePage).length,2)
   assert.equal(links.filter(n=>n.props.destination.type===app.AccountOrderPage).length,1)
   assert.equal(tree.filter(n=>n?.type==='NavigationStack').length,1,'children inherit the root stack')

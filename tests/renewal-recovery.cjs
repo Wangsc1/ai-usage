@@ -29,7 +29,7 @@ function runtime(provider) {
     },
   })
   // Test hooks expose existing private functions; no production exports or protocol substitutes.
-  const source = fs.readFileSync(path.join(__dirname, '../api.ts'), 'utf8').replace('async function refresh(item: Credential, force = false, read?: WidgetRead)', 'export async function refresh(item: Credential, force = false, read?: WidgetRead)') + '\nexport { refreshToken, saveOfficialCredential, ClaudeOAuth }'
+  const source = fs.readFileSync(path.join(__dirname, '../api.ts'), 'utf8').replace('async function refresh(item: Credential, force = false)', 'export async function refresh(item: Credential, force = false)') + '\nexport { refreshToken, saveOfficialCredential, ClaudeOAuth }'
   const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS }, reportDiagnostics: true })
   assert.equal(compiled.diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error).length, 0)
   const m = { exports: {} }; vm.runInContext(`(function(exports,module){${compiled.outputText}\n})`, context)(m.exports, m)

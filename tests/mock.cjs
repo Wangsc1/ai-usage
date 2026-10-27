@@ -845,7 +845,7 @@ async function main() {
   let authUI,before
   // Documented-shape WebViewController: each attempt has its own non-persistent store and finally disposal.
   const browserTimers=new Map();let timerId=0
-  context.setTimeout=(fn,ms)=>{if(ms===20000||ms===15000){const id=++timerId;browserTimers.set(id,fn);return id}now+=ms;Promise.resolve().then(fn);return 0}
+  context.setTimeout=(fn,ms)=>{if(ms===20000){const id=++timerId;browserTimers.set(id,fn);return id}now+=ms;Promise.resolve().then(fn);return 0}
   context.clearTimeout=id=>browserTimers.delete(id)
   const instances=[];let presentBrowser=async()=>{},loadBrowser=async()=>true
   context.WebViewController=class {

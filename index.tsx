@@ -1,4 +1,3 @@
-import { WidgetDiagnosticsPage } from "./widget_diagnostics"
 import { refreshAccount, requestLocalWidgetProjection, accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
@@ -710,7 +709,6 @@ function SettingsView() {
           {REFRESH_OPTIONS.map(m => <Text tag={String(m)}>{m}分钟</Text>)}
         </Picker>
         <Button title="预览组件" action={() => Widget.preview({ family: "systemSmall" })} />
-        <NavigationLink destination={<WidgetDiagnosticsPage />}><Text>组件诊断</Text></NavigationLink>
       </Section>
 
 

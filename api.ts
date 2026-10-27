@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.55"
+export const VERSION = "1.56"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
@@ -11,43 +11,6 @@ function changeDetailIdentity(id: string) { detailIdentityRevisions.set(id, (det
 export function saveSource(source: DataSource) {
   if (source !== getSource()) { officialRenewalScope++; pendingCodexRenewals.clear(); ClaudeOAuth.clearRenewalCandidates() }
   Storage.set("ai_usage_source_v1", source)
-}
-
-// Optional, invocation-local read lease. App/intent/detail loads do not use a widget deadline.
-export class WidgetReadStopped extends Error {}
-export class WidgetRead {
-  readonly source = getSource()
-  private revision = officialRenewalScope
-  private parrotScope = accountScope("parrot")
-  private subScope = accountScope("sub2api")
-  private statistics = getStatisticsSource()
-  readonly codexFlights = new Map<string, Promise<any>>()
-  readonly claudeFlights = new Map<string, Promise<any>>()
-  readonly wbFlights = new Map<string, Promise<any>>()
-  readonly agFlights = new Map<string, Promise<any>>()
-  session?: Promise<string>
-  private stopped = false
-  private wake!: () => void
-  private cancellation = new Promise<void>(resolve => { this.wake = resolve })
-  check() {
-    if (this.stopped || this.revision !== officialRenewalScope || getSource() !== this.source || accountScope("parrot") !== this.parrotScope || accountScope("sub2api") !== this.subScope || getStatisticsSource() !== this.statistics) throw new WidgetReadStopped()
-  }
-  cancel() { this.stopped = true; this.wake() }
-  async wait<T>(job: Promise<T>): Promise<T> {
-    this.check()
-    const result = await Promise.race([job, this.cancellation.then(() => { throw new WidgetReadStopped() })])
-    this.check(); return result
-  }
-}
-async function readFetch(read: WidgetRead | undefined, url: string, options: any) {
-  read?.check()
-  if (!read) return fetch(url, options)
-  const response = await read.wait(fetch(url, options))
-  // Body parsing may also wait; never let a delayed body resume a cancelled read's writes.
-  return new Proxy(response, { get(target, key) {
-    if (key === "json") return () => { read.check(); return read.wait(target.json()) }
-    const value = target[key]; return typeof value === "function" ? value.bind(target) : value
-  } })
 }
 
 // Statistics selection is independent of account/quota source. Existing installs default to Parrot.
@@ -263,15 +226,14 @@ class HttpError extends Error {
   }
 }
 
-async function loginRequest(baseUrl: string, managementKey: string, scope: number, read?: WidgetRead): Promise<string> {
-  const resp = await readFetch(read, `${baseUrl}/api/management/v1/auth/sessions`, {
+async function loginRequest(baseUrl: string, managementKey: string, scope: number): Promise<string> {
+  const resp = await fetch(`${baseUrl}/api/management/v1/auth/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ grantType: "managementKey", managementKey }),
     timeout: 15,
   })
   const body = await resp.json().catch(() => null)
-  read?.check()
   if (resp.status !== 201 || !body?.data?.credential) {
     throw new HttpError(resp.status, body?.error?.code ?? "LOGIN_FAILED")
   }
@@ -282,9 +244,7 @@ async function loginRequest(baseUrl: string, managementKey: string, scope: numbe
 }
 
 let parrotLogin: { scope: number; url: string; key: string; promise: Promise<string> } | null = null
-function login(baseUrl: string, managementKey: string, read?: WidgetRead): Promise<string> {
-  read?.check()
-  if (read) return read.session ?? (read.session = loginRequest(baseUrl, managementKey, accountScope("parrot"), read))
+function login(baseUrl: string, managementKey: string): Promise<string> {
   const scope = accountScope("parrot")
   if (parrotLogin?.scope === scope && parrotLogin.url === baseUrl && parrotLogin.key === managementKey) return parrotLogin.promise
   const promise = loginRequest(baseUrl, managementKey, scope)
@@ -293,13 +253,12 @@ function login(baseUrl: string, managementKey: string, read?: WidgetRead): Promi
   return promise
 }
 
-async function apiGet(baseUrl: string, path: string, cred: string, read?: WidgetRead): Promise<any> {
-  const resp = await readFetch(read, `${baseUrl}/api/management/v1${path}`, {
+async function apiGet(baseUrl: string, path: string, cred: string): Promise<any> {
+  const resp = await fetch(`${baseUrl}/api/management/v1${path}`, {
     headers: { Authorization: `Bearer ${cred}` },
     timeout: 15,
   })
   const body = await resp.json().catch(() => null)
-  read?.check()
   if (resp.status !== 200) {
     throw new HttpError(resp.status, body?.error?.code ?? "REQUEST_FAILED")
   }
@@ -341,18 +300,18 @@ function toWindow(list: any[], name: string): QuotaWindow {
   }
 }
 
-async function fetchAll(baseUrl: string, cred: string, read?: WidgetRead): Promise<UsageData> {
-  const accList = await apiGet(baseUrl, "/oauth/accounts?pageSize=50", cred, read)
+async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
+  const accList = await apiGet(baseUrl, "/oauth/accounts?pageSize=50", cred)
   const all = [...(accList?.items ?? [])]
   for (let page = 2, pageLength = all.length; pageLength === 50; page++) {
-    const next = await apiGet(baseUrl, `/oauth/accounts?pageSize=50&page=${page}`, cred, read)
+    const next = await apiGet(baseUrl, `/oauth/accounts?pageSize=50&page=${page}`, cred)
     all.push(...(next?.items ?? []))
     pageLength = next?.items?.length ?? 0
   }
   const accounts: Account[] = await Promise.all(
     all.map(async (a: any) => {
       let d: any
-      try { d = await apiGet(baseUrl, `/oauth/accounts/${encodeURIComponent(a.accountId)}`, cred, read) }
+      try { d = await apiGet(baseUrl, `/oauth/accounts/${encodeURIComponent(a.accountId)}`, cred) }
       catch (e) {
         if (a.provider !== "workbuddy" || e instanceof HttpError && e.status === 401) throw e
         const old = Storage.get<UsageData>(KEY_CACHE)?.accounts.find(x => x.id === a.accountId)
@@ -374,7 +333,7 @@ async function fetchAll(baseUrl: string, cred: string, read?: WidgetRead): Promi
     })
   )
   // Claude 在前，其余按名称
-  const ds = await dsParrot(baseUrl, cred, (Storage.get<UsageData>(KEY_CACHE)?.accounts ?? []), read)
+  const ds = await dsParrot(baseUrl, cred, (Storage.get<UsageData>(KEY_CACHE)?.accounts ?? []))
   accounts.push(...ds.accounts)
   accounts.sort((x, y) =>
     x.provider === y.provider ? x.name.localeCompare(y.name) : x.provider === "claude" ? -1 : y.provider === "claude" ? 1 : x.provider.localeCompare(y.provider)
@@ -393,18 +352,18 @@ function statsOnly(data: ParrotStats): ParrotStats {
   return { today: data.today, month: data.month, todayByFamily: data.todayByFamily,
     monthByFamily: data.monthByFamily, fetchedAt: data.fetchedAt }
 }
-async function loadParrotStats(read?: WidgetRead): Promise<{ data: ParrotStats | null; error: string | null }> {
+async function loadParrotStats(): Promise<{ data: ParrotStats | null; error: string | null }> {
   const scope = accountScope("parrot")
   const { baseUrl, managementKey } = getConfig()
   // Older Parrot full cache can seed statistics, but its accounts never enter the composed result.
   const cached = Storage.get<ParrotStats>(KEY_STATS) ?? Storage.get<UsageData>(KEY_CACHE)
   if (!baseUrl || !managementKey) return { data: null, error: "Parrot统计未配置" }
   try {
-    let cred = Keychain.get(KEY_SESSION) || await login(baseUrl, managementKey, read)
+    let cred = Keychain.get(KEY_SESSION) || await login(baseUrl, managementKey)
     const fetchStats = async () => {
       const [today, month] = await Promise.all([
-        apiGet(baseUrl, "/stats/summary?period=today", cred, read),
-        apiGet(baseUrl, "/stats/summary?period=month", cred, read),
+        apiGet(baseUrl, "/stats/summary?period=today", cred),
+        apiGet(baseUrl, "/stats/summary?period=month", cred),
       ])
       return parseStats(today, month)
     }
@@ -413,12 +372,12 @@ async function loadParrotStats(read?: WidgetRead): Promise<{ data: ParrotStats |
     catch (e) {
       if (!(e instanceof HttpError) || e.status !== 401 || accountScope("parrot") !== scope) throw e
       Keychain.remove(KEY_SESSION)
-      cred = await login(baseUrl, managementKey, read)
+      cred = await login(baseUrl, managementKey)
       data = await fetchStats()
     }
     const current = getConfig()
     if (accountScope("parrot") !== scope || current.baseUrl !== baseUrl || current.managementKey !== managementKey) return { data: null, error: "Parrot统计配置已改变" }
-    read?.check(); Storage.set(KEY_STATS, data)
+    Storage.set(KEY_STATS, data)
     return { data, error: null }
   } catch (e: any) {
     const current = getConfig(), same = accountScope("parrot") === scope && current.baseUrl === baseUrl && current.managementKey === managementKey
@@ -426,7 +385,7 @@ async function loadParrotStats(read?: WidgetRead): Promise<{ data: ParrotStats |
   }
 }
 
-async function loadParrotQuota(read?: WidgetRead): Promise<LoadResult> {
+async function loadParrotQuota(): Promise<LoadResult> {
   const scope = accountScope("parrot")
   const { baseUrl, managementKey } = getConfig()
   const rawCache = Storage.get<UsageData>(KEY_CACHE)
@@ -436,24 +395,23 @@ async function loadParrotQuota(read?: WidgetRead): Promise<LoadResult> {
   }
   try {
     let cred = Keychain.get(KEY_SESSION)
-    if (!cred) cred = await login(baseUrl, managementKey, read)
+    if (!cred) cred = await login(baseUrl, managementKey)
     let data: UsageData
     try {
-      data = await fetchAll(baseUrl, cred, read)
+      data = await fetchAll(baseUrl, cred)
     } catch (e) {
       // 会话过期 → 重新登录一次
       if (e instanceof HttpError && e.status === 401) {
         if (accountScope("parrot") !== scope) throw e
         Keychain.remove(KEY_SESSION)
-        cred = await login(baseUrl, managementKey, read)
-        data = await fetchAll(baseUrl, cred, read)
+        cred = await login(baseUrl, managementKey)
+        data = await fetchAll(baseUrl, cred)
       } else throw e
     }
     const current = getConfig()
     if (accountScope("parrot") !== scope || current.baseUrl !== baseUrl || current.managementKey !== managementKey) return { data: null, stale: false, error: "Parrot额度配置已改变" }
-    read?.check()
     data.accounts = syncAccountOrder(data.accounts, "parrot")
-    read?.check(); Storage.set(KEY_CACHE, data)
+    Storage.set(KEY_CACHE, data)
     return { data, stale: false, error: null }
   } catch (e: any) {
     const msg = e instanceof HttpError
@@ -473,12 +431,10 @@ function sub2Date(tz: string, at = Date.now()): string {
 function sameSub2Config(cfg: ReturnType<typeof getSub2APIConfig>) {
   const c = getSub2APIConfig(); return c.baseUrl === cfg.baseUrl && c.adminKey === cfg.adminKey && c.timezone === cfg.timezone
 }
-async function sub2Get(cfg: ReturnType<typeof getSub2APIConfig>, path: string, read?: WidgetRead): Promise<any> {
-  read?.check()
-  const res = await readFetch(read, `${cfg.baseUrl}/api/v1/admin${path}`, { headers: { "x-api-key": cfg.adminKey! }, timeout: 15 })
+async function sub2Get(cfg: ReturnType<typeof getSub2APIConfig>, path: string): Promise<any> {
+  const res = await fetch(`${cfg.baseUrl}/api/v1/admin${path}`, { headers: { "x-api-key": cfg.adminKey! }, timeout: 15 })
   if (res.status !== 200) throw new Error(`Sub2API HTTP ${res.status}，GET /api/v1/admin${path.split("?")[0]}`)
   const body = await res.json().catch(() => null)
-  read?.check()
   if (body?.code !== 0 || body.data == null) throw new Error(`Sub2API响应无效，GET /api/v1/admin${path.split("?")[0]}`)
   return body.data
 }
@@ -491,18 +447,18 @@ export function parseSub2APIStats(today: any, month: any): ParrotStats {
   }
   return { today: metric(today), month: metric(month), todayByFamily: {}, monthByFamily: {}, fetchedAt: Date.now() }
 }
-async function loadSub2APIStats(read?: WidgetRead): Promise<{ data: ParrotStats | null; error: string | null }> {
+async function loadSub2APIStats(): Promise<{ data: ParrotStats | null; error: string | null }> {
   const cfg = getSub2APIConfig(), cached = Storage.get<ParrotStats>(KEY_SUB_STATS)
   if (!cfg.baseUrl || !cfg.adminKey) return { data: null, error: "Sub2API统计未配置" }
   try {
     const end = sub2Date(cfg.timezone), first = end.slice(0, 8) + "01", tz = encodeURIComponent(cfg.timezone)
     // Explicit calendar month: upstream period=month is rolling one month, not this month.
     const path = (start: string) => `/usage/stats?start_date=${start}&end_date=${end}&timezone=${tz}`
-    const todayRead = sub2Get(cfg, path(end), read)
-    const [today, month] = await Promise.all([todayRead, first === end ? todayRead : sub2Get(cfg, path(first), read)])
+    const todayRead = sub2Get(cfg, path(end))
+    const [today, month] = await Promise.all([todayRead, first === end ? todayRead : sub2Get(cfg, path(first))])
     const data = parseSub2APIStats(today, month)
     if (!sameSub2Config(cfg)) return { data: null, error: "Sub2API统计配置已改变" }
-    read?.check(); Storage.set(KEY_SUB_STATS, data); return { data, error: null }
+    Storage.set(KEY_SUB_STATS, data); return { data, error: null }
   } catch (e: any) {
     return { data: sameSub2Config(cfg) && cached?.today && cached?.month ? statsOnly(cached) : null,
       error: typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API统计网络或解析失败" }
@@ -528,7 +484,7 @@ export function mapSub2APIAccount(row: any, usage: any, credits: any): Account {
     fiveHour: codex ? codexWindow(18000) : sub2Window(usage?.five_hour), sevenDay: codex ? codexWindow(604800) : sub2Window(usage?.seven_day),
     resetCredits: sub2Count(codex ? usage?.rate_limit_reset_credits?.available_count : credits?.available_count) }
 }
-async function loadSub2APIQuota(read?: WidgetRead): Promise<LoadResult> {
+async function loadSub2APIQuota(): Promise<LoadResult> {
   const scope = accountScope("sub2api")
   const cfg = getSub2APIConfig(), cached = Storage.get<UsageData>(KEY_SUB_CACHE)
   const fallback = cached ? { ...cached, accounts: sortAccounts(cached.accounts, "sub2api") } : null
@@ -536,7 +492,7 @@ async function loadSub2APIQuota(read?: WidgetRead): Promise<LoadResult> {
   try {
     const rows: any[] = [], seen = new Set<number>()
     for (let page = 1, pages = 1; page <= pages; page++) {
-      const result = await sub2Get(cfg, `/accounts?lite=true&page=${page}&page_size=100`, read)
+      const result = await sub2Get(cfg, `/accounts?lite=true&page=${page}&page_size=100`)
       if (!Array.isArray(result.items) || !Number.isSafeInteger(result.pages) || result.pages < page) throw new Error("Sub2API账号分页响应无效")
       pages = result.pages
       for (const row of result.items) {
@@ -550,14 +506,14 @@ async function loadSub2APIQuota(read?: WidgetRead): Promise<LoadResult> {
     // Bounded sequential reads avoid a per-account upstream request burst. List remains complete if any read fails.
     for (const row of rows) {
       const id = `sub2api:${row.id}`, old = cached?.accounts.find(a => a.id === id)
-      if (row.platform === "deepseek") { accounts.push(await dsSub2(cfg, row, old, read)); continue }
+      if (row.platform === "deepseek") { accounts.push(await dsSub2(cfg, row, old)); continue }
       let usage: any = null, credits: any = null, quotaFailed = false
-      try { usage = await sub2Get(cfg, row.platform === "openai" ? `/openai/accounts/${row.id}/quota` : `/accounts/${row.id}/usage`, read) }
+      try { usage = await sub2Get(cfg, row.platform === "openai" ? `/openai/accounts/${row.id}/quota` : `/accounts/${row.id}/usage`) }
       catch (e: any) { quotaFailed = true; errors.push(`${id}额度：${typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API网络或解析失败"}`) }
       if (row.platform === "anthropic" && row.type === "oauth") {
         if (cards[id] && Date.now() - cards[id].at < 3600000) { credits = { available_count: cards[id].count }; if (cards[id].error) errors.push(cards[id].error!) }
         else {
-          try { credits = await sub2Get(cfg, `/accounts/${row.id}/claude/reset-credits`, read); cards[id] = { count: sub2Count(credits?.available_count), at: Date.now() } }
+          try { credits = await sub2Get(cfg, `/accounts/${row.id}/claude/reset-credits`); cards[id] = { count: sub2Count(credits?.available_count), at: Date.now() } }
           catch (e: any) { const error = `${id}重置卡：${typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API网络或解析失败"}`; errors.push(error); cards[id] = { count: cards[id]?.count ?? null, at: Date.now(), error }; credits = { available_count: cards[id].count } }
         }
       }
@@ -567,119 +523,14 @@ async function loadSub2APIQuota(read?: WidgetRead): Promise<LoadResult> {
       accounts.push(account)
     }
     if (accountScope("sub2api") !== scope || !sameSub2Config(cfg)) return { data: null, stale: false, error: "Sub2API额度配置已改变" }
-    read?.check()
     const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: syncAccountOrder(accounts, "sub2api"), fetchedAt: errors.length && cached ? cached.fetchedAt : Date.now() }
-    read?.check(); Storage.set(KEY_SUB_CACHE, data); read?.check(); Storage.set(KEY_SUB_CARDS, cards)
+    Storage.set(KEY_SUB_CACHE, data); Storage.set(KEY_SUB_CARDS, cards)
     return { data, stale: errors.length > 0, error: errors.length ? errors.join("；") : null }
   } catch (e: any) {
     return { data: accountScope("sub2api") === scope && sameSub2Config(cfg) ? fallback : null, stale: accountScope("sub2api") === scope && sameSub2Config(cfg) && !!fallback,
       error: typeof e?.message === "string" && e.message.startsWith("Sub2API") ? e.message : "Sub2API账号列表网络或解析失败" }
   }
 }
-// Validate only data required by widget renderers before any delayed JSX child runs.
-export class WidgetCacheInvalid extends Error {}
-export type WidgetDiagnostic = { version: 1; phase: "init" | "settings" | "cache" | "load" | "prepare" | "present" | "text_control"; elapsedMs: number; outcome: "fresh" | "cache" | "text" | "present_error"; errorType: "none" | "timeout" | "cache_invalid" | "read_stopped" | "runtime" | "intent_init" | "present_error" | "icon_fallback" }
-export function recordWidgetDiagnostic(entry: WidgetDiagnostic) {
-  // One bounded overwrite, fixed fields/enums only. Never persist Error/name/message/URL/response.
-  try { Storage.set("ai_usage_widget_diagnostic_v1", { version: 1, phase: diagnosticEnum(entry.phase, diagnosticPhases, "init"), elapsedMs: Number.isFinite(entry.elapsedMs) ? Math.max(0, Math.min(86400000, Math.round(entry.elapsedMs))) : 0, outcome: diagnosticEnum(entry.outcome, diagnosticOutcomes.slice(1), "text"), errorType: diagnosticEnum(entry.errorType, diagnosticErrors, "runtime") }) } catch { /* diagnostics cannot block a render */ }
-}
-
-
-// Local evidence only: no account/source identifiers, exception strings or server content.
-const DIAGNOSTIC_HISTORY = "ai_usage_widget_diagnostic_history_v1"
-let widgetDiagnosticSequence = 0
-const diagnosticPhases = ["init", "settings", "cache", "load", "prepare", "present", "text_control"]
-const diagnosticOutcomes = ["pending", "fresh", "cache", "text", "present_error"]
-const diagnosticErrors = ["none", "timeout", "cache_invalid", "read_stopped", "runtime", "intent_init", "present_error", "icon_fallback"]
-const diagnosticFamilies = ["systemSmall", "systemMedium", "systemLarge", "systemExtraLarge", "accessoryInline", "accessoryCircular", "accessoryRectangular"]
-export type WidgetExecutionDiagnostic = {
-  id: string; scriptVersion: string; startedAt: number | null; family: string; phase: string;
-  outcome: string; errorType: string; elapsedMs: number; beforePresent: boolean; returned: boolean; legacy: boolean
-}
-const diagnosticEnum = (v: unknown, values: string[], fallback: string) => typeof v === "string" && values.includes(v) ? v : fallback
-function cleanWidgetDiagnostic(v: any): WidgetExecutionDiagnostic | null {
-  if (!v || typeof v !== "object" || typeof v.id !== "string" || !/^[0-9-]{1,40}$/.test(v.id)) return null
-  return { id: v.id, scriptVersion: typeof v.scriptVersion === "string" && /^1\.\d{1,3}$/.test(v.scriptVersion) ? v.scriptVersion : "未知",
-    startedAt: typeof v.startedAt === "number" && Number.isFinite(v.startedAt) && v.startedAt > 0 && v.startedAt < 8640000000000000 ? v.startedAt : null,
-    family: diagnosticEnum(v.family, diagnosticFamilies, "未知"), phase: diagnosticEnum(v.phase, diagnosticPhases, "init"),
-    outcome: diagnosticEnum(v.outcome, diagnosticOutcomes, "pending"), errorType: diagnosticEnum(v.errorType, diagnosticErrors, "runtime"),
-    elapsedMs: typeof v.elapsedMs === "number" && Number.isFinite(v.elapsedMs) ? Math.max(0, Math.min(86400000, Math.round(v.elapsedMs))) : 0,
-    beforePresent: v.beforePresent === true, returned: v.returned === true, legacy: v.legacy === true }
-}
-export function readWidgetDiagnostics(): WidgetExecutionDiagnostic[] {
-  try {
-    const raw = Storage.get<any>(DIAGNOSTIC_HISTORY)
-    if (Array.isArray(raw)) return raw.slice(0, 10).map(cleanWidgetDiagnostic).filter((x): x is WidgetExecutionDiagnostic => x != null)
-    const old = Storage.get<any>("ai_usage_widget_diagnostic_v1")
-    if (!old || old.version !== 1) return []
-    return [cleanWidgetDiagnostic({ ...old, id: "0", scriptVersion: "1.52", legacy: true })!]
-  } catch { return [] }
-}
-export function beginWidgetDiagnostic(family: unknown, startedAt: number) {
-  const entry = cleanWidgetDiagnostic({ id: `${startedAt}-${++widgetDiagnosticSequence}-${Math.floor(Math.random() * 1000000)}`, scriptVersion: VERSION,
-    startedAt, family, phase: "init", outcome: "pending", errorType: "none" })!
-  const write = () => {
-    try {
-      // Storage has no atomic merge: concurrent extension instances can lose one another's writes.
-      const previous = readWidgetDiagnostics().filter(x => x.id !== entry.id && !x.legacy)
-      Storage.set(DIAGNOSTIC_HISTORY, [cleanWidgetDiagnostic(entry), ...previous].slice(0, 10))
-    } catch { /* diagnostics never block execution */ }
-  }
-  write()
-  return {
-    stage(phase: WidgetDiagnostic["phase"]) { entry.phase = phase; entry.elapsedMs = Date.now() - startedAt; write() },
-    result(result: WidgetDiagnostic) { entry.phase = result.phase; entry.elapsedMs = result.elapsedMs; entry.outcome = result.outcome; entry.errorType = result.errorType; write() },
-    beforePresent() { entry.beforePresent = true; entry.elapsedMs = Date.now() - startedAt; write() },
-    returned() { entry.returned = true; entry.elapsedMs = Date.now() - startedAt; write() },
-  }
-}
-export function widgetDiagnosticTime(value: number | null): string {
-  if (value == null) return "时间未记录（旧记录）"
-  try { return new Date(value + 8 * 3600000).toISOString().slice(0, 19).replace("T", " ") + " 北京时间" }
-  catch { return "时间不可用" }
-}
-
-const widgetObject = (x: any) => x != null && typeof x === "object" && !Array.isArray(x)
-const widgetNumber = (x: any) => typeof x === "number" && Number.isFinite(x)
-const widgetNullableNumber = (x: any) => x == null || widgetNumber(x)
-const widgetNullableText = (x: any) => x == null || typeof x === "string"
-function widgetWindow(x: any): boolean { return widgetObject(x) && widgetNullableNumber(x.remainingPercent) && widgetNullableNumber(x.usedPercent) && widgetNullableText(x.resetsAt) }
-function widgetMetric(x: any): boolean {
-  return x == null || widgetObject(x) && ["requests", "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens", "costUsd"].every(k => widgetNumber(x[k]))
-}
-export function validateWidgetData(data: any): data is UsageData {
-  if (!widgetObject(data) || !Array.isArray(data.accounts) || !widgetNumber(data.fetchedAt) || !widgetMetric(data.today) || !widgetMetric(data.month)) return false
-  if (![data.todayByFamily, data.monthByFamily].every(f => widgetObject(f) && Object.values(f).every(widgetMetric))) return false
-  const ids = new Set<string>()
-  return data.accounts.every((a: any) => {
-    if (!widgetObject(a) || typeof a.id !== "string" || !a.id || ids.has(a.id) || typeof a.name !== "string" || typeof a.provider !== "string" || typeof a.enabled !== "boolean" || typeof a.available !== "boolean" || !widgetWindow(a.fiveHour) || !widgetWindow(a.sevenDay) || !widgetNullableNumber(a.resetCredits)) return false
-    ids.add(a.id)
-    if (![a.readError, a.balance?.error, a.credits?.error].every(widgetNullableText)) return false
-    if (a.balance != null && (!widgetObject(a.balance) || !Array.isArray(a.balance.money) || !a.balance.money.every((m: any) => widgetObject(m) && typeof m.currency === "string" && ["total", "granted", "toppedUp", "weekCost"].every(k => widgetNullableText(m[k]))))) return false
-    if (a.credits != null && (!widgetObject(a.credits) || !["remaining", "capacity", "used"].every(k => widgetNullableNumber(a.credits[k])) || !Array.isArray(a.credits.packages) || !a.credits.packages.every((p: any) => widgetObject(p) && typeof p.name === "string" && widgetNullableText(p.expiresAt) && widgetNullableText(p.cycleEnd) && ["remaining", "capacity", "used"].every(k => widgetNullableNumber(p[k]))))) return false
-    if (a.antigravity != null && (!widgetObject(a.antigravity) || !Array.isArray(a.antigravity.groups) || !a.antigravity.groups.every((g: any) => widgetObject(g) && typeof g.name === "string" && Array.isArray(g.buckets) && g.buckets.every((b: any) => widgetObject(b) && typeof b.name === "string" && widgetNullableText(b.window) && widgetNullableText(b.resetsAt) && widgetNullableNumber(b.remainingPercent))))) return false
-    return true
-  })
-}
-export function widgetCacheSnapshot(): { source: DataSource; scope: number; data: UsageData | null; local: boolean } {
-  const source = getSource(), scope = accountScope(source)
-  const raw = Storage.get<UsageData>(source === "official" ? CACHE : source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE)
-  if (raw != null && !validateWidgetData(raw)) throw new WidgetCacheInvalid()
-  const until = Storage.get<number>(localWidgetKey(source))
-  const local = typeof until === "number" && Number.isFinite(until) && Date.now() < until
-  let data = raw
-  if (data) {
-    // Canonical source snapshot only; never consult Keychain to get an old official snapshot.
-    data = { ...data, accounts: visibleAccounts(data.accounts, source) }
-    const statsSource = getStatisticsSource(), stats = Storage.get<ParrotStats>(statsSource === "sub2api" ? KEY_SUB_STATS : KEY_STATS) ?? (statsSource === "parrot" ? Storage.get<UsageData>(KEY_CACHE) : null)
-    if (stats != null && (!widgetObject(stats) || !widgetMetric(stats.today) || !widgetMetric(stats.month) || ![stats.todayByFamily, stats.monthByFamily].every(f => widgetObject(f) && Object.values(f).every(widgetMetric)))) throw new WidgetCacheInvalid()
-    data = { ...data, today: stats?.today ?? null, month: stats?.month ?? null, todayByFamily: stats?.todayByFamily ?? {}, monthByFamily: stats?.monthByFamily ?? {},
-      statistics: { fetchedAt: stats?.fetchedAt ?? null, stale: true, error: null } }
-  }
-  if (source !== getSource() || scope !== accountScope(source)) throw new WidgetReadStopped()
-  return { source, scope, data, local }
-}
-
 // Detail refresh never calls a list/full-source loader or statistics endpoint.
 export type AccountRefreshResult = { account: Account | null; error: string | null }
 class DetailRefreshError extends Error {}
@@ -794,21 +645,19 @@ export async function refreshAccount(id: string, source: DataSource, scope = acc
 }
 
 let usageFlight: { scope: number; source: DataSource; stats: StatisticsSource; parrotURL: string | null; parrotKey: string | null; subURL: string | null; subKey: string | null; tz: string; promise: Promise<LoadResult> } | null = null
-export function loadUsage(read?: WidgetRead): Promise<LoadResult> {
-  read?.check()
+export function loadUsage(): Promise<LoadResult> {
   const source = getSource(), scope = accountScope(source), stats = getStatisticsSource(), pc = getConfig(), sc = getSub2APIConfig()
   const f = usageFlight
-  if (!read && f && f.scope === scope && f.source === source && f.stats === stats && f.parrotURL === pc.baseUrl && f.parrotKey === pc.managementKey && f.subURL === sc.baseUrl && f.subKey === sc.adminKey && f.tz === sc.timezone) return f.promise
+  if (f && f.scope === scope && f.source === source && f.stats === stats && f.parrotURL === pc.baseUrl && f.parrotKey === pc.managementKey && f.subURL === sc.baseUrl && f.subKey === sc.adminKey && f.tz === sc.timezone) return f.promise
   const promise = (async (): Promise<LoadResult> => {
-    const [quota, result] = await Promise.all([source === "official" ? loadOfficialUsage(read) : source === "sub2api" ? loadSub2APIQuota(read) : loadParrotQuota(read), stats === "sub2api" ? loadSub2APIStats(read) : loadParrotStats(read)])
-    read?.check()
+    const [quota, result] = await Promise.all([source === "official" ? loadOfficialUsage() : source === "sub2api" ? loadSub2APIQuota() : loadParrotQuota(), stats === "sub2api" ? loadSub2APIStats() : loadParrotStats()])
     if (getSource() !== source || accountScope(source) !== scope) return { data: null, stale: false, error: "账号来源或配置已改变" }
     if (!quota.data) return quota
     return { ...quota, data: { ...quota.data, accounts: visibleAccounts(quota.data.accounts, source), today: result.data?.today ?? null, month: result.data?.month ?? null,
       todayByFamily: result.data?.todayByFamily ?? {}, monthByFamily: result.data?.monthByFamily ?? {},
       statistics: { fetchedAt: result.data?.fetchedAt ?? null, stale: !!result.error && !!result.data, error: result.error } } }
   })()
-  if (!read) usageFlight = { source, scope, stats, parrotURL: pc.baseUrl, parrotKey: pc.managementKey, subURL: sc.baseUrl, subKey: sc.adminKey, tz: sc.timezone, promise }
+  usageFlight = { source, scope, stats, parrotURL: pc.baseUrl, parrotKey: pc.managementKey, subURL: sc.baseUrl, subKey: sc.adminKey, tz: sc.timezone, promise }
   promise.finally(() => { if (usageFlight?.promise === promise) usageFlight = null }).catch(() => {})
   return promise
 }
@@ -954,15 +803,15 @@ export function logoutOfficial(id: string) {
   if (order) saveAccountOrder(order.filter(x => x !== id), "official")
 }
 // Never surface response bodies / transport errors, which may contain secrets.
-async function request(url: string, options: any = {}, read?: WidgetRead) {
-  try { return await readFetch(read, url, { ...options, timeout: 20 }) }
+async function request(url: string, options: any = {}) {
+  try { return await fetch(url, { ...options, timeout: 20 }) }
   catch { throw new Error("官方服务网络请求失败，请检查网络后重试") }
 }
 async function json(resp: any) {
   try { return await resp.json() } catch { throw new Error("官方服务返回了无法解析的数据") }
 }
-async function post(path: string, body: any, read?: WidgetRead) {
-  return request(AUTH + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, read)
+async function post(path: string, body: any) {
+  return request(AUTH + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
 }
 function claims(token: string): any {
   try {
@@ -1095,8 +944,7 @@ function renewalWait(provider: string, until: number): string {
 function renewalDue(expiresAt: number): boolean {
   return typeof expiresAt !== "number" || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 60000
 }
-async function renewalFailure(provider: string, id: string, response: any, read?: WidgetRead): Promise<Error> {
-  read?.check()
+async function renewalFailure(provider: string, id: string, response: any): Promise<Error> {
   let retry = ""
   try { retry = String(response.headers?.get("Retry-After") || "").trim() } catch { /* no raw headers */ }
   let until = /^\d+$/.test(retry) ? Date.now() + Number(retry) * 1000 : /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retry) ? Date.parse(retry) : 0
@@ -1114,7 +962,6 @@ async function renewalFailure(provider: string, id: string, response: any, read?
   // Do not infer revocation from HTTP400/401/403 alone or echo response message/body.
   let invalid = false
   try { const body = await response.json(); invalid = body?.error === "invalid_grant" || body?.error?.type === "invalid_grant" } catch { /* unclassified */ }
-  read?.check()
   return new Error(invalid ? `${provider}续期失败：登录已失效（invalid_grant），请重新添加该账号` : `${provider}续期失败（HTTP ${response.status}），尚不能确认登录失效；保留登录，下次刷新再尝试`)
 }
 // Execution-local only: never persist a rotated candidate outside Keychain.
@@ -1122,10 +969,8 @@ const pendingCodexRenewals = new Map<string, { previous: string; next: Credentia
 const codexGenerations = new Map<string, number>()
 function forgetCodexRenewal(id: string) { changeDetailIdentity(id); pendingCodexRenewals.delete(id); codexGenerations.set(id, (codexGenerations.get(id) ?? 0) + 1) }
 const refreshing = new Map<string, Promise<Credential>>()
-async function refreshToken(item: Credential, force = false, read?: WidgetRead): Promise<Credential> {
-  read?.check()
-  const jobs = read?.codexFlights ?? refreshing
-  const running = jobs.get(item.id)
+async function refreshToken(item: Credential, force = false): Promise<Credential> {
+  const running = refreshing.get(item.id)
   if (running) return running
   const job = (async () => {
     const current = credentials().find(x => x.id === item.id)
@@ -1144,19 +989,18 @@ async function refreshToken(item: Credential, force = false, read?: WidgetRead):
     const until = renewalDeadline("Codex", item.id)
     if (until) throw new Error(renewalWait("Codex", until))
     let r: any
-    try { r = await post("/oauth/token", { grant_type: "refresh_token", client_id: CLIENT, refresh_token: current.refresh }, read) }
+    try { r = await post("/oauth/token", { grant_type: "refresh_token", client_id: CLIENT, refresh_token: current.refresh }) }
     catch { throw new Error("Codex续期网络暂时失败，保留登录，下次刷新再尝试") }
     if (r.status !== 200) {
       const latest = credentials().find(x => x.id === item.id)
       if (latest && (latest.access !== current.access || latest.refresh !== current.refresh)) return latest
-      const failure = await renewalFailure("Codex", item.id, r, read)
+      const failure = await renewalFailure("Codex", item.id, r)
       // Parsing the error body awaits I/O; another execution can rotate credentials meanwhile.
       const recovered = credentials().find(x => x.id === item.id)
       if (!recovered) throw new Error("该官方账号已退出")
       if (!renewalDue(recovered.expiresAt) && (recovered.access !== current.access || recovered.refresh !== current.refresh || recovered.expiresAt !== current.expiresAt)) return recovered
       throw failure
     }
-    read?.check()
     const next = credential(await json(r), current)
     const items = credentials(), latest = items.find(x => x.id === item.id)
     if (!latest) throw new Error("该官方账号已退出")
@@ -1167,8 +1011,8 @@ async function refreshToken(item: Credential, force = false, read?: WidgetRead):
     pendingCodexRenewals.delete(item.id)
     return next
   })()
-  jobs.set(item.id, job)
-  try { return await job } finally { jobs.delete(item.id) }
+  refreshing.set(item.id, job)
+  try { return await job } finally { refreshing.delete(item.id) }
 }
 const emptyWindow = (): QuotaWindow => ({ usedPercent: null, remainingPercent: null, resetsAt: null })
 function windowOf(w: any): QuotaWindow {
@@ -1192,13 +1036,13 @@ export function mapOfficialUsage(b: any) {
   }
   return { fiveHour, sevenDay, resetCredits: resetCount(b?.rate_limit_reset_credits) }
 }
-async function fetchAccount(item: Credential, index: number, observed?: (value: unknown) => void, read?: WidgetRead): Promise<Account> {
-  let token = renewalDue(item.expiresAt) ? await refreshToken(item, false, read) : item
+async function fetchAccount(item: Credential, index: number, observed?: (value: unknown) => void): Promise<Account> {
+  let token = renewalDue(item.expiresAt) ? await refreshToken(item) : item
   observed?.(token)
   async function get(path: string) {
-    const send = () => request(WHAM + path, { headers: { Authorization: `Bearer ${token.access}`, "ChatGPT-Account-ID": token.accountId, Accept: "application/json" } }, read)
+    const send = () => request(WHAM + path, { headers: { Authorization: `Bearer ${token.access}`, "ChatGPT-Account-ID": token.accountId, Accept: "application/json" } })
     let r = await send()
-    if (r.status === 401) { token = await refreshToken(token, true, read); observed?.(token); r = await send() }
+    if (r.status === 401) { token = await refreshToken(token, true); observed?.(token); r = await send() }
     return r
   }
   const r = await get("/usage")
@@ -1213,27 +1057,23 @@ async function fetchAccount(item: Credential, index: number, observed?: (value: 
   }
   return { id: item.id, name: officialDisplay(token, index), provider: "openai", enabled: true, available: true, ...mapped }
 }
-export async function loadOfficialUsage(read?: WidgetRead): Promise<LoadResult> {
+export async function loadOfficialUsage(): Promise<LoadResult> {
   try {
     const items = credentials()
     if (!items.length && !claudeAccounts().length && !dsCredentials().length && !WorkBuddyCN.credentials().length && !Antigravity.credentials().length) return { data: null, stale: false, error: "请在脚本中添加官方账号" }
     // Keep complete mixed-provider snapshots: a failed account is not silently dropped as current.
     const isolate = dsCredentials().length > 0 || WorkBuddyCN.credentials().length > 0 || Antigravity.credentials().length > 0
-    const [codex, claude] = await Promise.all([Promise.all(items.map((item, i) => isolate ? fetchAccount(item, i, undefined, read).catch(() => quotaFallback(item.id, officialDisplay(item, i), "openai")) : fetchAccount(item, i, undefined, read))), loadClaudeAccounts(isolate, read)])
-    read?.check()
-    const deepseek = (await Promise.all(dsCredentials().map(item => dsOfficial(item, read)))).filter((a): a is Account => !!a)
-    read?.check()
-    const workbuddy = (await Promise.all(WorkBuddyCN.credentials().map(item => WorkBuddyCN.read(item, undefined, read)))).filter((a): a is Account => !!a)
-    read?.check()
-    const antigravityReads = await Promise.all(Antigravity.credentials().map(item => Antigravity.read(item, undefined, undefined, read)))
+    const [codex, claude] = await Promise.all([Promise.all(items.map((item, i) => isolate ? fetchAccount(item, i).catch(() => quotaFallback(item.id, officialDisplay(item, i), "openai")) : fetchAccount(item, i))), loadClaudeAccounts(isolate)])
+    const deepseek = (await Promise.all(dsCredentials().map(dsOfficial))).filter((a): a is Account => !!a)
+    const workbuddy = (await Promise.all(WorkBuddyCN.credentials().map(item => WorkBuddyCN.read(item)))).filter((a): a is Account => !!a)
+    const antigravityReads = await Promise.all(Antigravity.credentials().map(item => Antigravity.read(item)))
     // Resolve against the latest completed in-process read without persisting diagnostics.
     const antigravity = antigravityReads.map(Antigravity.latestRead)
-    read?.check()
     const live = new Set(officialAccounts().map(a => a.id))
     const accounts = syncAccountOrder([...codex, ...claude, ...deepseek, ...workbuddy, ...antigravity].filter(a => live.has(a.id)), "official")
     const providerErrors = accounts.flatMap(a => a.readError ? [`${a.name}：${a.readError}`] : [])
     const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts, fetchedAt: Date.now(), ...(providerErrors.length ? { providerErrors } : {}) }
-    read?.check(); Storage.set(CACHE, data) // canonical windows + all raw groups; never persist a selected projection
+    Storage.set(CACHE, data) // canonical windows + all raw groups; never persist a selected projection
     return { data: { ...data, accounts: data.accounts.map(a => projectAntigravityAccount(a, "official")) }, stale: false, error: null }
   } catch (e: any) {
     // Logout may have pruned the cache while a request was in flight; never resurrect its old snapshot.
@@ -1423,8 +1263,8 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
   d.timer = setTimeout(() => { if (!d.cancelled) { cancelClaudeLogin(d); onExpire() } }, 15 * 60 * 1000)
   return d
 }
-async function request(url: string, options: any = {}, read?: WidgetRead) {
-  try { return await readFetch(read, url, { ...options, timeout: 20 }) }
+async function request(url: string, options: any = {}) {
+  try { return await fetch(url, { ...options, timeout: 20 }) }
   catch { throw new Error("Claude官方服务网络请求失败") }
 }
 async function json(r: any) { try { return await r.json() } catch { throw new Error("Claude官方响应无法解析") } }
@@ -1437,13 +1277,13 @@ function tokenBody(b: any, old?: Credential) {
   return { access: b.access_token, refresh: b.refresh_token || old!.refresh,
     expiresAt: Date.now() + b.expires_in * 1000, scope: typeof b.scope === "string" ? b.scope : old?.scope || SCOPE }
 }
-const post = (body: any, read?: WidgetRead) => {
+const post = (body: any) => {
   // Same honest HTTP identity and JSON negotiation for initial exchange and renewal.
   // A controlled compatibility adjustment, not evidence that these headers cure service HTTP429.
   const headers: Record<string, string> = {
     "Content-Type": "application/json", Accept: "application/json", "User-Agent": `ai-usage/${VERSION}`,
   }
-  return request(TOKEN, { method: "POST", headers, body: JSON.stringify(body) }, read)
+  return request(TOKEN, { method: "POST", headers, body: JSON.stringify(body) })
 }
 export async function finishClaudeLogin(d: ClaudeLogin, pasted = "", stillActive: () => boolean = () => true): Promise<string> {
   active(d)
@@ -1494,10 +1334,8 @@ const generations = new Map<string, number>()
 export function clearRenewalCandidates() { pendingRenewals.clear() }
 function forgetRenewal(id: string) { changeDetailIdentity(id); pendingRenewals.delete(id); generations.set(id, (generations.get(id) ?? 0) + 1) }
 const refreshing = new Map<string, Promise<Credential>>()
-async function refresh(item: Credential, force = false, read?: WidgetRead): Promise<Credential> {
-  read?.check()
-  const jobs = read?.claudeFlights ?? refreshing
-  const existing = jobs.get(item.id)
+async function refresh(item: Credential, force = false): Promise<Credential> {
+  const existing = refreshing.get(item.id)
   if (existing) return existing
   const job = (async () => {
     const current = credentials().find(a => a.id === item.id)
@@ -1516,12 +1354,12 @@ async function refresh(item: Credential, force = false, read?: WidgetRead): Prom
     const until = renewalDeadline("Claude", item.id)
     if (until) throw new Error(renewalWait("Claude", until))
     let r: any
-    try { r = await post({ grant_type: "refresh_token", refresh_token: current.refresh, client_id: CLIENT, scope: current.scope }, read) }
+    try { r = await post({ grant_type: "refresh_token", refresh_token: current.refresh, client_id: CLIENT, scope: current.scope }) }
     catch { throw new Error("Claude续期网络暂时失败，保留登录，下次刷新再尝试") }
     if (r.status !== 200) {
       const latest = credentials().find(a => a.id === item.id)
       if (latest && (latest.access !== current.access || latest.refresh !== current.refresh)) return latest
-      const failure = await renewalFailure("Claude", item.id, r, read)
+      const failure = await renewalFailure("Claude", item.id, r)
       const recovered = credentials().find(a => a.id === item.id)
       if (!recovered) throw new Error("该Claude账号已退出")
       if (!renewalDue(recovered.expiresAt) && (recovered.access !== current.access || recovered.refresh !== current.refresh || recovered.expiresAt !== current.expiresAt)) return recovered
@@ -1535,8 +1373,8 @@ async function refresh(item: Credential, force = false, read?: WidgetRead): Prom
     persist(items.map(a => a.id === item.id ? { ...a, ...next } : a))
     pendingRenewals.delete(item.id); return next
   })()
-  jobs.set(item.id, job)
-  try { return await job } finally { jobs.delete(item.id) }
+  refreshing.set(item.id, job)
+  try { return await job } finally { refreshing.delete(item.id) }
 }
 // Official 2.1.295 cedar_ember status: grants[].resets_left; CLI Ue sums the remaining grants.
 // Do not substitute extra_usage.used_credits (money), or infer zero from an absent/malformed status.
@@ -1592,8 +1430,7 @@ export function mapClaudeUsage(b: any): { fiveHour: QuotaWindow; sevenDay: Quota
   // Never substitute model-specific Opus/Sonnet or extra usage for the aggregate weekly window.
   return { fiveHour: window(b?.five_hour), sevenDay: window(b?.seven_day), resetCredits: claudeResetCount(b) }
 }
-export async function loadClaudeAccounts(isolate = false, read?: WidgetRead): Promise<Account[]> {
-  if (read) return Promise.all(credentials().map(item => loadClaudeAccount(item, undefined, undefined, read)))
+export async function loadClaudeAccounts(isolate = false): Promise<Account[]> {
   // In-process de-duplication: concurrent App/widget loads share one request sequence per account.
   return Promise.all(credentials().map(item => {
     const pending = claudeLoads.get(item.id)
@@ -1608,17 +1445,17 @@ export async function readOne(id: string, observed: (value: unknown) => void, ac
   if (!item) throw new Error("该Claude账号已退出")
   return loadClaudeAccount(item, observed, active)
 }
-async function loadClaudeAccount(item: Credential, observed?: (value: unknown) => void, active?: () => boolean, read?: WidgetRead): Promise<Account> {
-  const check = () => { read?.check(); if (active && !active()) throw new Error("Claude当前账号或来源已改变，已丢弃结果") }
+async function loadClaudeAccount(item: Credential, observed?: (value: unknown) => void, active?: () => boolean): Promise<Account> {
+  const check = () => { if (active && !active()) throw new Error("Claude当前账号或来源已改变，已丢弃结果") }
   {
     const limited = deadline(USAGE_LIMIT, item.id)
     if (limited) throw new Error(`Claude额度读取冷却中（此前GET /api/oauth/usage受限），${waitText(limited)}；本次未发送请求`)
-    let current = renewalDue(item.expiresAt) ? await refresh(item, false, read) : item
+    let current = renewalDue(item.expiresAt) ? await refresh(item) : item
     observed?.(current)
     const getUsage = () => request(API + "/usage", { headers: { Authorization: `Bearer ${current.access}`,
-      "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } }, read)
+      "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
     let r = await getUsage(); check()
-    if (r.status === 401) { current = await refresh(current, true, read); observed?.(current); r = await getUsage(); check() }
+    if (r.status === 401) { current = await refresh(current, true); observed?.(current); r = await getUsage(); check() }
     if (r.status === 429 || r.status === 403) {
       const until = remember429(USAGE_LIMIT, item.id, r)
       throw new Error(`Claude额度读取受限（HTTP ${r.status}，GET /api/oauth/usage），${waitText(until)}；不自动重试`)
@@ -1632,7 +1469,7 @@ async function loadClaudeAccount(item: Credential, observed?: (value: unknown) =
       // Optional same-endpoint selector at most hourly; never the reset_rate_limits POST/claim endpoint.
       try {
         const cardResponse = await request(API + "/usage?cedar_ember=1&skip_spend=1", { headers: { Authorization: `Bearer ${current.access}`,
-          "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } }, read)
+          "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
         check()
         if (cardResponse.status === 429 || cardResponse.status === 403) remember429(CARDS, item.id, cardResponse)
         else if (cardResponse.status === 200) {
@@ -1723,7 +1560,7 @@ function dsPublicMoney(body: any): DeepSeekMoney[] {
   })
 }
 const dsFlights = new Map<string, Promise<Account | null>>()
-async function dsOfficial(item: DeepSeekCredential, read?: WidgetRead): Promise<Account | null> {
+async function dsOfficial(item: DeepSeekCredential): Promise<Account | null> {
   const existing = dsFlights.get(item.id); if (existing) return existing
   const job = (async () => {
     const old = officialCached()?.accounts.find(a => a.id === item.id)
@@ -1731,14 +1568,14 @@ async function dsOfficial(item: DeepSeekCredential, read?: WidgetRead): Promise<
     try {
       const headers = { Authorization: `Bearer ${item.token}`, Accept: "application/json", "User-Agent": "ai-usage/1.10.0" }
       if (item.mode === "api") {
-        const r = await readFetch(read, "https://api.deepseek.com/user/balance", { headers, timeout: 15 })
+        const r = await fetch("https://api.deepseek.com/user/balance", { headers, timeout: 15 })
         if (r.status !== 200) throw new DeepSeekReadError(`DeepSeek API余额 HTTP ${r.status}`)
         const body = await r.json(); const money = dsPublicMoney(body)
         account = dsAccount(item.id, item.name, { money, fetchedAt: Date.now(), stale: false, error: null, available: typeof body.is_available === "boolean" ? body.is_available : null, auth: "API Key" })
       } else {
         // Private platform contract; no API-key fallback or automatic session renewal.
         const webHeaders = { ...headers, Referer: "https://platform.deepseek.com/usage" }
-        const r = await readFetch(read, "https://platform.deepseek.com/api/v0/users/get_user_summary", { headers: webHeaders, timeout: 20 })
+        const r = await fetch("https://platform.deepseek.com/api/v0/users/get_user_summary", { headers: webHeaders, timeout: 20 })
         if (r.status !== 200) throw new DeepSeekReadError(`DeepSeek网页余额 HTTP ${r.status}；可重试，Token失效需更新`)
         const body = await r.json(), biz = body?.data?.biz_data
         if (body?.code !== 0 || !Array.isArray(biz?.normal_wallets) || !Array.isArray(biz?.bonus_wallets)) throw new DeepSeekReadError("DeepSeek网页余额字段缺失；可重试，Token失效需更新")
@@ -1752,7 +1589,7 @@ async function dsOfficial(item: DeepSeekCredential, read?: WidgetRead): Promise<
         const balance: DeepSeekBalance = { money, fetchedAt: Date.now(), stale: false, error: null, available: null, auth: "网页Token", weekFetchedAt: null }
         try {
           const midnight = Math.floor((Date.now() / 1000 + 28800) / 86400) * 86400 - 28800
-          const cost = await readFetch(read, `https://platform.deepseek.com/api/v0/usage/by_api_key/cost?start=${midnight - 6 * 86400}&end=${midnight + 86400}&tz=28800`, { headers: webHeaders, timeout: 15 })
+          const cost = await fetch(`https://platform.deepseek.com/api/v0/usage/by_api_key/cost?start=${midnight - 6 * 86400}&end=${midnight + 86400}&tz=28800`, { headers: webHeaders, timeout: 15 })
           if (cost.status !== 200) throw new Error("cost")
           const cb = await cost.json(), rows = cb?.data?.biz_data?.data
           if ((cb?.code != null && cb.code !== 0) || !Array.isArray(rows)) throw new Error("schema")
@@ -1784,11 +1621,11 @@ async function dsOfficial(item: DeepSeekCredential, read?: WidgetRead): Promise<
   dsFlights.set(item.id, job)
   try { return await job } finally { dsFlights.delete(item.id) }
 }
-async function dsParrot(baseUrl: string, cred: string, old: Account[], read?: WidgetRead): Promise<{ accounts: Account[]; error?: string }> {
+async function dsParrot(baseUrl: string, cred: string, old: Account[]): Promise<{ accounts: Account[]; error?: string }> {
   const accounts: Account[] = [], seen = new Set<string>()
   try {
     for (let page = 1, more = true; more; page++) {
-      const r = await readFetch(read, `${baseUrl}/api/management/v1/channels?providerId=deepseek&page=${page}&pageSize=50`, { headers: { Authorization: `Bearer ${cred}` }, timeout: 15 })
+      const r = await fetch(`${baseUrl}/api/management/v1/channels?providerId=deepseek&page=${page}&pageSize=50`, { headers: { Authorization: `Bearer ${cred}` }, timeout: 15 })
       if (r.status === 401) throw new HttpError(401, "AUTHENTICATION_FAILED")
       if (r.status !== 200) throw new Error(`HTTP ${r.status}`)
       const body = await r.json()
@@ -1819,10 +1656,10 @@ async function dsParrot(baseUrl: string, cred: string, old: Account[], read?: Wi
     return { accounts }
   } catch (e) { if (e instanceof HttpError && e.status === 401) throw e; return { accounts: [...accounts, ...old.filter(a => a.provider === "deepseek" && !accounts.some(current => current.id === a.id)).map(a => dsFallback(a.id, a.name, a, "Parrot快照", "Parrot DeepSeek频道接口不可用，可重试"))], error: "Parrot DeepSeek频道接口不可用（旧版可能未提供），原账号仍可读取" } }
 }
-async function dsSub2(cfg: ReturnType<typeof getSub2APIConfig>, row: any, old?: Account, read?: WidgetRead): Promise<Account> {
+async function dsSub2(cfg: ReturnType<typeof getSub2APIConfig>, row: any, old?: Account): Promise<Account> {
   const id = `sub2api:${row.id}`, name = String(row.name || id)
   try {
-    const b = await sub2Get(cfg, `/cn-providers/accounts/${row.id}/balance`, read)
+    const b = await sub2Get(cfg, `/cn-providers/accounts/${row.id}/balance`)
     if (!b.success || !Array.isArray(b.balances) || !b.balances.length || !Number.isFinite(b.fetched_at) || b.fetched_at <= 0 || !Number.isFinite(new Date(b.fetched_at * 1000).getTime())) throw new Error("schema")
     const money = b.balances.map((m: any) => {
       const total = dsDecimal(m.balance)
@@ -1914,12 +1751,12 @@ function active(d: Login, valid: () => boolean) {
   if (d.cancelled || Date.now() >= d.expiresAt || !valid()) { cancel(d); throw new WBError("WorkBuddy登录已取消或等待超时，请重新登录") }
 }
 // Scripting fetch docs: handleRedirect returns null to prevent redirects; cookies are NOT shared automatically.
-async function wire(base: string, path: string, method: string, h: Record<string, string>, body?: any, d?: Login, pending = false, read?: WidgetRead): Promise<any> {
+async function wire(base: string, path: string, method: string, h: Record<string, string>, body?: any, d?: Login, pending = false): Promise<any> {
   if (base !== AUTH && base !== BILLING) throw new WBError("WorkBuddy不支持此请求域名")
   if (d?.cancelled) throw new WBError("WorkBuddy登录已取消")
   let r: any
   try {
-    r = await readFetch(read, base + path, { method, headers: h, ...(body === undefined ? {} : { body: JSON.stringify(body) }), timeout: 20,
+    r = await fetch(base + path, { method, headers: h, ...(body === undefined ? {} : { body: JSON.stringify(body) }), timeout: 20,
       handleRedirect: async () => null, ...(d?.controller ? { signal: d.controller.signal } : {}) })
   } catch { throw new WBError(d?.cancelled ? "WorkBuddy登录已取消" : "WorkBuddy网络请求失败，请重试") }
   if (d?.cancelled) throw new WBError("WorkBuddy登录已取消")
@@ -1979,24 +1816,22 @@ export async function finish(d: Login, valid: () => boolean): Promise<void> {
     active(d, valid); persist([...rows.filter(c => c.id !== id), credential]); changeDetailIdentity(id)
   } finally { cancel(d) }
 }
-async function refresh(c: Credential, read?: WidgetRead): Promise<Credential> {
-  read?.check()
-  const jobs = read?.wbFlights ?? refreshing
+async function refresh(c: Credential): Promise<Credential> {
   const key = c.id + ":" + c.refresh
-  const existing = jobs.get(key); if (existing) return existing
+  const existing = refreshing.get(key); if (existing) return existing
   const task = (async () => {
     if (!same(c)) throw new WBError("WorkBuddy账号已退出或登录已更新")
     let candidate = pendingRefresh.get(key)
     if (candidate && candidate.until <= Date.now()) throw new WBError("WorkBuddy轮换令牌未能保存且已过期，请重新登录", true)
     if (!candidate) {
-      const b = await wire(AUTH, "/v2/plugin/auth/token/refresh", "POST", headers(c, true), undefined, undefined, false, read)
+      const b = await wire(AUTH, "/v2/plugin/auth/token/refresh", "POST", headers(c, true))
       const next: Credential = { ...c, access: text(b.accessToken), refresh: b.refreshToken == null ? c.refresh : text(b.refreshToken), expiresAt: tokenExpiry(b.expiresIn), domain: b.domain == null ? c.domain : domain(b.domain) }
       candidate = { credential: next, until: next.expiresAt || Date.now() + 300000 }; pendingRefresh.set(key, candidate)
     }
     const rows = credentials(); if (!same(c)) { pendingRefresh.delete(key); throw new WBError("WorkBuddy账号已退出或登录已更新") }
     persist(rows.map(x => x.id === c.id ? candidate!.credential : x)); pendingRefresh.delete(key); return candidate.credential
   })()
-  jobs.set(key, task); try { return await task } finally { jobs.delete(key) }
+  refreshing.set(key, task); try { return await task } finally { refreshing.delete(key) }
 }
 function cnTime(v: any): string | null {
   if (typeof v !== "string" || !v.trim()) return null
@@ -2033,11 +1868,11 @@ function normalize(p: any) {
   if (capacity != null && used != null && used > capacity) reliable = false
   return { name: typeof p.PackageName === "string" ? p.PackageName : "资源包", capacity, remaining, used, reliable, expiresAt: cnTime(p.PackageEndTime) ?? cnTime(p.EndTime) ?? epoch(p.DeductionEndTime), cycleEnd: cnTime(p.CycleEndTime) }
 }
-export async function read(c: Credential, observed?: (value: unknown) => void, read?: WidgetRead): Promise<Account | null> {
+export async function read(c: Credential, observed?: (value: unknown) => void): Promise<Account | null> {
   const make = (credits: WorkBuddyCredits, readError?: string): Account => ({ id: c.id, name: c.name, provider: "workbuddy", enabled: true, available: true, fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null, credits, ...(readError ? { readError } : {}) })
   try {
     let token = c, refreshed = false
-    if (!c.expiresAt || c.expiresAt - Date.now() <= 300000) { token = await refresh(c, read); refreshed = true }
+    if (!c.expiresAt || c.expiresAt - Date.now() <= 300000) { token = await refresh(c); refreshed = true }
     observed?.(token)
     const date = (ms: number) => new Date(ms + 8 * 3600000).toISOString().slice(0,19).replace("T", " ")
     const begin = date(Date.now()), end = date(Date.now() + 365 * 101 * 86400000)
@@ -2048,8 +1883,8 @@ export async function read(c: Credential, observed?: (value: unknown) => void, r
       if (!same(token)) throw new WBError("WorkBuddy账号已退出或登录已更新")
       const body = { PageSize: 100, PageNumber: page, ProductCode: "p_tcaca", Status: [0,3], PackageEndTimeRangeBegin: begin, PackageEndTimeRangeEnd: end }
       let b: any
-      try { b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body, undefined, false, read) }
-      catch (e) { if (!(e instanceof WBError) || !e.invalid || refreshed) throw e; token = await refresh(token, read); observed?.(token); refreshed = true; b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body, undefined, false, read) }
+      try { b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body) }
+      catch (e) { if (!(e instanceof WBError) || !e.invalid || refreshed) throw e; token = await refresh(token); observed?.(token); refreshed = true; b = await wire(BILLING, "/v2/billing/meter/get-user-resource", "POST", headers(token), body) }
       if (!same(token)) throw new WBError("WorkBuddy账号已退出或登录已更新")
       if (Date.now() >= deadline) throw new WBError("WorkBuddy积分分页读取超时，保留此前快照")
       const response = b.Response
@@ -2073,10 +1908,10 @@ export async function read(c: Credential, observed?: (value: unknown) => void, r
     const started = Date.now()
     try {
       let status: any
-      try { status = await wire(BILLING, "/v2/billing/meter/checkin-activity-status", "POST", headers(token), {}, undefined, false, read) }
+      try { status = await wire(BILLING, "/v2/billing/meter/checkin-activity-status", "POST", headers(token), {}) }
       catch (e) {
         if (!(e instanceof WBError) || !e.message.includes("HTTP 404")) throw e
-        status = await wire(BILLING, "/v2/billing/meter/checkin-status", "POST", headers(token), {}, undefined, false, read)
+        status = await wire(BILLING, "/v2/billing/meter/checkin-status", "POST", headers(token), {})
       }
       const observed = Date.now()
       credits.checkin = workBuddyCheckin(status, observed, workBuddyDay(started) !== workBuddyDay(observed) ? "查询跨越北京时间日期边界" : undefined)
@@ -2305,8 +2140,8 @@ export function begin(onCode: () => void, onExpire: () => void, onFailure: () =>
   d.timer = setTimeout(() => { if (!d.cancelled) { cancel(d); onExpire() } }, 15 * 60000)
   return d
 }
-async function token(body: Record<string, string>, read?: WidgetRead) {
-  return request(TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: Object.entries({ client_id: CLIENT, client_secret: SECRET, ...body }).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&") }, read)
+async function token(body: Record<string, string>) {
+  return request(TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: Object.entries({ client_id: CLIENT, client_secret: SECRET, ...body }).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&") })
 }
 function credential(b: any, old?: Credential): Credential {
   const seconds = Number(b?.expires_in)
@@ -2332,9 +2167,7 @@ export async function finish(d: Login, active: () => boolean) {
 const flights = new Map<string, Promise<Credential>>()
 // If Keychain temporarily rejects a rotated token, retry its save rather than reuse the old refresh token.
 const rotated = new Map<string, { previous: string; next: Credential }>()
-async function renew(item: Credential, force = false, read?: WidgetRead): Promise<Credential> {
-  read?.check()
-  const jobs = read?.agFlights ?? flights
+async function renew(item: Credential, force = false): Promise<Credential> {
   const latest = credentials().find(c => c.id === item.id)
   if (!latest) throw new Error("Antigravity账号已退出")
   const recovery = rotated.get(item.id)
@@ -2346,15 +2179,15 @@ async function renew(item: Credential, force = false, read?: WidgetRead): Promis
   }
   if (JSON.stringify(latest) !== JSON.stringify(item)) return latest
   if (!force && !renewalDue(latest.expiresAt)) return latest
-  const pending = jobs.get(item.id); if (pending) return pending
+  const pending = flights.get(item.id); if (pending) return pending
   const job = (async () => {
     const until = renewalDeadline("Antigravity", item.id); if (until) throw new Error(renewalWait("Antigravity", until))
-    const r = await token({ grant_type: "refresh_token", refresh_token: item.refresh }, read)
+    const r = await token({ grant_type: "refresh_token", refresh_token: item.refresh })
     const current = () => credentials().find(c => c.id === item.id)
     if (!current()) throw new Error("Antigravity账号已退出")
     if (JSON.stringify(current()) !== JSON.stringify(item)) return current()!
     if (r.status !== 200) {
-      const failure = await renewalFailure("Antigravity", item.id, r, read), recovered = current()
+      const failure = await renewalFailure("Antigravity", item.id, r), recovered = current()
       if (!recovered) throw new Error("Antigravity账号已退出")
       if (JSON.stringify(recovered) !== JSON.stringify(item)) return recovered
       throw failure
@@ -2365,16 +2198,15 @@ async function renew(item: Credential, force = false, read?: WidgetRead): Promis
     rotated.set(item.id, { previous: JSON.stringify(item), next })
     persist(items.map(c => c.id === item.id ? next : c)); rotated.delete(item.id); return next
   })()
-  jobs.set(item.id, job)
-  try { return await job } finally { if (jobs.get(item.id) === job) jobs.delete(item.id) }
+  flights.set(item.id, job)
+  try { return await job } finally { if (flights.get(item.id) === job) flights.delete(item.id) }
 }
 let readSequence = 0
 const completedReads = new Map<string, { sequence: number; account: Account }>()
 export function latestRead(account: Account): Account { return completedReads.get(account.id)?.account ?? account }
-export async function read(item: Credential, observed?: (value: unknown) => void, active?: () => boolean, read?: WidgetRead): Promise<Account> {
+export async function read(item: Credential, observed?: (value: unknown) => void, active?: () => boolean): Promise<Account> {
   const sequence = ++readSequence
   const finish = (account: Account): Account => {
-    if (read) { try { read.check() } catch { return account } }
     if (active && !active()) return account
     const latest = completedReads.get(item.id)
     if (!credentials().some(c => c.id === item.id)) { completedReads.delete(item.id); return account }
@@ -2383,16 +2215,16 @@ export async function read(item: Credential, observed?: (value: unknown) => void
     return account
   }
   try {
-    let current = renewalDue(item.expiresAt) ? await renew(item, false, read) : item, retried = false
+    let current = renewalDue(item.expiresAt) ? await renew(item) : item, retried = false
     observed?.(current)
     const post = async (method: "loadCodeAssist" | "retrieveUserQuotaSummary", body: any) => {
       const projectState = method === "retrieveUserQuotaSummary" ? `；project ${body.project ? "已提供" : "未提供"}` : ""
       const send = async () => {
-        try { return await request((method === "retrieveUserQuotaSummary" ? QUOTA_BASE : BASE) + method, { method: "POST", headers: { Authorization: `Bearer ${current.access}`, "Content-Type": "application/json", Accept: "application/json", "User-Agent": QUOTA_USER_AGENT }, body: JSON.stringify(body) }, read) }
+        try { return await request((method === "retrieveUserQuotaSummary" ? QUOTA_BASE : BASE) + method, { method: "POST", headers: { Authorization: `Bearer ${current.access}`, "Content-Type": "application/json", Accept: "application/json", "User-Agent": QUOTA_USER_AGENT }, body: JSON.stringify(body) }) }
         catch { throw new Error(`Antigravity ${method}：网络请求失败（无 HTTP 状态${projectState}），保留登录；可重试`) }
       }
       let r = await send()
-      if (r.status === 401 && !retried) { retried = true; current = await renew(current, true, read); observed?.(current); r = await send() }
+      if (r.status === 401 && !retried) { retried = true; current = await renew(current, true); observed?.(current); r = await send() }
       if (r.status !== 200) {
         // Do not echo Google messages, URLs, request IDs or arbitrary error fields.
         // Only these fixed protocol status names are safe to surface in cached details.
