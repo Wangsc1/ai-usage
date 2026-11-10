@@ -13,10 +13,6 @@ import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, cl
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
-// EditMode is a host global, not a scripting export. Older runtimes keep their native EditButton
-// (or the existing sort-page fallback) when the global editing API is unavailable.
-const CUSTOM_LOGIN_SORT = NATIVE_SORT && typeof useObservable === "function" && typeof EditMode !== "undefined" && EditMode != null
-  && typeof EditMode.active === "function" && typeof EditMode.inactive === "function"
 // Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
 const ICON_SIZE = 17
 function providerIconCode(provider: string) {
@@ -262,8 +258,6 @@ function maskedKey(value: string): string {
   return chars.length > 4 ? chars.slice(0, 4).join("") + "*".repeat(chars.length - 4) : "*".repeat(chars.length)
 }
 function SettingsView() {
-  // Capability is constant for this runtime; only the official Section receives this binding.
-  const officialEditMode = CUSTOM_LOGIN_SORT ? useObservable(() => EditMode.inactive()) : null
   const close = Navigation.useDismiss()
   const [authorization, setAuthorization] = useState<AuthorizationDestination | null>(null)
   const pushAuthorization: PushAuthorization = destination => {
@@ -640,9 +634,7 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section environments={officialEditMode ? { editMode: officialEditMode } : undefined} header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? officialEditMode ? <Button title={officialEditMode.value.isEditing ? "完成" : "编辑排序"} action={() => {
-        officialEditMode.value = officialEditMode.value.isEditing ? EditMode.inactive() : EditMode.active()
-      }} /> : <EditButton /> : null}</HStack>}>
+      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <HStack spacing={0}><EditButton /><Text>排序</Text></HStack> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
           {!dsAdding && (!claude || claude.manual && !busy) && !codexBrowser && !workbuddy && !wbPreparing && !agBrowser
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />

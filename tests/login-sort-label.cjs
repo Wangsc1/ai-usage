@@ -42,12 +42,6 @@ function runtime(options = {}) {
     if (modules[name]) return modules[name].exports
     let source = fs.readFileSync(path.join(root, name), 'utf8')
     if (name === 'index.tsx') {
-      // Optional exact historical source supplied for the one-off 1.57 regression reproduction.
-      if (options.indexSource) source = options.indexSource
-      if (options.reintroduce157Import) {
-        assert.ok(source.includes('Button, EditButton, ForEach,'))
-        source = source.replace('Button, EditButton, ForEach,', 'Button, EditButton, EditMode, ForEach,')
-      }
       source = source.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, AccountOrderPage }')
     }
     const out = ts.transpileModule(source, { fileName: name, compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, jsxImportSource: 'scripting' }, reportDiagnostics: true })
@@ -90,80 +84,36 @@ const section = (tree, title) => {
 }
 const ids = xs => Array.from(xs, x => x.id)
 async function main() {
-  // Reintroducing just the original bad import must reproduce the observed fallback, even though
-  // the global API exists. Run the same production component rather than testing a boolean alone.
-  const broken = runtime({ reintroduce157Import: true }); broken.seed()
-  const brokenTree = broken.render()
-  assert.equal(section(brokenTree, '登录账号').props.environments, undefined)
-  assert.equal(nodes(brokenTree).filter(n => n.type === 'EditButton').length, 1)
-  assert.equal(nodes(brokenTree).some(n => n.type === 'Button' && n.props.title === '编辑排序'), false)
-  assert.equal(broken.counts().fetches, 0)
-  console.log('PASS reproduces 1.57 import regression: module EditMode missing shadows supported host global, original EditButton fallback rendered')
-  const r = runtime(); r.seed()
-  let tree = r.render(), sec = section(tree, '登录账号')
-  const mode = sec.props.environments.editMode
-  assert.equal(mode.value.value, 'inactive'); assert.equal(mode.value.isEditing, false)
-  assert.equal(nodes(tree).some(n => n.type === 'EditButton'), false)
-  assert.equal(nodes(tree).some(n => n.type === 'NavigationLink' && n.props.destination.type === r.app.AccountOrderPage), false, 'same-page native sort retained')
-  const snapshot = JSON.stringify([...r.store]), credentials = JSON.stringify([...r.kc])
-  button(tree, '编辑排序').props.action()
-  assert.equal(mode.value.value, 'active'); assert.equal(mode.value.isEditing, true)
-  tree = r.render(); assert.equal(section(tree, '登录账号').props.environments.editMode, mode)
-  for (const row of tree.filter(x => x.node === each(tree) || x.node === button(tree, '完成'))) {
-    assert.ok(row.ancestors.includes(section(tree, '登录账号')), 'header button and ForEach share the bound Section')
+  for (const options of [{}, {missingGlobal:true}, {noObservable:true}]) {
+    const r=runtime(options);r.seed();let tree=r.render()
+    const sec=section(tree,'登录账号')
+    assert.equal(sec.props.environments,undefined,'native environment remains untouched')
+    const header=r.walk(sec.props.header)
+    const group=nodes(header).find(n=>n.type==='HStack' && n.props.spacing===0)
+    assert.ok(group)
+    assert.deepEqual(Array.from(group.props.children,n=>n.type),['EditButton','Text'])
+    assert.equal(group.props.children[1].props.children,'排序')
+    assert.equal(Object.keys(group.props.children[0].props).length,0,'original EditButton has no replacement action or custom binding')
+    assert.equal(nodes(tree).some(n=>n.type==='Button'&&n.props.title==='编辑排序'),false)
+    const before=JSON.stringify([...r.kc])
+    each(tree).props.onMove([0],3)
+    assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
+    r.reopen();assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
+    for(const source of ['parrot','sub2api']) {
+      const picker=nodes(r.render()).find(n=>n.type==='Picker'&&n.props.title==='账号来源')
+      await picker.props.onChanged(source)
+      tree=r.render()
+      const remoteHeader=r.walk(section(tree,'目前账号').props.header)
+      assert.equal(nodes(remoteHeader).filter(n=>n.type==='EditButton').length,1)
+      assert.equal(nodes(remoteHeader).some(n=>n.type==='Text'&&n.props.children==='排序'),false)
+    }
+    assert.equal(r.counts().fetches,0);assert.equal(JSON.stringify([...r.kc]),before)
   }
-  assert.equal(nodes(tree).filter(n => n.props?.environments?.editMode).length, 1, 'no environment on Form/NavigationStack or unrelated Section')
-  assert.equal(JSON.stringify([...r.store]), snapshot); assert.equal(JSON.stringify([...r.kc]), credentials)
-  each(tree).props.onMove([0], 3)
-  assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(), 'official')), ['antigravity:2', 'antigravity:3', 'antigravity:1'])
-  assert.deepEqual(r.store.get('ai_usage_official_order_v1'), ['antigravity:2', 'antigravity:3', 'antigravity:1'])
-  assert.equal(r.counts().reloads, 1, 'existing move persistence/reload unchanged')
-  tree = r.render()
-  assert.deepEqual(nodes(tree).filter(n => n.type === 'Text' && /^Fixture [0-2]$/.test(n.props.children)).map(n => n.props.children), ['Fixture 1', 'Fixture 2', 'Fixture 0'], 'actual native list row order updated')
-  button(tree, '完成').props.action()
-  assert.equal(mode.value.value, 'inactive'); assert.equal(mode.value.isEditing, false)
-  assert.ok(button(r.render(), '编辑排序'))
-  r.reopen(); assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(), 'official')), ['antigravity:2', 'antigravity:3', 'antigravity:1'])
-  tree = r.render()
-  assert.deepEqual(nodes(tree).filter(n => n.type === 'Text' && /^Fixture [0-2]$/.test(n.props.children)).map(n => n.props.children), ['Fixture 1', 'Fixture 2', 'Fixture 0'], 'reopened list renders persisted order')
-  button(tree, '编辑排序').props.action()
-  // Switch while official mode is ACTIVE: only its own Section had an environment.
-  for (const source of ['parrot', 'sub2api']) {
-    const picker = nodes(r.render()).find(n => n.type === 'Picker' && n.props.title === '账号来源')
-    await picker.props.onChanged(source)
-    tree = r.render(); sec = section(tree, '目前账号')
-    assert.equal(sec.props.environments, undefined)
-    assert.equal(nodes(tree).filter(n => n.type === 'EditButton').length, 1)
-    assert.equal(nodes(tree).some(n => n.props?.environments?.editMode), false)
-    assert.equal(nodes(tree).some(n => n.type === 'Button' && ['编辑排序', '完成'].includes(n.props.title)), false)
-    each(tree).props.onMove([0], 3)
-    assert.deepEqual(ids(r.api.cachedAccounts()), ['antigravity:2', 'antigravity:3', 'antigravity:1'], source + ' keeps original native move')
-  }
-  assert.equal(r.counts().fetches, 0)
-  assert.equal(JSON.stringify([...r.kc]), credentials, 'buttons and moves never change credentials')
-  for (const count of [0, 1]) { const small = runtime(); small.seed(count); const tree = nodes(small.render()); assert.equal(tree.some(n => n.type === 'Button' && ['编辑排序', '完成'].includes(n.props.title)), false) }
-  console.log('PASS production TSX: 编辑排序 -> shared native editMode active -> 完成 -> inactive; original ForEach move persists across reopen; only official Section bound; remote EditButton/move unaffected even after switching from active official mode; zero network/credential mutation')
-  for (const options of [{ missingGlobal: true }, { mode: undefined }, { mode: null }, { mode: {} }, { mode: { active: EditMode.active } }, { mode: { inactive: EditMode.inactive } }, { noObservable: true }]) {
-    const old = runtime(options); old.seed(); const tree = old.render()
-    assert.equal(nodes(tree).filter(n => n.type === 'EditButton').length, 1, 'old native EditButton retained, not fake renamed')
-    assert.equal(section(tree, '登录账号').props.environments, undefined)
-    assert.equal(nodes(tree).some(n => n.type === 'Button' && n.props.title === '编辑排序'), false)
-    each(tree).props.onMove([0], 3)
-    assert.deepEqual(ids(old.api.sortAccounts(old.api.officialAccounts(), 'official')), ['antigravity:2', 'antigravity:3', 'antigravity:1'])
-    assert.equal(old.counts().fetches, 0)
-  }
-  {
-  const old = runtime({ noNative: true }); old.seed(); const tree = old.render()
-  assert.equal(nodes(tree).some(n => n.type === 'EditButton' || n.type === 'ForEach'), false)
-  assert.equal(section(tree, '登录账号').props.environments, undefined)
-  const link = nodes(tree).find(n => n.type === 'NavigationLink' && n.props.destination.type === old.app.AccountOrderPage)
-  assert.ok(link, 'preexisting sort-page fallback retained')
-  const reorder = nodes(old.walk(link.props.destination)).find(n => n.type === 'ReorderableForEach')
-  assert.ok(reorder); reorder.props.onMove([0], 2)
-  assert.deepEqual(ids(old.api.sortAccounts(old.api.officialAccounts(), 'official')), ['antigravity:2', 'antigravity:3', 'antigravity:1'])
-  assert.equal(old.counts().fetches, 0)
-  }
-  console.log('PASS old APIs: missing/null/incomplete EditMode or absent useObservable retain real native EditButton and persistence; missing native sort exports retain working existing sort page. Observable host model is not native gesture/animation proof.')
+  for(const count of [0,1]) {const r=runtime();r.seed(count);const header=r.walk(section(r.render(),'登录账号').props.header);assert.equal(nodes(header).some(n=>n.type==='EditButton'||n.props?.children==='排序'),false)}
+  const old=runtime({noNative:true});old.seed();const tree=old.render()
+  assert.equal(nodes(tree).some(n=>n.type==='EditButton'),false)
+  assert.ok(nodes(tree).find(n=>n.type==='NavigationLink'&&n.props.destination.type===old.app.AccountOrderPage))
+  console.log('PASS original native EditButton restored with adjacent 排序 text only; no custom editMode/action; original move persistence, source isolation and fallback retained. Native gesture validation requires device.')
 }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })
 module.exports = { runtime, nodes, section }

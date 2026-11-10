@@ -2661,7 +2661,8 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     assert.deepEqual(ids(),[ds,'manage-codex','claude:manage:org']);assert.deepEqual(labels(),['1. deepseek Manage DeepSeek','2. codex manage@codex.test','3. claude manage@claude.test'])
     // Native (exports present): header EditButton, single ForEach with onMove, no official sub-page entry; rows keep swipe/name link.
     const loginSec=()=>render().find(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号')
-    assert.deepEqual(Array.from(loginSec().props.header.props.children.filter(Boolean),n=>n.type),['Text','Spacer','EditButton'])
+    assert.deepEqual(Array.from(loginSec().props.header.props.children.filter(Boolean),n=>n.type),['Text','Spacer','HStack'])
+    const editSuffix=loginSec().props.header.props.children.filter(Boolean)[2];assert.equal(editSuffix.props.spacing,0);assert.deepEqual(Array.from(editSuffix.props.children,n=>n.type),['EditButton','Text']);assert.equal(editSuffix.props.children[1].props.children,'排序')
     assert.ok(!managementUI.some(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage'))
     const nativeEach=()=>render().filter(n=>n?.type==='ForEach');assert.equal(nativeEach().length,1);const fe=nativeEach()[0]
     assert.equal(fe.props.count,3);assert.equal(fe.props.onDelete,undefined);assert.equal(typeof fe.props.onMove,'function')
