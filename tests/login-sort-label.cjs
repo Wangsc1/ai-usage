@@ -1,10 +1,11 @@
-// Real SettingsView/ForEach callbacks + documented Observable<EditMode> contract, offline only.
+// Production SettingsView/ForEach callbacks. Host layout follows IMG_5633 read-only device probe:
+// scripting.EditMode undefined; global EditMode object with active/inactive; scripting.useObservable function.
+// Native implementations remain synthetic; this is not an iOS gesture/animation test.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
 const ts = require(process.env.TYPESCRIPT_PATH || 'typescript'), root = path.resolve(__dirname, '..')
-class EditMode {
-  constructor(value) { this.value = value; this.isEditing = value === 'active' }
-  static active() { return new EditMode('active') }
-  static inactive() { return new EditMode('inactive') }
+const EditMode = {
+  active: () => ({ value: 'active', isEditing: true }),
+  inactive: () => ({ value: 'inactive', isEditing: false }),
 }
 function runtime(options = {}) {
   const modules = {}, store = new Map(), kc = new Map(), states = []
@@ -15,7 +16,7 @@ function runtime(options = {}) {
     return states[i]
   }
   const scripting = new Proxy({
-    EditMode: Object.hasOwn(options, 'mode') ? options.mode : EditMode,
+    EditMode: undefined, // Explicitly absent from the module, including its Proxy fallback.
     useObservable: options.noObservable ? undefined : observable,
     EditButton: options.noNative ? undefined : 'EditButton', ForEach: options.noNative ? undefined : 'ForEach',
     useState(initial) { const i = hook++; if (!(i in states)) states[i] = initial; return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v }] },
@@ -30,10 +31,25 @@ function runtime(options = {}) {
     fetch: () => { fetches++; throw Error('no network permitted') },
     setTimeout: () => { throw Error('no timer expected') }, clearTimeout() {},
   })
+  if (!options.missingGlobal) context.EditMode = Object.hasOwn(options, 'mode') ? options.mode : EditMode
+  assert.equal(scripting.EditMode, undefined)
+  if (!Object.hasOwn(options, 'mode') && !options.missingGlobal) {
+    assert.equal(vm.runInContext('typeof EditMode', context), 'object')
+    assert.equal(vm.runInContext('typeof EditMode.active', context), 'function')
+    assert.equal(vm.runInContext('typeof EditMode.inactive', context), 'function')
+  }
   function load(name) {
     if (modules[name]) return modules[name].exports
     let source = fs.readFileSync(path.join(root, name), 'utf8')
-    if (name === 'index.tsx') source = source.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, AccountOrderPage }')
+    if (name === 'index.tsx') {
+      // Optional exact historical source supplied for the one-off 1.57 regression reproduction.
+      if (options.indexSource) source = options.indexSource
+      if (options.reintroduce157Import) {
+        assert.ok(source.includes('Button, EditButton, ForEach,'))
+        source = source.replace('Button, EditButton, ForEach,', 'Button, EditButton, EditMode, ForEach,')
+      }
+      source = source.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, AccountOrderPage }')
+    }
     const out = ts.transpileModule(source, { fileName: name, compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, jsxImportSource: 'scripting' }, reportDiagnostics: true })
     assert.equal(out.diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error).length, 0, name)
     const m = modules[name] = { exports: {} }, jsx = (type, props) => ({ type, props })
@@ -74,6 +90,15 @@ const section = (tree, title) => {
 }
 const ids = xs => Array.from(xs, x => x.id)
 async function main() {
+  // Reintroducing just the original bad import must reproduce the observed fallback, even though
+  // the global API exists. Run the same production component rather than testing a boolean alone.
+  const broken = runtime({ reintroduce157Import: true }); broken.seed()
+  const brokenTree = broken.render()
+  assert.equal(section(brokenTree, '登录账号').props.environments, undefined)
+  assert.equal(nodes(brokenTree).filter(n => n.type === 'EditButton').length, 1)
+  assert.equal(nodes(brokenTree).some(n => n.type === 'Button' && n.props.title === '编辑排序'), false)
+  assert.equal(broken.counts().fetches, 0)
+  console.log('PASS reproduces 1.57 import regression: module EditMode missing shadows supported host global, original EditButton fallback rendered')
   const r = runtime(); r.seed()
   let tree = r.render(), sec = section(tree, '登录账号')
   const mode = sec.props.environments.editMode
@@ -118,7 +143,7 @@ async function main() {
   assert.equal(JSON.stringify([...r.kc]), credentials, 'buttons and moves never change credentials')
   for (const count of [0, 1]) { const small = runtime(); small.seed(count); const tree = nodes(small.render()); assert.equal(tree.some(n => n.type === 'Button' && ['编辑排序', '完成'].includes(n.props.title)), false) }
   console.log('PASS production TSX: 编辑排序 -> shared native editMode active -> 完成 -> inactive; original ForEach move persists across reopen; only official Section bound; remote EditButton/move unaffected even after switching from active official mode; zero network/credential mutation')
-  for (const options of [{ mode: undefined }, { mode: null }, { mode: {} }, { mode: { active: EditMode.active } }, { mode: { inactive: EditMode.inactive } }, { noObservable: true }]) {
+  for (const options of [{ missingGlobal: true }, { mode: undefined }, { mode: null }, { mode: {} }, { mode: { active: EditMode.active } }, { mode: { inactive: EditMode.inactive } }, { noObservable: true }]) {
     const old = runtime(options); old.seed(); const tree = old.render()
     assert.equal(nodes(tree).filter(n => n.type === 'EditButton').length, 1, 'old native EditButton retained, not fake renamed')
     assert.equal(section(tree, '登录账号').props.environments, undefined)
@@ -140,4 +165,5 @@ async function main() {
   }
   console.log('PASS old APIs: missing/null/incomplete EditMode or absent useObservable retain real native EditButton and persistence; missing native sort exports retain working existing sort page. Observable host model is not native gesture/animation proof.')
 }
-main().catch(e => { console.error(e); process.exitCode = 1 })
+if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })
+module.exports = { runtime, nodes, section }

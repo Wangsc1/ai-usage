@@ -1,7 +1,7 @@
 import { refreshAccount, requestLocalWidgetProjection, accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
-  Button, EditButton, EditMode, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, WebView, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
@@ -13,7 +13,8 @@ import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, cl
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
-// Older runtimes keep their native EditButton (or the existing sort-page fallback).
+// EditMode is a host global, not a scripting export. Older runtimes keep their native EditButton
+// (or the existing sort-page fallback) when the global editing API is unavailable.
 const CUSTOM_LOGIN_SORT = NATIVE_SORT && typeof useObservable === "function" && typeof EditMode !== "undefined" && EditMode != null
   && typeof EditMode.active === "function" && typeof EditMode.inactive === "function"
 // Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
