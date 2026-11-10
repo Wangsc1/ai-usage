@@ -1,6 +1,5 @@
-// Production SettingsView/ForEach callbacks. Host layout follows IMG_5633 read-only device probe:
-// scripting.EditMode undefined; global EditMode object with active/inactive; scripting.useObservable function.
-// Native implementations remain synthetic; this is not an iOS gesture/animation test.
+// Production TSX + documented read-only EnvironmentValuesReader callbacks, offline only.
+// Reader updates below model native environment changes, not native button clicks or pixels.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
 const ts = require(process.env.TYPESCRIPT_PATH || 'typescript'), root = path.resolve(__dirname, '..')
 const EditMode = {
@@ -10,13 +9,15 @@ const EditMode = {
 function runtime(options = {}) {
   const modules = {}, store = new Map(), kc = new Map(), states = []
   let hook = 0, reloads = 0, fetches = 0
+  let nativeMode = Object.freeze({ isEditing: false, value: 'inactive' })
   const observable = initial => {
     const i = hook++
     if (!(i in states)) states[i] = { value: typeof initial === 'function' ? initial() : initial, setValue(v) { this.value = v } }
     return states[i]
   }
   const scripting = new Proxy({
-    EditMode: undefined, // Explicitly absent from the module, including its Proxy fallback.
+    EditMode: undefined, // No script-side editing API is used.
+    EnvironmentValuesReader: options.noReader ? undefined : options.nullReader ? null : 'EnvironmentValuesReader',
     useObservable: options.noObservable ? undefined : observable,
     EditButton: options.noNative ? undefined : 'EditButton', ForEach: options.noNative ? undefined : 'ForEach',
     useState(initial) { const i = hook++; if (!(i in states)) states[i] = initial; return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v }] },
@@ -59,7 +60,12 @@ function runtime(options = {}) {
     if (typeof n.type === 'function') return walk(n.type(n.props), out, ancestors)
     out.push({ node: n, ancestors })
     const next = [...ancestors, n]
-    walk(n.props?.children, out, next); walk(n.props?.header, out, next)
+    if (n.type === 'EnvironmentValuesReader') {
+      assert.deepEqual(Array.from(n.props.keys), ['editMode'])
+      assert.equal(typeof n.props.children, 'function')
+      walk(n.props.children(Object.freeze({ editMode: nativeMode })), out, next)
+    } else walk(n.props?.children, out, next)
+    walk(n.props?.header, out, next)
     if (n.type === 'ForEach') for (let i = 0; i < n.props.count; i++) walk(n.props.itemBuilder(i), out, next)
     return out
   }
@@ -73,10 +79,9 @@ function runtime(options = {}) {
     kc.set('ai_usage_antigravity_oauth_v1', JSON.stringify(accounts.slice(0, count).map(a => ({ id: a.id, email: a.name, access: 'SYNTHETIC', refresh: 'SYNTHETIC', expiresAt: Date.now() + 3600000 }))))
     for (const key of ['ai_usage_official_cache_v1', 'ai_usage_cache_v1', 'ai_usage_sub2api_quota_v1']) store.set(key, { accounts: accounts.slice(0, count), today: null, month: null, todayByFamily: {}, monthByFamily: {}, fetchedAt: Date.now() })
   }
-  return { api, app, store, kc, render, seed, walk, reopen: () => { states.length = 0 }, counts: () => ({ reloads, fetches }) }
+  return { api, app, store, kc, render, seed, walk, setNativeMode: value => { nativeMode = value == null ? null : Object.freeze({ isEditing: value, value: value ? 'active' : 'inactive' }) }, reopen: () => { states.length = 0 }, counts: () => ({ reloads, fetches }) }
 }
 const nodes = tree => tree.map(x => x.node)
-const button = (tree, title) => { const b = nodes(tree).find(n => n.type === 'Button' && n.props.title === title); assert.ok(b, title); return b }
 const each = tree => { const n = nodes(tree).find(n => n.type === 'ForEach'); assert.ok(n); return n }
 const section = (tree, title) => {
   const row = tree.find(x => x.node.type === 'Text' && x.node.props.children === title)
@@ -85,35 +90,68 @@ const section = (tree, title) => {
 const ids = xs => Array.from(xs, x => x.id)
 async function main() {
   for (const options of [{}, {missingGlobal:true}, {noObservable:true}]) {
-    const r=runtime(options);r.seed();let tree=r.render()
-    const sec=section(tree,'登录账号')
-    assert.equal(sec.props.environments,undefined,'native environment remains untouched')
-    const header=r.walk(sec.props.header)
-    const group=nodes(header).find(n=>n.type==='HStack' && n.props.spacing===0)
-    assert.ok(group)
-    assert.deepEqual(Array.from(group.props.children,n=>n.type),['EditButton','Text'])
-    assert.equal(group.props.children[1].props.children,'排序')
-    assert.equal(Object.keys(group.props.children[0].props).length,0,'original EditButton has no replacement action or custom binding')
-    assert.equal(nodes(tree).some(n=>n.type==='Button'&&n.props.title==='编辑排序'),false)
-    const before=JSON.stringify([...r.kc])
-    each(tree).props.onMove([0],3)
+    const r=runtime(options);r.seed()
+    const before=JSON.stringify([...r.kc]), storageBefore=JSON.stringify([...r.store])
+    for (const editing of [false, true, null, false]) {
+      r.setNativeMode(editing)
+      const tree=r.render(), sec=section(tree,'登录账号'), header=r.walk(sec.props.header)
+      assert.equal(sec.props.environments,undefined)
+      assert.equal(nodes(tree).some(n=>n.props?.environments?.editMode),false,'no injected editing state anywhere')
+      const reader=header.find(x=>x.node.type==='EnvironmentValuesReader')
+      assert.ok(reader);assert.ok(reader.ancestors.includes(sec.props.header),'reads inside existing header, not outside Form')
+      const group=nodes(header).find(n=>n.type==='HStack'&&n.props.spacing===0)
+      assert.ok(group,'zero gap, no literal spaces')
+      const native=nodes(header).filter(n=>n.type==='EditButton')
+      assert.equal(native.length,1)
+      assert.deepEqual(Object.keys(native[0].props).sort(),['font','fontWeight','foregroundStyle','tint'])
+      assert.equal(native[0].props.font,'body');assert.equal(native[0].props.fontWeight,'regular')
+      assert.equal(native[0].props.foregroundStyle,'systemBlue');assert.equal(native[0].props.tint,'systemBlue')
+      const suffix=nodes(header).filter(n=>n.type==='Text'&&n.props.children==='排序')
+      assert.equal(suffix.length,editing ? 0 : 1,'active native environment hides suffix; inactive/null shows it')
+      if (!editing) {
+        for (const key of ['font','fontWeight','foregroundStyle']) assert.equal(suffix[0].props[key],native[0].props[key])
+        assert.deepEqual(Array.from(group.props.children.filter(Boolean),n=>n.type),['EditButton','Text'])
+        assert.equal(group.props.children[1].props.children,'排序','no leading/trailing space')
+      } else assert.deepEqual(Array.from(group.props.children.filter(Boolean),n=>n.type),['EditButton'],'only native done control remains')
+      assert.equal(nodes(tree).some(n=>n.type==='Button'&&['编辑排序','完成'].includes(n.props.title)),false,'no replacement action or title')
+    }
+    assert.equal(JSON.stringify([...r.store]),storageBefore,'environment updates write no application data')
+    each(r.render()).props.onMove([0],3)
     assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
+    assert.deepEqual(r.store.get('ai_usage_official_order_v1'),['antigravity:2','antigravity:3','antigravity:1'])
+    assert.equal(r.counts().reloads,1)
     r.reopen();assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
+    r.setNativeMode(true)
     for(const source of ['parrot','sub2api']) {
       const picker=nodes(r.render()).find(n=>n.type==='Picker'&&n.props.title==='账号来源')
       await picker.props.onChanged(source)
-      tree=r.render()
-      const remoteHeader=r.walk(section(tree,'目前账号').props.header)
-      assert.equal(nodes(remoteHeader).filter(n=>n.type==='EditButton').length,1)
-      assert.equal(nodes(remoteHeader).some(n=>n.type==='Text'&&n.props.children==='排序'),false)
+      const tree=r.render(), remote=section(tree,'目前账号'), remoteHeader=r.walk(remote.props.header)
+      assert.equal(remote.props.environments,undefined)
+      const native=nodes(remoteHeader).filter(n=>n.type==='EditButton')
+      assert.equal(native.length,1);assert.deepEqual(Object.keys(native[0].props),[],'remote button props unchanged')
+      assert.equal(nodes(remoteHeader).some(n=>n.type==='EnvironmentValuesReader'||n.type==='Text'&&n.props.children==='排序'),false)
+      each(tree).props.onMove([0],3)
+      assert.deepEqual(ids(r.api.cachedAccounts()),['antigravity:2','antigravity:3','antigravity:1'])
     }
     assert.equal(r.counts().fetches,0);assert.equal(JSON.stringify([...r.kc]),before)
   }
-  for(const count of [0,1]) {const r=runtime();r.seed(count);const header=r.walk(section(r.render(),'登录账号').props.header);assert.equal(nodes(header).some(n=>n.type==='EditButton'||n.props?.children==='排序'),false)}
+  for(const options of [{noReader:true},{nullReader:true}]) {
+    const old=runtime(options);old.seed()
+    for(const editing of [false,true,null]) {
+      old.setNativeMode(editing)
+      const header=old.walk(section(old.render(),'登录账号').props.header)
+      assert.equal(nodes(header).some(n=>n.type==='EnvironmentValuesReader'||n.type==='Text'&&n.props.children==='排序'),false)
+      const native=nodes(header).filter(n=>n.type==='EditButton')
+      assert.equal(native.length,1);assert.deepEqual(Object.keys(native[0].props),[],'fallback is untouched original button')
+    }
+    each(old.render()).props.onMove([0],3)
+    assert.deepEqual(ids(old.api.sortAccounts(old.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
+  }
+  for(const count of [0,1]) {const r=runtime();r.seed(count);const header=r.walk(section(r.render(),'登录账号').props.header);assert.equal(nodes(header).some(n=>n.type==='EditButton'||n.type==='EnvironmentValuesReader'||n.props?.children==='排序'),false)}
   const old=runtime({noNative:true});old.seed();const tree=old.render()
   assert.equal(nodes(tree).some(n=>n.type==='EditButton'),false)
   assert.ok(nodes(tree).find(n=>n.type==='NavigationLink'&&n.props.destination.type===old.app.AccountOrderPage))
-  console.log('PASS original native EditButton restored with adjacent 排序 text only; no custom editMode/action; original move persistence, source isolation and fallback retained. Native gesture validation requires device.')
+  console.log('PASS native EditButton untouched except matching explicit blue/body/regular style; read-only header reader inactive/null -> adjacent 排序, active -> no suffix, zero spacing; missing reader -> plain native fallback; ForEach persistence and remote button/move unchanged; zero network. Native labels, environment propagation, taps and pixels require device validation.')
 }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })
 module.exports = { runtime, nodes, section }

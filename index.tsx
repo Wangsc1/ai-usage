@@ -1,7 +1,7 @@
 import { refreshAccount, requestLocalWidgetProjection, accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
-  Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, EditButton, EnvironmentValuesReader, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, WebView, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
@@ -13,6 +13,16 @@ import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, cl
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
+// Read the native Form/header environment only; EditButton still owns its action and editing state.
+function OfficialSortButton() {
+  if (typeof EnvironmentValuesReader === "undefined" || EnvironmentValuesReader == null) return <EditButton />
+  return <EnvironmentValuesReader keys={["editMode"]}>
+    {env => <HStack spacing={0}>
+      <EditButton font="body" fontWeight="regular" foregroundStyle="systemBlue" tint="systemBlue" />
+      {env.editMode?.isEditing ? null : <Text font="body" fontWeight="regular" foregroundStyle="systemBlue">排序</Text>}
+    </HStack>}
+  </EnvironmentValuesReader>
+}
 // Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
 const ICON_SIZE = 17
 function providerIconCode(provider: string) {
@@ -634,7 +644,7 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <HStack spacing={0}><EditButton /><Text>排序</Text></HStack> : null}</HStack>}>
+      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <OfficialSortButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
           {!dsAdding && (!claude || claude.manual && !busy) && !codexBrowser && !workbuddy && !wbPreparing && !agBrowser
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
