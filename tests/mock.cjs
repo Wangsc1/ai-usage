@@ -655,7 +655,9 @@ async function main() {
   assert.ok(ui.some(x=>x.type==='ForEach' && typeof x.props.onMove==='function'));assert.ok(expand(ui.find(x=>x.type==='Section'&&expand(x.props.header).includes('目前账号')).props.header).some(x=>x?.type==='EditButton'))
   const nativeSettingsView=SettingsView;SettingsView=loadSettingsWith(['EditButton','ForEach']);ui=render()
   const indexSource=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
-  for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','onMove={busy','EditMode'])assert.ok(!indexSource.includes(old),old)
+  for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','onMove={busy'])assert.ok(!indexSource.includes(old),old)
+  // EditMode is now a documented optional API; unsupported hosts must keep the existing fallback.
+  assert.ok(!ui.some(x=>x.props?.environments?.editMode),'no custom editMode binding without native sort exports')
   assert.ok(!ui.some(x=>x.type==='ForEach'||x.type==='EditButton'||x?.props?.onDrag||x?.props?.onDrop))
   assert.equal(render().find(x=>x.type==='Form').props.toolbar.confirmationAction,undefined)
   // Minimal documented-shape mocks: Observable{value,setValue}, chainable modifiers() recorder.
@@ -2862,7 +2864,8 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     kc.clear();for(const[k,v]of oldKC)kc.set(k,v);storage.clear();for(const[k,v]of oldStore)storage.set(k,v);handler=oldHandler;states.length=0
     console.log('PASS: Parrot/Sub2API focus-cleared masked TextField (4 prefix/rest stars, short all stars), old mask never persisted, no-focus events ignored, empty preserves key/new replaces/blur+save+reopen masked/clear default prompt/no secrets in Storage; native swipe-only deletion exact-ID for all three providers; no standalone test buttons; add+Spacer+provider menu row and provider switches retained')
   }
-  assert.equal(scripting.EditMode,undefined);assert.ok(!fs.readFileSync(path.join(root,'index.tsx'),'utf8').includes('EditMode'));
+  assert.equal(scripting.EditMode,undefined)
+  assert.ok(!render().some(n=>n.props?.environments?.editMode),'missing EditMode still renders without a custom binding')
   // Execute the real App run/Navigation.present entry and ALL mount effects (normal UI harness suppresses them).
   {
     const oldKC=[...kc.entries()],oldStore=[...storage.entries()],oldHandler=handler,oldEffect=scripting.useEffect,oldNavigation=scripting.Navigation,oldScript=scripting.Script,oldReload=scripting.Widget.reloadAll
