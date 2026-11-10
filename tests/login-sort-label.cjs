@@ -1,6 +1,8 @@
 // Production SettingsView with documented global EditMode/Observable API.
 // Resolve BOTH inherited environment and nearest list-owner binding; Section-only injection is NOT
-// treated as native list editing. This checks structure/actions, not iOS handle rendering or taps.
+// treated as native list editing. Plain value writes deliberately do NOT notify the native binding.
+// Header refresh deliberately requires a useState update, not a forced render after every action.
+// This checks the documented notification path, not iOS handle rendering or taps.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
 const ts = require(process.env.TYPESCRIPT_PATH || 'typescript'), root = path.resolve(__dirname, '..')
 const EditMode = {
@@ -10,16 +12,33 @@ const EditMode = {
 function runtime(options = {}) {
   const modules = {}, store = new Map(), kc = new Map(), states = []
   let hook = 0, reloads = 0, fetches = 0, activeCalls = 0, inactiveCalls = 0
+  let stateUpdates = 0, setValueCalls = 0, nativeNotifications = 0, renderedRevision = -1, lastTree
+  let mountedBinding, unsubscribeBinding
+  const nativeValues = new WeakMap()
   const observable = initial => {
     const i = hook++
-    if (!(i in states)) states[i] = { value: typeof initial === 'function' ? initial() : initial, setValue(v) { this.value = v } }
+    if (!(i in states)) {
+      const listeners = new Set()
+      const obs = { value: typeof initial === 'function' ? initial() : initial,
+        setValue(v) {
+          setValueCalls++
+          if (options.throwSetValue) throw Error('synthetic notification failure')
+          const previous = this.value; this.value = v
+          listeners.forEach(fn => fn(v, previous))
+        },
+        subscribe(fn) { listeners.add(fn) }, unsubscribe(fn) { listeners.delete(fn) },
+      }
+      if (options.noSetValue) delete obs.setValue
+      if (options.nullSetValue) obs.setValue = null
+      states[i] = obs
+    }
     return states[i]
   }
   const scripting = new Proxy({
     EditMode: undefined, // Verified device layout: only the host global exists.
     useObservable: options.noObservable ? undefined : observable,
     EditButton: options.noNative ? undefined : 'EditButton', ForEach: options.noNative ? undefined : 'ForEach',
-    useState(initial) { const i = hook++; if (!(i in states)) states[i] = initial; return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v }] },
+    useState(initial) { const i = hook++; if (!(i in states)) states[i] = initial; return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v; stateUpdates++ }] },
     useEffect() {}, Navigation: { useDismiss: () => () => {} },
     Widget: { reloadAll: async () => { reloads++ } },
     modifiers: () => { const m = new Proxy({}, { get: () => () => m }); return m },
@@ -46,6 +65,12 @@ function runtime(options = {}) {
     let source = fs.readFileSync(path.join(root, name), 'utf8')
     if (name === 'index.tsx') {
       if (options.indexSource) source = options.indexSource
+      if (options.directValueOnly || options.noTitleState) {
+        const update = 'officialEditMode.setValue(next)\n          // Match the calendar sort control: notify the binding, then refresh the nested header via state.\n          setSortUI({ editing: next.isEditing, failed: false })'
+        assert.ok(source.includes(update))
+        source = source.replace(update, options.directValueOnly ? 'officialEditMode.value = next' : 'officialEditMode.setValue(next)')
+        if (options.directValueOnly) source = source.replace('title={sortUI.editing ?', 'title={officialEditMode.value.isEditing ?')
+      }
       if (options.sectionOnly) {
         const binding = 'environments={source === \"official\" && officialEditMode ? { editMode: officialEditMode } : undefined}'
         assert.ok(source.includes(binding))
@@ -75,7 +100,25 @@ function runtime(options = {}) {
     if (n.type === 'ForEach') for (let i = 0; i < n.props.count; i++) walk(n.props.itemBuilder(i), out, next)
     return out
   }
-  const render = () => { hook = 0; return walk(app.SettingsView()) }
+  const render = () => {
+    hook = 0
+    const tree = walk(app.SettingsView())
+    const form = tree.find(x => x.node.type === 'Form')?.node
+    const mode = form?.props.environments?.editMode
+    if (mode !== mountedBinding) {
+      unsubscribeBinding?.()
+      mountedBinding = mode
+      if (mode) {
+        nativeValues.set(mode, mode.value)
+        const notified = value => { nativeNotifications++; nativeValues.set(mode, value) }
+        mode.subscribe(notified)
+        unsubscribeBinding = () => mode.unsubscribe(notified)
+      } else unsubscribeBinding = undefined
+    }
+    lastTree = tree; renderedRevision = stateUpdates
+    return tree
+  }
+  const flushUI = () => stateUpdates !== renderedRevision ? render() : lastTree
   const accounts = ['antigravity:1', 'antigravity:2', 'antigravity:3'].map((id, i) => ({
     id, name: `Fixture ${i}`, provider: 'antigravity', enabled: true, available: true,
     fiveHour: { remainingPercent: 70, usedPercent: 30, resetsAt: null }, sevenDay: { remainingPercent: 70, usedPercent: 30, resetsAt: null }, resetCredits: null,
@@ -85,7 +128,7 @@ function runtime(options = {}) {
     kc.set('ai_usage_antigravity_oauth_v1', JSON.stringify(accounts.slice(0, count).map(a => ({ id: a.id, email: a.name, access: 'SYNTHETIC', refresh: 'SYNTHETIC', expiresAt: Date.now() + 3600000 }))))
     for (const key of ['ai_usage_official_cache_v1', 'ai_usage_cache_v1', 'ai_usage_sub2api_quota_v1']) store.set(key, { accounts: accounts.slice(0, count), today: null, month: null, todayByFamily: {}, monthByFamily: {}, fetchedAt: Date.now() })
   }
-  return { api, app, store, kc, render, seed, walk, reopen: () => { states.length = 0 }, counts: () => ({ reloads, fetches, activeCalls, inactiveCalls }) }
+  return { api, app, store, kc, render, flushUI, seed, walk, nativeValue: mode => nativeValues.get(mode), reopen: () => { states.length = 0 }, counts: () => ({ reloads, fetches, activeCalls, inactiveCalls, stateUpdates, setValueCalls, nativeNotifications }) }
 }
 const nodes = tree => tree.map(x => x.node)
 const each = tree => { const n = nodes(tree).find(n => n.type === 'ForEach'); assert.ok(n); return n }
@@ -109,6 +152,13 @@ function assertOwnerScope(tree) {
   assert.deepEqual(nodes(tree).filter(n => n.props?.environments?.editMode), [row.owner])
   return { mode: row.ownerMode, action: action.node }
 }
+function assertNotified(r, before, mode, editing) {
+  const after = r.counts()
+  assert.equal(after.setValueCalls, before.setValueCalls + 1, 'action must invoke setValue, not only store value')
+  assert.equal(after.nativeNotifications, before.nativeNotifications + 1, 'mounted Form binding receives subscription notification')
+  assert.equal(after.stateUpdates, before.stateUpdates + 1, 'nested header title refresh uses ordinary state')
+  assert.equal(r.nativeValue(mode).isEditing, editing)
+}
 async function main() {
   const r=runtime();r.seed()
   let tree=r.render(), {mode,action}=assertOwnerScope(tree)
@@ -121,7 +171,8 @@ async function main() {
   let calls=r.counts(); action.props.action()
   assert.equal(r.counts().activeCalls,calls.activeCalls+1,'action invokes global active()')
   assert.equal(mode.value.isEditing,true)
-  tree=r.render();let current=assertOwnerScope(tree)
+  assertNotified(r,calls,mode,true)
+  tree=r.flushUI();let current=assertOwnerScope(tree)
   assert.equal(current.mode,mode);assert.equal(current.action.props.title,'完成')
   assert.equal(tree.find(x=>x.node.type==='ForEach').ownerMode.value.isEditing,true,'list-owner binding becomes active, not merely Section state')
   each(tree).props.onMove([0],3)
@@ -132,7 +183,8 @@ async function main() {
   calls=r.counts();current.action.props.action()
   assert.equal(r.counts().inactiveCalls,calls.inactiveCalls+1,'done invokes global inactive()')
   assert.equal(mode.value.isEditing,false)
-  assert.equal(assertOwnerScope(r.render()).action.props.title,'编辑排序')
+  assertNotified(r,calls,mode,false)
+  assert.equal(assertOwnerScope(r.flushUI()).action.props.title,'编辑排序')
   r.reopen();tree=r.render();({mode,action}=assertOwnerScope(tree))
   assert.deepEqual(nodes(tree).filter(n=>n.type==='Text'&&/^Fixture [0-2]$/.test(n.props.children)).map(n=>n.props.children),['Fixture 1','Fixture 2','Fixture 0'],'reopened actual rows use persisted order')
   assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
@@ -141,11 +193,16 @@ async function main() {
   assert.equal(r.counts().fetches,0,'editing/done and local sorting do not request data')
   for (const source of ['parrot','sub2api']) {
     const requestsBefore=r.counts().fetches
-    action=assertOwnerScope(r.render()).action;action.props.action()
+    action=assertOwnerScope(r.render()).action;calls=r.counts();action.props.action()
+    assertNotified(r,calls,mode,true)
     assert.equal(r.counts().fetches,requestsBefore,'whole-title edit action is local')
     assert.equal(mode.value.isEditing,true)
-    const picker=nodes(r.render()).find(n=>n.type==='Picker'&&n.props.title==='账号来源')
+    const picker=nodes(r.flushUI()).find(n=>n.type==='Picker'&&n.props.title==='账号来源')
+    const resetCalls=r.counts()
     await picker.props.onChanged(source)
+    assert.equal(r.counts().setValueCalls,resetCalls.setValueCalls+1,'source reset also calls setValue')
+    assert.equal(r.counts().nativeNotifications,resetCalls.nativeNotifications+1)
+    assert.equal(r.nativeValue(mode).isEditing,false)
     assert.equal(mode.value.isEditing,false,'leaving official clears edit state before dropping binding')
     tree=r.render()
     assert.equal(nodes(tree).some(n=>n.props?.environments?.editMode),false,'remote Form/Section receive no custom editing environment')
@@ -164,7 +221,7 @@ async function main() {
     assert.equal(current.mode.value.isEditing,false);assert.equal(current.action.props.title,'编辑排序')
   }
   assert.equal(r.counts().fetches,6);assert.equal(JSON.stringify([...r.kc]),before)
-  for(const options of [{missingGlobal:true},{mode:undefined},{mode:null},{mode:{}},{mode:{active:EditMode.active}},{mode:{inactive:EditMode.inactive}},{noObservable:true}]) {
+  for(const options of [{missingGlobal:true},{mode:undefined},{mode:null},{mode:{}},{mode:{active:EditMode.active}},{mode:{inactive:EditMode.inactive}},{noObservable:true},{noSetValue:true},{nullSetValue:true}]) {
     const old=runtime(options);old.seed();const tree=old.render()
     assert.equal(nodes(tree).some(n=>n.props?.environments?.editMode),false)
     const header=old.walk(section(tree,'登录账号').props.header)
@@ -174,17 +231,41 @@ async function main() {
     each(tree).props.onMove([0],3)
     assert.deepEqual(ids(old.api.sortAccounts(old.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
     assert.equal(old.counts().fetches,0)
+    if (options.noSetValue || options.nullSetValue) {
+      const picker=nodes(old.render()).find(n=>n.type==='Picker'&&n.props.title==='账号来源')
+      await picker.props.onChanged('parrot')
+      assert.equal(old.counts().setValueCalls,0,'source reset safely skips unsupported notification API')
+      assert.equal(nodes(old.flushUI()).some(n=>n.props?.environments?.editMode),false)
+    }
   }
   for(const count of [0,1]) {const r=runtime();r.seed(count);const header=r.walk(section(r.render(),'登录账号').props.header);assert.equal(nodes(header).some(n=>n.type==='EditButton'||n.type==='Button'),false)}
   const old=runtime({noNative:true});old.seed();tree=old.render()
   assert.equal(nodes(tree).some(n=>n.type==='EditButton'||n.props?.environments?.editMode),false)
   assert.ok(nodes(tree).find(n=>n.type==='NavigationLink'&&n.props.destination.type===old.app.AccountOrderPage))
+  const direct=runtime({directValueOnly:true});direct.seed()
+  const original=assertOwnerScope(direct.render()), originalCounts=direct.counts()
+  original.action.props.action()
+  assert.equal(original.mode.value.isEditing,true,'1.61-style write really changes storage')
+  assert.equal(direct.nativeValue(original.mode).isEditing,false,'but must NOT count as a native notification')
+  assert.equal(direct.counts().stateUpdates,originalCounts.stateUpdates)
+  assert.equal(assertOwnerScope(direct.flushUI()).action.props.title,'编辑排序','cached header remains unchanged without state refresh')
+  assert.throws(()=>assertNotified(direct,originalCounts,original.mode,true),/must invoke setValue/)
+  const title=runtime({noTitleState:true});title.seed()
+  const titleOriginal=assertOwnerScope(title.render())
+  titleOriginal.action.props.action()
+  assert.equal(title.nativeValue(titleOriginal.mode).isEditing,true,'setValue alone notifies native binding')
+  assert.equal(assertOwnerScope(title.flushUI()).action.props.title,'编辑排序','but no implicit header render is assumed')
+  const failed=runtime({throwSetValue:true});failed.seed()
+  assertOwnerScope(failed.render()).action.props.action()
+  const failedTree=failed.flushUI()
+  assert.equal(nodes(failedTree).some(n=>n.props?.environments?.editMode),false)
+  assert.equal(nodes(failedTree).filter(n=>n.type==='EditButton').length,1,'sync notification failure falls back to real native control')
   const wrong=runtime({sectionOnly:true});wrong.seed();const wrongTree=wrong.render()
   const wrongRow=wrongTree.find(x=>x.node.type==='ForEach')
   assert.ok(wrongRow.inheritedMode,'negative control really does bind Section descendants')
   assert.equal(wrongRow.ownerMode,undefined,'but cannot configure its parent Form')
   assert.throws(()=>assertOwnerScope(wrongTree),/Form itself must receive/,'reject original 1.58 Section-only structure')
-  console.log('PASS full production SettingsView: single 编辑排序/完成 Button -> global active/inactive; binding on Form owner and inherited by header/ForEach, not Section; original onMove and reopened row order persist; active -> remote drops binding/resets state -> official inactive; missing APIs native fallback; negative Section-only control rejected; edit actions zero fetch, existing source-switch refresh requests intercepted offline. Native handles/taps still require device validation.')
+  console.log('PASS full production SettingsView: single 编辑排序/完成 Button -> global active/inactive; binding on Form owner and inherited by header/ForEach, not Section; original onMove and reopened row order persist; active -> remote drops binding/resets state -> official inactive; missing APIs native fallback; negative Section-only/direct-value/no-title-state controls distinguished; setValue/native subscriptions + ordinary state verified; edit actions zero fetch, existing source-switch refresh requests intercepted offline. Native handles/taps still require device validation.')
 }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })
-module.exports = { runtime, nodes, section, assertOwnerScope }
+module.exports = { runtime, nodes, section, assertOwnerScope, assertNotified }

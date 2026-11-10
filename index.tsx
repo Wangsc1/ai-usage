@@ -261,7 +261,9 @@ function maskedKey(value: string): string {
   return chars.length > 4 ? chars.slice(0, 4).join("") + "*".repeat(chars.length - 4) : "*".repeat(chars.length)
 }
 function SettingsView() {
-  const officialEditMode = CUSTOM_LOGIN_SORT ? useObservable(() => EditMode.inactive()) : null
+  const [sortUI, setSortUI] = useState({ editing: false, failed: false })
+  const sortMode = CUSTOM_LOGIN_SORT ? useObservable(() => EditMode.inactive()) : null
+  const officialEditMode = !sortUI.failed && sortMode && typeof sortMode.setValue === "function" ? sortMode : null
   const close = Navigation.useDismiss()
   const [authorization, setAuthorization] = useState<AuthorizationDestination | null>(null)
   const pushAuthorization: PushAuthorization = destination => {
@@ -314,7 +316,10 @@ function SettingsView() {
   useEffect(() => () => { if (auth.antigravity) cancelAntigravityLogin(auth.antigravity); auth.antigravity = null; if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
-    if (officialEditMode) officialEditMode.value = EditMode.inactive()
+    try {
+      if (officialEditMode) officialEditMode.setValue(EditMode.inactive())
+      setSortUI(current => ({ ...current, editing: false }))
+    } catch { setSortUI({ editing: false, failed: true }) }
     stopAuth()
     saveSource(value as DataSource)
     setSource(value as DataSource)
@@ -641,9 +646,14 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? officialEditMode ? <Button title={officialEditMode.value.isEditing ? "完成" : "编辑排序"} action={() => {
+      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? officialEditMode ? <Button title={sortUI.editing ? "完成" : "编辑排序"} action={() => {
         if (getSource() !== "official") return
-        officialEditMode.value = officialEditMode.value.isEditing ? EditMode.inactive() : EditMode.active()
+        try {
+          const next = officialEditMode.value.isEditing ? EditMode.inactive() : EditMode.active()
+          officialEditMode.setValue(next)
+          // Match the calendar sort control: notify the binding, then refresh the nested header via state.
+          setSortUI({ editing: next.isEditing, failed: false })
+        } catch { setSortUI({ editing: false, failed: true }) }
       }} /> : <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
           {!dsAdding && (!claude || claude.manual && !busy) && !codexBrowser && !workbuddy && !wbPreparing && !agBrowser
