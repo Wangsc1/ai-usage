@@ -1,5 +1,6 @@
-// Production TSX + documented read-only EnvironmentValuesReader callbacks, offline only.
-// Reader updates below model native environment changes, not native button clicks or pixels.
+// Production SettingsView with documented global EditMode/Observable API.
+// Resolve BOTH inherited environment and nearest list-owner binding; Section-only injection is NOT
+// treated as native list editing. This checks structure/actions, not iOS handle rendering or taps.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
 const ts = require(process.env.TYPESCRIPT_PATH || 'typescript'), root = path.resolve(__dirname, '..')
 const EditMode = {
@@ -8,16 +9,14 @@ const EditMode = {
 }
 function runtime(options = {}) {
   const modules = {}, store = new Map(), kc = new Map(), states = []
-  let hook = 0, reloads = 0, fetches = 0
-  let nativeMode = Object.freeze({ isEditing: false, value: 'inactive' })
+  let hook = 0, reloads = 0, fetches = 0, activeCalls = 0, inactiveCalls = 0
   const observable = initial => {
     const i = hook++
     if (!(i in states)) states[i] = { value: typeof initial === 'function' ? initial() : initial, setValue(v) { this.value = v } }
     return states[i]
   }
   const scripting = new Proxy({
-    EditMode: undefined, // No script-side editing API is used.
-    EnvironmentValuesReader: options.noReader ? undefined : options.nullReader ? null : 'EnvironmentValuesReader',
+    EditMode: undefined, // Verified device layout: only the host global exists.
     useObservable: options.noObservable ? undefined : observable,
     EditButton: options.noNative ? undefined : 'EditButton', ForEach: options.noNative ? undefined : 'ForEach',
     useState(initial) { const i = hook++; if (!(i in states)) states[i] = initial; return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v }] },
@@ -32,7 +31,10 @@ function runtime(options = {}) {
     fetch: () => { fetches++; throw Error('no network permitted') },
     setTimeout: () => { throw Error('no timer expected') }, clearTimeout() {},
   })
-  if (!options.missingGlobal) context.EditMode = Object.hasOwn(options, 'mode') ? options.mode : EditMode
+  if (!options.missingGlobal) context.EditMode = Object.hasOwn(options, 'mode') ? options.mode : {
+    active: () => { activeCalls++; return Object.freeze(EditMode.active()) },
+    inactive: () => { inactiveCalls++; return Object.freeze(EditMode.inactive()) },
+  }
   assert.equal(scripting.EditMode, undefined)
   if (!Object.hasOwn(options, 'mode') && !options.missingGlobal) {
     assert.equal(vm.runInContext('typeof EditMode', context), 'object')
@@ -43,6 +45,12 @@ function runtime(options = {}) {
     if (modules[name]) return modules[name].exports
     let source = fs.readFileSync(path.join(root, name), 'utf8')
     if (name === 'index.tsx') {
+      if (options.indexSource) source = options.indexSource
+      if (options.sectionOnly) {
+        const binding = 'environments={source === \"official\" && officialEditMode ? { editMode: officialEditMode } : undefined}'
+        assert.ok(source.includes(binding))
+        source = source.replace(binding, '').replace('<Section header={<HStack frame={{ maxWidth: \"infinity\" }}><Text>登录账号</Text>', '<Section ' + binding + ' header={<HStack frame={{ maxWidth: \"infinity\" }}><Text>登录账号</Text>')
+      }
       source = source.replace(/\nrun\(\)\s*$/, '\nexport { SettingsView, AccountOrderPage }')
     }
     const out = ts.transpileModule(source, { fileName: name, compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, jsxImportSource: 'scripting' }, reportDiagnostics: true })
@@ -58,13 +66,11 @@ function runtime(options = {}) {
     if (Array.isArray(n)) { n.forEach(x => walk(x, out, ancestors)); return out }
     if (typeof n !== 'object') return out
     if (typeof n.type === 'function') return walk(n.type(n.props), out, ancestors)
-    out.push({ node: n, ancestors })
+    const owner = [...ancestors].reverse().find(a => a.type === 'Form' || a.type === 'List')
+    const inherited = [...ancestors].reverse().find(a => a.props?.environments?.editMode)
+    out.push({ node: n, ancestors, owner, ownerMode: owner?.props.environments?.editMode, inheritedMode: inherited?.props.environments?.editMode })
     const next = [...ancestors, n]
-    if (n.type === 'EnvironmentValuesReader') {
-      assert.deepEqual(Array.from(n.props.keys), ['editMode'])
-      assert.equal(typeof n.props.children, 'function')
-      walk(n.props.children(Object.freeze({ editMode: nativeMode })), out, next)
-    } else walk(n.props?.children, out, next)
+    walk(n.props?.children, out, next)
     walk(n.props?.header, out, next)
     if (n.type === 'ForEach') for (let i = 0; i < n.props.count; i++) walk(n.props.itemBuilder(i), out, next)
     return out
@@ -79,7 +85,7 @@ function runtime(options = {}) {
     kc.set('ai_usage_antigravity_oauth_v1', JSON.stringify(accounts.slice(0, count).map(a => ({ id: a.id, email: a.name, access: 'SYNTHETIC', refresh: 'SYNTHETIC', expiresAt: Date.now() + 3600000 }))))
     for (const key of ['ai_usage_official_cache_v1', 'ai_usage_cache_v1', 'ai_usage_sub2api_quota_v1']) store.set(key, { accounts: accounts.slice(0, count), today: null, month: null, todayByFamily: {}, monthByFamily: {}, fetchedAt: Date.now() })
   }
-  return { api, app, store, kc, render, seed, walk, setNativeMode: value => { nativeMode = value == null ? null : Object.freeze({ isEditing: value, value: value ? 'active' : 'inactive' }) }, reopen: () => { states.length = 0 }, counts: () => ({ reloads, fetches }) }
+  return { api, app, store, kc, render, seed, walk, reopen: () => { states.length = 0 }, counts: () => ({ reloads, fetches, activeCalls, inactiveCalls }) }
 }
 const nodes = tree => tree.map(x => x.node)
 const each = tree => { const n = nodes(tree).find(n => n.type === 'ForEach'); assert.ok(n); return n }
@@ -88,70 +94,97 @@ const section = (tree, title) => {
   assert.ok(row, title); return row.ancestors.findLast(n => n.type === 'Section')
 }
 const ids = xs => Array.from(xs, x => x.id)
+function assertOwnerScope(tree) {
+  const row = tree.find(x => x.node.type === 'ForEach')
+  assert.ok(row?.owner && row.owner.type === 'Form', 'Form owns the editable rows')
+  assert.ok(row.ownerMode, 'Form itself must receive editMode, not only its Section')
+  assert.equal(row.inheritedMode, row.ownerMode)
+  const header = section(tree, '登录账号').props.header
+  const actions = tree.filter(x => x.node.type === 'Button' && x.ancestors.includes(header))
+  assert.equal(actions.length, 1, 'single whole-title Button in header')
+  const action = actions[0]
+  assert.equal(action.owner, row.owner)
+  assert.equal(action.inheritedMode, row.ownerMode)
+  assert.equal(section(tree, '登录账号').props.environments, undefined)
+  assert.deepEqual(nodes(tree).filter(n => n.props?.environments?.editMode), [row.owner])
+  return { mode: row.ownerMode, action: action.node }
+}
 async function main() {
-  for (const options of [{}, {missingGlobal:true}, {noObservable:true}]) {
-    const r=runtime(options);r.seed()
-    const before=JSON.stringify([...r.kc]), storageBefore=JSON.stringify([...r.store])
-    for (const editing of [false, true, null, false]) {
-      r.setNativeMode(editing)
-      const tree=r.render(), sec=section(tree,'登录账号'), header=r.walk(sec.props.header)
-      assert.equal(sec.props.environments,undefined)
-      assert.equal(nodes(tree).some(n=>n.props?.environments?.editMode),false,'no injected editing state anywhere')
-      const reader=header.find(x=>x.node.type==='EnvironmentValuesReader')
-      assert.ok(reader);assert.ok(reader.ancestors.includes(sec.props.header),'reads inside existing header, not outside Form')
-      const group=nodes(header).find(n=>n.type==='HStack'&&n.props.spacing===0)
-      assert.ok(group,'zero gap, no literal spaces')
-      const native=nodes(header).filter(n=>n.type==='EditButton')
-      assert.equal(native.length,1)
-      assert.deepEqual(Object.keys(native[0].props).sort(),['font','fontWeight','foregroundStyle','tint'])
-      assert.equal(native[0].props.font,'body');assert.equal(native[0].props.fontWeight,'regular')
-      assert.equal(native[0].props.foregroundStyle,'systemBlue');assert.equal(native[0].props.tint,'systemBlue')
-      const suffix=nodes(header).filter(n=>n.type==='Text'&&n.props.children==='排序')
-      assert.equal(suffix.length,editing ? 0 : 1,'active native environment hides suffix; inactive/null shows it')
-      if (!editing) {
-        for (const key of ['font','fontWeight','foregroundStyle']) assert.equal(suffix[0].props[key],native[0].props[key])
-        assert.deepEqual(Array.from(group.props.children.filter(Boolean),n=>n.type),['EditButton','Text'])
-        assert.equal(group.props.children[1].props.children,'排序','no leading/trailing space')
-      } else assert.deepEqual(Array.from(group.props.children.filter(Boolean),n=>n.type),['EditButton'],'only native done control remains')
-      assert.equal(nodes(tree).some(n=>n.type==='Button'&&['编辑排序','完成'].includes(n.props.title)),false,'no replacement action or title')
-    }
-    assert.equal(JSON.stringify([...r.store]),storageBefore,'environment updates write no application data')
-    each(r.render()).props.onMove([0],3)
-    assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
-    assert.deepEqual(r.store.get('ai_usage_official_order_v1'),['antigravity:2','antigravity:3','antigravity:1'])
-    assert.equal(r.counts().reloads,1)
-    r.reopen();assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
-    r.setNativeMode(true)
-    for(const source of ['parrot','sub2api']) {
-      const picker=nodes(r.render()).find(n=>n.type==='Picker'&&n.props.title==='账号来源')
-      await picker.props.onChanged(source)
-      const tree=r.render(), remote=section(tree,'目前账号'), remoteHeader=r.walk(remote.props.header)
-      assert.equal(remote.props.environments,undefined)
-      const native=nodes(remoteHeader).filter(n=>n.type==='EditButton')
-      assert.equal(native.length,1);assert.deepEqual(Object.keys(native[0].props),[],'remote button props unchanged')
-      assert.equal(nodes(remoteHeader).some(n=>n.type==='EnvironmentValuesReader'||n.type==='Text'&&n.props.children==='排序'),false)
-      each(tree).props.onMove([0],3)
-      assert.deepEqual(ids(r.api.cachedAccounts()),['antigravity:2','antigravity:3','antigravity:1'])
-    }
-    assert.equal(r.counts().fetches,0);assert.equal(JSON.stringify([...r.kc]),before)
+  const r=runtime();r.seed()
+  let tree=r.render(), {mode,action}=assertOwnerScope(tree)
+  assert.equal(action.props.title,'编辑排序')
+  assert.equal(nodes(tree).filter(n=>n.type==='EditButton').length,0)
+  assert.equal(nodes(tree).some(n=>n.type==='Text'&&n.props.children==='排序'),false,'no non-clickable suffix')
+  assert.equal(nodes(tree).some(n=>n.type==='NavigationLink'&&n.props.destination.type===r.app.AccountOrderPage),false)
+  const before=JSON.stringify([...r.kc]), storageBefore=JSON.stringify([...r.store])
+  assert.equal(mode.value.isEditing,false)
+  let calls=r.counts(); action.props.action()
+  assert.equal(r.counts().activeCalls,calls.activeCalls+1,'action invokes global active()')
+  assert.equal(mode.value.isEditing,true)
+  tree=r.render();let current=assertOwnerScope(tree)
+  assert.equal(current.mode,mode);assert.equal(current.action.props.title,'完成')
+  assert.equal(tree.find(x=>x.node.type==='ForEach').ownerMode.value.isEditing,true,'list-owner binding becomes active, not merely Section state')
+  each(tree).props.onMove([0],3)
+  assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
+  assert.deepEqual(r.store.get('ai_usage_official_order_v1'),['antigravity:2','antigravity:3','antigravity:1'])
+  assert.equal(r.counts().reloads,1)
+  assert.deepEqual(nodes(r.render()).filter(n=>n.type==='Text'&&/^Fixture [0-2]$/.test(n.props.children)).map(n=>n.props.children),['Fixture 1','Fixture 2','Fixture 0'])
+  calls=r.counts();current.action.props.action()
+  assert.equal(r.counts().inactiveCalls,calls.inactiveCalls+1,'done invokes global inactive()')
+  assert.equal(mode.value.isEditing,false)
+  assert.equal(assertOwnerScope(r.render()).action.props.title,'编辑排序')
+  r.reopen();tree=r.render();({mode,action}=assertOwnerScope(tree))
+  assert.deepEqual(nodes(tree).filter(n=>n.type==='Text'&&/^Fixture [0-2]$/.test(n.props.children)).map(n=>n.props.children),['Fixture 1','Fixture 2','Fixture 0'],'reopened actual rows use persisted order')
+  assert.deepEqual(ids(r.api.sortAccounts(r.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
+  assert.equal(mode.value.isEditing,false)
+  assert.notEqual(JSON.stringify([...r.store]),storageBefore,'only sorting persists data')
+  assert.equal(r.counts().fetches,0,'editing/done and local sorting do not request data')
+  for (const source of ['parrot','sub2api']) {
+    const requestsBefore=r.counts().fetches
+    action=assertOwnerScope(r.render()).action;action.props.action()
+    assert.equal(r.counts().fetches,requestsBefore,'whole-title edit action is local')
+    assert.equal(mode.value.isEditing,true)
+    const picker=nodes(r.render()).find(n=>n.type==='Picker'&&n.props.title==='账号来源')
+    await picker.props.onChanged(source)
+    assert.equal(mode.value.isEditing,false,'leaving official clears edit state before dropping binding')
+    tree=r.render()
+    assert.equal(nodes(tree).some(n=>n.props?.environments?.editMode),false,'remote Form/Section receive no custom editing environment')
+    const remoteHeader=section(tree,'目前账号').props.header
+    const native=tree.filter(x=>x.node.type==='EditButton'&&x.ancestors.includes(remoteHeader))
+    assert.equal(native.length,1);assert.deepEqual(Object.keys(native[0].node.props),[])
+    assert.equal(native[0].ownerMode,undefined)
+    assert.equal(nodes(tree).some(n=>n.type==='Button'&&n.props.title==='编辑排序'||n.type==='Text'&&n.props.children==='排序'),false)
+    each(tree).props.onMove([0],3)
+    assert.deepEqual(ids(r.api.cachedAccounts()),['antigravity:2','antigravity:3','antigravity:1'])
+    action.props.action();assert.equal(mode.value.isEditing,false,'old official button cannot reactivate while remote')
+    const back=nodes(r.render()).find(n=>n.type==='Picker'&&n.props.title==='账号来源')
+    await back.props.onChanged('official')
+    assert.equal(r.counts().fetches,requestsBefore+3,'unchanged source-switch refresh: 3 synthetic account requests, all intercepted')
+    current=assertOwnerScope(r.render());assert.equal(current.mode,mode)
+    assert.equal(current.mode.value.isEditing,false);assert.equal(current.action.props.title,'编辑排序')
   }
-  for(const options of [{noReader:true},{nullReader:true}]) {
-    const old=runtime(options);old.seed()
-    for(const editing of [false,true,null]) {
-      old.setNativeMode(editing)
-      const header=old.walk(section(old.render(),'登录账号').props.header)
-      assert.equal(nodes(header).some(n=>n.type==='EnvironmentValuesReader'||n.type==='Text'&&n.props.children==='排序'),false)
-      const native=nodes(header).filter(n=>n.type==='EditButton')
-      assert.equal(native.length,1);assert.deepEqual(Object.keys(native[0].props),[],'fallback is untouched original button')
-    }
-    each(old.render()).props.onMove([0],3)
+  assert.equal(r.counts().fetches,6);assert.equal(JSON.stringify([...r.kc]),before)
+  for(const options of [{missingGlobal:true},{mode:undefined},{mode:null},{mode:{}},{mode:{active:EditMode.active}},{mode:{inactive:EditMode.inactive}},{noObservable:true}]) {
+    const old=runtime(options);old.seed();const tree=old.render()
+    assert.equal(nodes(tree).some(n=>n.props?.environments?.editMode),false)
+    const header=old.walk(section(tree,'登录账号').props.header)
+    const native=nodes(header).filter(n=>n.type==='EditButton')
+    assert.equal(native.length,1);assert.deepEqual(Object.keys(native[0].props),[])
+    assert.equal(nodes(header).some(n=>n.type==='Button'||n.type==='Text'&&n.props.children==='排序'),false)
+    each(tree).props.onMove([0],3)
     assert.deepEqual(ids(old.api.sortAccounts(old.api.officialAccounts(),'official')),['antigravity:2','antigravity:3','antigravity:1'])
+    assert.equal(old.counts().fetches,0)
   }
-  for(const count of [0,1]) {const r=runtime();r.seed(count);const header=r.walk(section(r.render(),'登录账号').props.header);assert.equal(nodes(header).some(n=>n.type==='EditButton'||n.type==='EnvironmentValuesReader'||n.props?.children==='排序'),false)}
-  const old=runtime({noNative:true});old.seed();const tree=old.render()
-  assert.equal(nodes(tree).some(n=>n.type==='EditButton'),false)
+  for(const count of [0,1]) {const r=runtime();r.seed(count);const header=r.walk(section(r.render(),'登录账号').props.header);assert.equal(nodes(header).some(n=>n.type==='EditButton'||n.type==='Button'),false)}
+  const old=runtime({noNative:true});old.seed();tree=old.render()
+  assert.equal(nodes(tree).some(n=>n.type==='EditButton'||n.props?.environments?.editMode),false)
   assert.ok(nodes(tree).find(n=>n.type==='NavigationLink'&&n.props.destination.type===old.app.AccountOrderPage))
-  console.log('PASS native EditButton untouched except matching explicit blue/body/regular style; read-only header reader inactive/null -> adjacent 排序, active -> no suffix, zero spacing; missing reader -> plain native fallback; ForEach persistence and remote button/move unchanged; zero network. Native labels, environment propagation, taps and pixels require device validation.')
+  const wrong=runtime({sectionOnly:true});wrong.seed();const wrongTree=wrong.render()
+  const wrongRow=wrongTree.find(x=>x.node.type==='ForEach')
+  assert.ok(wrongRow.inheritedMode,'negative control really does bind Section descendants')
+  assert.equal(wrongRow.ownerMode,undefined,'but cannot configure its parent Form')
+  assert.throws(()=>assertOwnerScope(wrongTree),/Form itself must receive/,'reject original 1.58 Section-only structure')
+  console.log('PASS full production SettingsView: single 编辑排序/完成 Button -> global active/inactive; binding on Form owner and inherited by header/ForEach, not Section; original onMove and reopened row order persist; active -> remote drops binding/resets state -> official inactive; missing APIs native fallback; negative Section-only control rejected; edit actions zero fetch, existing source-switch refresh requests intercepted offline. Native handles/taps still require device validation.')
 }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })
-module.exports = { runtime, nodes, section }
+module.exports = { runtime, nodes, section, assertOwnerScope }

@@ -1,7 +1,7 @@
 import { refreshAccount, requestLocalWidgetProjection, accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
 import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
-  Button, EditButton, EnvironmentValuesReader, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
+  Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, WebView, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
@@ -13,16 +13,9 @@ import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, cl
 // EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
-// Read the native Form/header environment only; EditButton still owns its action and editing state.
-function OfficialSortButton() {
-  if (typeof EnvironmentValuesReader === "undefined" || EnvironmentValuesReader == null) return <EditButton />
-  return <EnvironmentValuesReader keys={["editMode"]}>
-    {env => <HStack spacing={0}>
-      <EditButton font="body" fontWeight="regular" foregroundStyle="systemBlue" tint="systemBlue" />
-      {env.editMode?.isEditing ? null : <Text font="body" fontWeight="regular" foregroundStyle="systemBlue">排序</Text>}
-    </HStack>}
-  </EnvironmentValuesReader>
-}
+// EditMode is a host global, not a scripting export. Unsupported hosts keep native editing.
+const CUSTOM_LOGIN_SORT = NATIVE_SORT && typeof useObservable === "function" && typeof EditMode !== "undefined" && EditMode != null
+  && typeof EditMode.active === "function" && typeof EditMode.inactive === "function"
 // Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
 const ICON_SIZE = 17
 function providerIconCode(provider: string) {
@@ -268,6 +261,7 @@ function maskedKey(value: string): string {
   return chars.length > 4 ? chars.slice(0, 4).join("") + "*".repeat(chars.length - 4) : "*".repeat(chars.length)
 }
 function SettingsView() {
+  const officialEditMode = CUSTOM_LOGIN_SORT ? useObservable(() => EditMode.inactive()) : null
   const close = Navigation.useDismiss()
   const [authorization, setAuthorization] = useState<AuthorizationDestination | null>(null)
   const pushAuthorization: PushAuthorization = destination => {
@@ -320,6 +314,7 @@ function SettingsView() {
   useEffect(() => () => { if (auth.antigravity) cancelAntigravityLogin(auth.antigravity); auth.antigravity = null; if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
   async function changeSource(value: string) {
+    if (officialEditMode) officialEditMode.value = EditMode.inactive()
     stopAuth()
     saveSource(value as DataSource)
     setSource(value as DataSource)
@@ -600,6 +595,8 @@ function SettingsView() {
 
   return <NavigationStack>
     <Form
+      // The editing list owner must receive the binding, not only its child Section.
+      environments={source === "official" && officialEditMode ? { editMode: officialEditMode } : undefined}
       navigationDestination={{
         isPresented: authorization != null,
         onChanged: value => { if (!value) authorization?.onBack() },
@@ -644,7 +641,10 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? <OfficialSortButton /> : null}</HStack>}>
+      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? officialEditMode ? <Button title={officialEditMode.value.isEditing ? "完成" : "编辑排序"} action={() => {
+        if (getSource() !== "official") return
+        officialEditMode.value = officialEditMode.value.isEditing ? EditMode.inactive() : EditMode.active()
+      }} /> : <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
           {!dsAdding && (!claude || claude.manual && !busy) && !codexBrowser && !workbuddy && !wbPreparing && !agBrowser
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
