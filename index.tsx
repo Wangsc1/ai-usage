@@ -10,12 +10,49 @@ import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogi
 import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
 import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
 
-// EditButton/ForEach.onMove come from the official runnable example views/list/editable_list/index.tsx.
+// Modern ForEach uses Observable data + builder + editActions="move" (views/for_each).
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
 const NATIVE_SORT = typeof EditButton !== "undefined" && EditButton != null && typeof ForEach !== "undefined" && ForEach != null
 // EditMode is a host global, not a scripting export. Unsupported hosts keep native editing.
 const CUSTOM_LOGIN_SORT = NATIVE_SORT && typeof useObservable === "function" && typeof EditMode !== "undefined" && EditMode != null
   && typeof EditMode.active === "function" && typeof EditMode.inactive === "function"
+// Keep native reorder notifications separate from App-driven row synchronization.
+function sameRowOrder(a: { id: string }[], b: { id: string }[]) {
+  return a.length === b.length && a.every((row, i) => row.id === b[i].id)
+}
+function useSortableRows<T extends { id: string }>(rows: T[], enabled: boolean,
+  commit: (ids: string[], previous: T[]) => boolean) {
+  const data = typeof useObservable === "function" ? useObservable<T[]>(() => rows.slice()) : null
+  const supported = NATIVE_SORT && data && Array.isArray(data.value) && typeof data.setValue === "function"
+    && typeof data.subscribe === "function" && typeof data.unsubscribe === "function"
+  useEffect(function syncAccountRows() {
+    if (!supported || !data) return
+    let syncing = false, expected = rows.slice()
+    const replace = (value: T[]) => {
+      syncing = true
+      try { data.setValue(value.slice()) } finally { syncing = false }
+    }
+    const changed = (next: T[]) => {
+      if (syncing) return
+      const ids = Array.isArray(next) ? next.map(row => row?.id) : []
+      // Native move may reorder, but must not delete/add or change row identity/metadata.
+      const valid = Array.isArray(next) && ids.length === expected.length && new Set(ids).size === ids.length
+        && ids.every(id => expected.some(row => row.id === id))
+      if (valid && sameRowOrder(next, expected)) {
+        if (JSON.stringify(next) !== JSON.stringify(expected)) replace(expected)
+        return
+      }
+      if (!enabled || !valid || !commit(ids, expected)) { replace(expected); return }
+      const byId = new Map(expected.map(row => [row.id, row]))
+      expected = ids.map(id => byId.get(id)!)
+    }
+    // Run after render; suppress our own setValue so refresh/hide/source changes never save an order.
+    if (JSON.stringify(data.value) !== JSON.stringify(expected)) replace(expected)
+    data.subscribe(changed)
+    return () => data.unsubscribe(changed)
+  }, [data, supported, rows, enabled, commit])
+  return supported ? data : null
+}
 // Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
 const ICON_SIZE = 17
 function providerIconCode(provider: string) {
@@ -514,6 +551,7 @@ function SettingsView() {
       if (!auth.alive || getSource() !== requestSource || accountScope(requestSource) !== requestScope || getStatisticsSource() !== requestStats) return false
       if (r.data) {
         setAccounts(cachedAccounts())
+        if (requestSource === "official") setLogins(officialAccounts())
         await Widget.reloadAll()
         reloaded = true
       }
@@ -522,37 +560,32 @@ function SettingsView() {
     return reloaded
   }
 
-  // Same remove-then-insert contract as the official editable_list onMove example; persisted by stable ID.
-  function moveLogins(indices: number[], newOffset: number) {
-    if (busy || claude || codexBrowser || workbuddy || agBrowser || getSource() !== "official") return
-    const current = sortAccounts(logins, "official")
-    if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
-    const moving = indices.map(i => current[i])
-    const next = current.filter((_, i) => !indices.includes(i))
-    // newOffset is a destination in the ORIGINAL list (SwiftUI move semantics): drop the moved items that sit before it.
-    const at = newOffset - indices.filter(i => i < newOffset).length
-    next.splice(Math.max(0, Math.min(at, next.length)), 0, ...moving)
-    if (next.every((a, i) => a.id === current[i].id)) return
-    saveAccountOrder(next.map(a => a.id), "official")
-    setLogins(next)
+  // The system has already moved Observable data; persist its final stable-ID permutation.
+  function commitLogins(ids: string[], previous: ReturnType<typeof officialAccounts>): boolean {
+    if (busy || claude || codexBrowser || workbuddy || agBrowser || getSource() !== "official") return false
+    const current = sortAccounts(officialAccounts(), "official")
+    if (!sameRowOrder(current, previous)) return false
+    saveAccountOrder(ids, "official")
+    const byId = new Map(current.map(a => [a.id, a]))
+    setLogins(ids.map(id => byId.get(id)!))
     setAccounts(cachedAccounts())
     void Widget.reloadAll()
+    return true
   }
-
-  function moveRemoteAccounts(indices: number[], newOffset: number) {
-    if (busy || source === "official" || getSource() !== source || accountScope(source) !== listScope) return
-    const current = cachedAccounts()
-    // Reject an event from a stale row snapshot (e.g. another widget hid a row).
-    if (current.length !== visible.length || current.some((a, i) => a.id !== visible[i].id)) return
-    if (!indices.length || new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= current.length) || !Number.isInteger(newOffset)) return
-    const moving = indices.map(i => current[i]), next = current.filter((_, i) => !indices.includes(i))
-    const at = newOffset - indices.filter(i => i < newOffset).length
-    next.splice(Math.max(0, Math.min(at, next.length)), 0, ...moving)
-    if (next.every((a, i) => a.id === current[i].id)) return
-    if (!saveVisibleAccountOrder(next.map(a => a.id), source, listScope)) return
+  function commitRemote(ids: string[], previous: Account[], target: DataSource, scope: number): boolean {
+    if (busy || getSource() !== target || accountScope(target) !== scope || !sameRowOrder(cachedAccounts(), previous)) return false
+    if (!saveVisibleAccountOrder(ids, target, scope)) return false
     setAccounts(cachedAccounts())
     void Widget.reloadAll()
+    return true
   }
+  const loginRows = useSortableRows(sortedLogins, source === "official", commitLogins)
+  // Separate bindings ensure an old native source cannot reorder the next source's data.
+  const parrotRows = useSortableRows(source === "parrot" ? visible : [], source === "parrot",
+    (ids, previous) => commitRemote(ids, previous, "parrot", listScope))
+  const subRows = useSortableRows(source === "sub2api" ? visible : [], source === "sub2api",
+    (ids, previous) => commitRemote(ids, previous, "sub2api", listScope))
+  const remoteRows = source === "sub2api" ? subRows : parrotRows
   const remoteRow = (a: Account, i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
     <Button title="隐藏" role="destructive" disabled={busy} action={async () => {
       if (busy || !hideAccount(a.id, source, listScope)) return
@@ -601,7 +634,7 @@ function SettingsView() {
   return <NavigationStack>
     <Form
       // The editing list owner must receive the binding, not only its child Section.
-      environments={source === "official" && officialEditMode ? { editMode: officialEditMode } : undefined}
+      environments={source === "official" && loginRows && officialEditMode ? { editMode: officialEditMode } : undefined}
       navigationDestination={{
         isPresented: authorization != null,
         onChanged: value => { if (!value) authorization?.onBack() },
@@ -646,7 +679,7 @@ function SettingsView() {
         {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
-      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{NATIVE_SORT && logins.length > 1 ? officialEditMode ? <Button title={sortUI.editing ? "完成" : "编辑排序"} action={() => {
+      {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{loginRows && logins.length > 1 ? officialEditMode ? <Button title={sortUI.editing ? "完成" : "编辑排序"} action={() => {
         if (getSource() !== "official") return
         try {
           const next = officialEditMode.value.isEditing ? EditMode.inactive() : EditMode.active()
@@ -700,16 +733,16 @@ function SettingsView() {
           <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
         {!claude && !codexBrowser && !workbuddy && !agBrowser && browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
-        {NATIVE_SORT ? <ForEach count={logins.length} onMove={moveLogins} itemBuilder={i => loginRow(sortedLogins[i], i)} />
+        {loginRows ? <ForEach key="official" data={loginRows} editActions="move" builder={loginRow} />
           : sortedLogins.map(loginRow)}
-        {!NATIVE_SORT && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={() => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
+        {!loginRows && logins.length > 1 ? <NavigationLink destination={<AccountOrderPage key="official" source="official" onSaved={() => { setAccounts(cachedAccounts()); setLogins(sortAccounts(officialAccounts(), "official")) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}
       </Section> : null}
 
-      {source !== "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>目前账号</Text><Spacer />{NATIVE_SORT && visible.length > 1 ? <EditButton /> : null}</HStack>}>
-        {NATIVE_SORT ? <ForEach count={visible.length} onMove={moveRemoteAccounts} itemBuilder={i => remoteRow(visible[i], i)} /> : visible.map(remoteRow)}
-        {!NATIVE_SORT && visible.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
+      {source !== "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>目前账号</Text><Spacer />{remoteRows && visible.length > 1 ? <EditButton /> : null}</HStack>}>
+        {remoteRows ? <ForEach key={`${source}:${listScope}`} data={remoteRows} editActions="move" builder={remoteRow} /> : visible.map(remoteRow)}
+        {!remoteRows && visible.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}
         {hiddenCount > 0 ? <Button title={`恢复全部隐藏账号（${hiddenCount}）`} disabled={busy} action={async () => {

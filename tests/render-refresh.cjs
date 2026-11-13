@@ -1,3 +1,4 @@
+const modern = require('./modern-foreach.js')
 // Production App/API with an offline host. Counts are local reads/reload requests, not native timing.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
 const ts = require(process.env.TYPESCRIPT_PATH || 'typescript'), root = path.resolve(__dirname, '..')
@@ -39,7 +40,7 @@ function runtime(count) {
     if (Array.isArray(n)) return n.flatMap(walk)
     if (typeof n !== 'object') return [n]
     if (typeof n.type === 'function') return walk(n.type(n.props))
-    if (n.type === 'ForEach') return [n, ...walk(Array.from({ length: n.props.count }, (_, i) => n.props.itemBuilder(i)))]
+    if (n.type === 'ForEach') return [n, ...walk(modern.rows(n.props))]
     return [n, ...walk(n.props?.children)]
   }
   const app = load('index.tsx'), api = load('api.ts')

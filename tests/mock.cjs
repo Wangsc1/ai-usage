@@ -1,3 +1,4 @@
+const modern = require('./modern-foreach.js')
 // Local simulation only; never contacts a network or reads real credentials.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict')
 const ts = require(process.env.TYPESCRIPT_PATH || 'typescript')
@@ -161,7 +162,7 @@ async function main() {
   const linesIn=tree=>tree.filter(isLine).map(lineOf)
   let skipAccountTitles=false
   let proposedStatsWidth=null
-  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function'&&skipAccountTitles&&n.type.name==='AccountTitle')return [];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(Array.from({length:n.props.count},(_,i)=>n.props.itemBuilder(i)))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame?.height===5?330:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame?.height??134}}))];return [n,...expand(n.props?.children)] }
+  function expand(n) { if(n==null)return [];if(Array.isArray(n))return n.flatMap(expand);if(typeof n!=='object')return [n];if(typeof n.type==='function'&&skipAccountTitles&&n.type.name==='AccountTitle')return [];if(typeof n.type==='function')return expand(normalizeLargeBar&&n.type.name==='LargeSegBar'?SegBar({remaining:n.props.remaining,count:20,height:5}):n.type(n.props));if(n.type==='ForEach')return [n,...expand(modern.rows(n.props))];if(n.type==='GeometryReader')return [n,...expand(n.props.children({size:{width:n.props.frame?.height===5?330:proposedStatsWidth??(scripting.Widget.family==='systemSmall'?130:330),height:n.props.frame?.height??134}}))];return [n,...expand(n.props?.children)] }
   const accounts=Array.from({length:4},(_,i)=>({id:'p'+i,name:'匿名'+i,provider:'openai',enabled:i!==0,available:true,...mapped}))
   const data={today:null,month:null,accounts,fetchedAt:now,todayByFamily:{},monthByFamily:{}}
   const expectedLight={gradient:[{color:'#FAFDFE',location:0},{color:'#F2F8FC',location:0.45},{color:'#DAEDF9',location:0.75},{color:'#ADD9F3',location:1}],startPoint:{x:0.3,y:0},endPoint:{x:0.7,y:1}}
@@ -632,7 +633,7 @@ async function main() {
   // Exercise App sorting controls with persistent mock hook state, not only the data helper.
   const states=[];let hook=0
   scripting.useState=initial=>{const i=hook++;if(!(i in states))states[i]=initial;return [states[i],next=>states[i]=typeof next==='function'?next(states[i]):next]}
-  scripting.useEffect=()=>{}
+  scripting.useEffect=fn=>{modern.effect(fn)}
   scripting.Navigation={useDismiss:()=>()=>{}}
   scripting.Widget.reloadAll=async()=>{}
   storage.set('ai_usage_cache_v1',{...data,accounts})
@@ -640,7 +641,9 @@ async function main() {
   const loadSettingsWith=missing=>{delete modules['index.tsx'];missing.forEach(k=>missingExports.add(k));try{return load('index.tsx').SettingsView}finally{missing.forEach(k=>missingExports.delete(k));delete modules['index.tsx']}}
   let SettingsView=load('index.tsx').SettingsView
   const withMissingSort=fn=>{const saved=SettingsView;SettingsView=loadSettingsWith(['EditButton','ForEach']);try{return fn()}finally{SettingsView=saved;load('index.tsx')}}
-  const render=()=>{hook=0;return expand(SettingsView())}
+  let settingsRender=false
+  scripting.useObservable=initial=>modern.observable(initial)
+  const render=()=>{hook=0;return expand(modern.render(()=>{settingsRender=true;try{return SettingsView()}finally{settingsRender=false}}))}
   const manualRefresh=ui=>{const p=ui.find(x=>x.type==='Picker'&&x.props.title==='统计来源');assert.ok(p,'statistics Picker present');return p.props.onChanged(p.props.value)}
   let ui=render()
   assert.ok(!ui.some(x=>x.type==='Toggle'))
@@ -652,7 +655,7 @@ async function main() {
   assert.ok(ui.filter(isLine).every(h=>h.props.children.every(c=>c.props.foregroundStyle===undefined)),'account line colors unchanged')
   assert.ok(!ui.some(x=>x.type==='Button'&&['上移','下移'].includes(x.props.title)))
   // Native list editing is preferred; absent exports retain the separate long-press page.
-  assert.ok(ui.some(x=>x.type==='ForEach' && typeof x.props.onMove==='function'));assert.ok(expand(ui.find(x=>x.type==='Section'&&expand(x.props.header).includes('目前账号')).props.header).some(x=>x?.type==='EditButton'))
+  assert.ok(ui.some(x=>x.type==='ForEach' && x.props.editActions==='move'));assert.ok(expand(ui.find(x=>x.type==='Section'&&expand(x.props.header).includes('目前账号')).props.header).some(x=>x?.type==='EditButton'))
   const nativeSettingsView=SettingsView;SettingsView=loadSettingsWith(['EditButton','ForEach']);ui=render()
   const indexSource=fs.readFileSync(path.join(root,'index.tsx'),'utf8')
   for(const old of ['onDrag','onDrop','ItemProvider','DropInfo','UTType','dragSession','onMove={busy'])assert.ok(!indexSource.includes(old),old)
@@ -662,7 +665,7 @@ async function main() {
   assert.equal(render().find(x=>x.type==='Form').props.toolbar.confirmationAction,undefined)
   // Minimal documented-shape mocks: Observable{value,setValue}, chainable modifiers() recorder.
   let obsStore=[],obsIndex=0
-  scripting.useObservable=init=>{const i=obsIndex++;if(!(i in obsStore)){const o={value:typeof init==='function'?init():init,setValue(v){o.value=v}};obsStore[i]=o}return obsStore[i]}
+  scripting.useObservable=init=>{if(settingsRender)return modern.observable(init);const i=obsIndex++;if(!(i in obsStore))obsStore[i]=modern.observable(init);return obsStore[i]}
   scripting.modifiers=()=>{const calls=[];const m=new Proxy({calls},{get(t,k){if(k==='calls')return calls;if(k==='toJSON')return undefined;return v=>{calls.push([k,v]);return m}}});return m}
   const ids=()=>Array.from(api.cachedAccounts(),a=>a.id)
   const link=()=>render().find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
@@ -822,7 +825,7 @@ async function main() {
   assert.ok(emailUI.some(x=>isLine(x)&&lineOf(x).icon==='codex'&&lineOf(x).name==='nested@example.test'))
   assert.ok(!emailUI.some(x=>x.type==='Section'&&x.props.header?.props.children==='目前账号'))
   assert.ok(!emailUI.some(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage'),'native sort replaces official sub-page')
-  const nativeOrder=emailUI.find(x=>x.type==='ForEach');assert.ok(nativeOrder);assert.equal(typeof nativeOrder.props.onMove,'function')
+  const nativeOrder=emailUI.find(x=>x.type==='ForEach');assert.ok(nativeOrder);assert.equal(nativeOrder.props.editActions,'move')
   const fallbackUI=withMissingSort(()=>{states.length=0;return render()})
   const orderLink=fallbackUI.find(x=>x.type==='NavigationLink'&&x.props.destination?.type?.name==='AccountOrderPage')
   obsStore=[];obsIndex=0;const emailOrder=expand(orderLink.props.destination.type(orderLink.props.destination.props))
@@ -2659,15 +2662,15 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     const rows=()=>render().filter(n=>n?.type==='HStack'&&n.props.trailingSwipeActions)
     const ids=()=>Array.from(rows(),n=>n.key),labels=()=>rows().map(n=>{const l=lineOf(expand(n).find(isLine));return l.n+' '+l.icon+' '+l.name})
     assert.deepEqual(ids(),[ds,'manage-codex','claude:manage:org']);assert.deepEqual(labels(),['1. deepseek Manage DeepSeek','2. codex manage@codex.test','3. claude manage@claude.test'])
-    // Native (exports present): header EditButton, single ForEach with onMove, no official sub-page entry; rows keep swipe/name link.
+    // Native (exports present): header EditButton, single modern ForEach data binding, no official sub-page entry; rows keep swipe/name link.
     const loginSec=()=>render().find(n=>n?.type==='Section'&&n.props.header?.props.children?.[0]?.props?.children==='登录账号')
     assert.deepEqual(Array.from(loginSec().props.header.props.children.filter(Boolean),n=>n.type),['Text','Spacer','EditButton'])
     assert.equal(expand(loginSec().props.header).includes('排序'),false,'global EditMode absent: original native fallback, no suffix')
     assert.ok(!managementUI.some(n=>n?.type==='NavigationLink'&&n.props.destination?.type?.name==='AccountOrderPage'))
     const nativeEach=()=>render().filter(n=>n?.type==='ForEach');assert.equal(nativeEach().length,1);const fe=nativeEach()[0]
-    assert.equal(fe.props.count,3);assert.equal(fe.props.onDelete,undefined);assert.equal(typeof fe.props.onMove,'function')
+    assert.equal(fe.props.data.value.length,3);assert.equal(fe.props.onDelete,undefined);assert.equal(fe.props.editActions,'move')
     assert.ok(rows().every(n=>n.props.trailingSwipeActions&&n.props.children[0].type==='NavigationLink'))
-    const move=(idx,off)=>render().find(n=>n?.type==='ForEach').props.onMove(idx,off)
+    const move=(idx,off)=>modern.move(render().find(n=>n?.type==='ForEach').props,idx,off)
     const order0=ids();move([0,0],1);move([-1],1);move([5],0);move([0],0);assert.deepEqual(ids(),order0,'invalid/no-op moves ignored');assert.deepEqual(storage.get('ai_usage_official_order_v1'),order0)
     // SwiftUI destination semantics: newOffset indexes the ORIGINAL list. Start: [claude, codex, ds] in some order; use ids() snapshots.
     {const base=ids();
@@ -2699,7 +2702,7 @@ assert.ok(dsUI.some(n=>n?.type==='Text'&&n.props.tag==='deepseek'&&n.props.child
     const added=api.addDeepSeekAccount('New Manage','api','SYNTHETIC-MANAGE-NEW');states.length=0;assert.deepEqual(ids(),['claude:manage:org','manage-codex',added]);assert.ok(labels()[2].startsWith('3. deepseek'))
     for(const source of ['parrot','sub2api']){api.saveSource(source);states.length=0;assert.ok(render().some(n=>n?.type==='Section'&&expand(n.props.header).includes('目前账号')));assert.ok(!render().some(n=>n?.type==='Section'&&(n.props.header?.props.children==='登录账号'||n.props.header?.props.children?.[0]?.props?.children==='登录账号')))}
     kc.clear();for(const[k,v]of previousKC)kc.set(k,v);storage.clear();for(const[k,v]of previousStore)storage.set(k,v);handler=previousHandler;states.length=0
-    console.log('PASS: official only duplicate Section removed; sorted continuous three-provider labels; no-usage metadata supports existing name editor and header EditButton + same-page ForEach.onMove (exports present) and original long-press sub-page (exports missing); actual move persists+updates login list; aliases retained; widget sequence matches; reordered swipe deletes exact ID and renumbers; new IDs append; nonofficial module retained; local operations no network')
+    console.log('PASS: official only duplicate Section removed; sorted continuous three-provider labels; no-usage metadata supports existing name editor and header EditButton + same-page ForEach.data/editActions=move (supported Observable methods) and original long-press sub-page (exports missing); actual move persists+updates login list; aliases retained; widget sequence matches; reordered swipe deletes exact ID and renumbers; new IDs append; nonofficial module retained; local operations no network')
   }
   // Login row structure is stable for every provider/state: left item always present, Picker always right (never Spacer+Picker only).
   {
