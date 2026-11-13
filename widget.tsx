@@ -1,6 +1,6 @@
 import { antigravityBrandImage } from "./api"
 import { Button, Gauge, HStack, VStack, ZStack, Text, Spacer, Image, SVG, RoundedRectangle, Rectangle, GeometryReader, Widget, VirtualNode, modifiers } from "scripting"
-import { visibleAccounts, cachedLocalWidgetProjection, loadUsage, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
+import { visibleAccounts, cachedLocalWidgetProjection, cachedWidgetUsage, loadUsage, LoadResult, Account, QuotaWindow, UsageData, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd, widgetAccounts, getRefreshMinutes, getWidgetName, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyCheckin, workBuddyBrandImage, CLAUDE_PATH, OPENAI_PATH, iconSvg, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG } from "./api"
 
 import { RefreshUsageIntent } from "./app_intents"
 
@@ -575,10 +575,38 @@ function Root({ data, error }: { data: UsageData | null; error: string | null })
   </ZStack>
 }
 
+// Conservative pre-view budget, not a claimed iOS deadline. Timers cannot preempt synchronous JS/native stalls.
+const WIDGET_LOAD_BUDGET_MS = 8000
 async function run() {
-  const r = cachedLocalWidgetProjection() ?? await loadUsage()
-  Widget.present(<Root data={r.data} error={r.error} />, {
-    reloadPolicy: { policy: "after", date: new Date(Date.now() + getRefreshMinutes() * 60 * 1000) },
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let r: LoadResult
+  let fallback = false
+  try {
+    // Install before invoking any cache/config/network initialization; catch synchronous failures too.
+    const deadline = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), WIDGET_LOAD_BUDGET_MS) })
+    const read = Promise.resolve().then(() => cachedLocalWidgetProjection() ?? loadUsage())
+    const result = await Promise.race([read, deadline])
+    if (result == null) fallback = true
+    r = result ?? { data: null, stale: false, error: null }
+  } catch {
+    fallback = true
+    r = { data: null, stale: false, error: null }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+  if (fallback) {
+    // Read CURRENT source/config caches, not the source captured by the losing request.
+    try { r = cachedWidgetUsage() }
+    catch { r = { data: null, stale: false, error: null } }
+  }
+  let minutes = 15
+  try { minutes = getRefreshMinutes() } catch { /* storage unavailable: keep the existing default */ }
+  const view = fallback && !r.data
+    ? <Text font={11} lineLimit={3} multilineTextAlignment="center">暂时无法读取用量，请打开脚本刷新</Text>
+    : <Root data={r.data} error={r.error} />
+  // Only this path submits a view. Do not schedule another present or depend on JS surviving it.
+  Widget.present(view, {
+    reloadPolicy: { policy: "after", date: new Date(Date.now() + minutes * 60 * 1000) },
   })
 }
 

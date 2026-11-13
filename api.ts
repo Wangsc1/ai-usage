@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.62"
+export const VERSION = "1.63"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
@@ -1058,6 +1058,7 @@ async function fetchAccount(item: Credential, index: number, observed?: (value: 
   return { id: item.id, name: officialDisplay(token, index), provider: "openai", enabled: true, available: true, ...mapped }
 }
 export async function loadOfficialUsage(): Promise<LoadResult> {
+  const source = getSource(), sourceRevision = officialRenewalScope, identities = new Map(detailIdentityRevisions)
   try {
     const items = credentials()
     if (!items.length && !claudeAccounts().length && !dsCredentials().length && !WorkBuddyCN.credentials().length && !Antigravity.credentials().length) return { data: null, stale: false, error: "请在脚本中添加官方账号" }
@@ -1069,7 +1070,11 @@ export async function loadOfficialUsage(): Promise<LoadResult> {
     const antigravityReads = await Promise.all(Antigravity.credentials().map(item => Antigravity.read(item)))
     // Resolve against the latest completed in-process read without persisting diagnostics.
     const antigravity = antigravityReads.map(Antigravity.latestRead)
+    // A timed-out widget may still finish while this execution lives. Never commit its
+    // old account snapshot after a source switch or logout/re-login (token rotation is not a new identity).
     const live = new Set(officialAccounts().map(a => a.id))
+    if (getSource() !== source || officialRenewalScope !== sourceRevision || [...detailIdentityRevisions].some(([id, revision]) => live.has(id) && identities.get(id) !== revision))
+      return { data: null, stale: false, error: "账号来源或登录已改变" }
     const accounts = syncAccountOrder([...codex, ...claude, ...deepseek, ...workbuddy, ...antigravity].filter(a => live.has(a.id)), "official")
     const providerErrors = accounts.flatMap(a => a.readError ? [`${a.name}：${a.readError}`] : [])
     const data: UsageData = { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts, fetchedAt: Date.now(), ...(providerErrors.length ? { providerErrors } : {}) }
@@ -1997,12 +2002,22 @@ export function cachedAntigravityWidgetProjection(): LoadResult | null { return 
 export function cachedLocalWidgetProjection(): LoadResult | null {
   const source = getSource(), until = Storage.get<number>(localWidgetKey(source))
   if (typeof until !== "number" || !Number.isFinite(until) || Date.now() >= until) return null
-  const cache = (source === "official" ? officialCached() : Storage.get<UsageData>(source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE)) ?? { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: managementAccounts(), fetchedAt: 0 }
+  const snapshot = cachedWidgetUsage()
+  return snapshot.data ? snapshot : widgetCacheResult(source, { today: null, month: null, todayByFamily: {}, monthByFamily: {}, accounts: managementAccounts(), fetchedAt: 0 })
+}
+// Read-only fallback for a widget deadline; no projection expiry, fetch, or fabricated success time.
+export function cachedWidgetUsage(): LoadResult {
+  const source = getSource()
+  const cache = source === "official" ? officialCached() : Storage.get<UsageData>(source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE)
+  return cache ? widgetCacheResult(source, cache) : { data: null, stale: false, error: "暂无缓存，请打开脚本刷新" }
+}
+function widgetCacheResult(source: DataSource, cache: UsageData): LoadResult {
   const statisticsSource = getStatisticsSource()
   const stats = Storage.get<ParrotStats>(statisticsSource === "sub2api" ? KEY_SUB_STATS : KEY_STATS) ?? (statisticsSource === "parrot" ? Storage.get<UsageData>(KEY_CACHE) : null)
   return { data: { ...cache, accounts: visibleAccounts(cache.accounts, source), today: stats?.today ?? null, month: stats?.month ?? null, todayByFamily: stats?.todayByFamily ?? {}, monthByFamily: stats?.monthByFamily ?? {},
     statistics: { fetchedAt: stats?.fetchedAt ?? null, stale: true, error: stats?.today && stats?.month ? null : `${statisticsSource === "parrot" ? "Parrot" : "Sub2API"}统计缓存未提供` } }, stale: true, error: null }
 }
+
 function antigravityWindows(groups: AntigravityQuota["groups"]): Pick<Account, "fiveHour" | "sevenDay"> {
   const window = (name: string): QuotaWindow => {
     const buckets = groups.flatMap(g => g.buckets).filter(b => b.window === name && typeof b.remainingPercent === "number" && Number.isFinite(b.remainingPercent) && b.remainingPercent >= 0 && b.remainingPercent <= 100)
