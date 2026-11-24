@@ -67,7 +67,7 @@ function assertModeSection(account,source='official'){
  assert.equal(children.length,1,'exactly one content row, no empty section or second hint row')
  if(source==='official'){
   assert.equal(children[0].type,'Picker')
-  assert.deepEqual(Array.from(children[0].props.children,n=>[n.props.tag,n.props.children]),[['summary','最低剩余额度汇总'],['gemini','Gemini Models'],['claude_gpt','Claude and GPT models'],['argon','Gemini 4 Argon']])
+  assert.deepEqual(Array.from(children[0].props.children,n=>[n.props.tag,n.props.children]),[['summary','最低剩余额度汇总'],['gemini','Gemini Models'],['claude_gpt','Claude and GPT models']])
  }else{
   assert.equal(children[0].type,'Text')
   assert.equal(children[0].props.children,api.antigravityModeHint(account,source))
@@ -81,63 +81,53 @@ function assertWidgetTrees(a){const p=project(a),expected={...p,id:'expected-sum
 // Fixture restores Google's camelCase keys via the verified parse_quota_summary mapping
 // in /app/src/oauth/antigravity.py:849; no identity, token or project fields are retained.
 const argonSummary=JSON.parse(fs.readFileSync(path.join(root,'tests/fixtures/antigravity-argon-summary.json'),'utf8'))
-async function argonCases(){
- reset();const raw=argonSummary.groups,argon=raw[2],fraction=argon.buckets[0].remainingFraction,remaining=fraction*100,resetAt=argon.buckets[0].resetTime,a=make(A,raw),b=make(B,raw)
- assert.equal(argon.displayName,'Gemini 4 Argon');assert.equal(argon.buckets[0].bucketId,'gemini-argon-wtu-weekly');assert.equal(argon.buckets[0].window,'weekly');assert.equal(argon.buckets.length,1)
+async function extraGroupAndLegacyModeCases(){
+ reset();const raw=argonSummary.groups,extra=raw[2],fraction=extra.buckets[0].remainingFraction,remaining=fraction*100,resetAt=extra.buckets[0].resetTime,a=make(A,raw),b=make(B,raw)
+ assert.equal(extra.buckets[0].window,'weekly');assert.equal(extra.buckets.length,1)
  seed([a,b],true);const original=JSON.stringify(store.get(CACHE)),beforeKC=kc.get(KEY)
- // Canonical summary includes Argon but its missing 5h must not erase the other groups' 5h.
+ // Canonical summary still includes all provider-returned groups, and an extra weekly-only group does not erase 5h.
  windows(a,100,remaining,raw[0].buckets[1].resetTime,resetAt)
  for(const order of [raw,[raw[2],raw[0],raw[1]],[raw[1],raw[2],raw[0]],raw.slice().reverse()]){
   const account=make(A,order)
-  for(const [mode,five,seven]of [['summary',100,remaining],['gemini',100,100],['claude_gpt',100,100],['argon',null,remaining]]){
+  for(const [mode,five,seven]of [['summary',100,remaining],['gemini',100,100],['claude_gpt',100,100]]){
    api.saveAntigravityMode(A,mode);windows(project(account),five,seven);assertDetails(account,five,seven);assertWidgetTrees(account);assertModeSection(account)
   }
-  assert.equal(project(account).sevenDay.resetsAt,resetAt)
  }
- // Stable weekly ties include Argon according to response order, not preferred group names.
+ // Stable weekly ties include all returned groups according to response order.
  const tied=JSON.parse(JSON.stringify(raw));tied[0].buckets[0].remainingFraction=fraction
  api.saveAntigravityMode(A,'summary');assert.equal(project(make(A,tied)).sevenDay.resetsAt,tied[0].buckets[0].resetTime);assert.equal(project(make(A,[tied[2],tied[1],tied[0]])).sevenDay.resetsAt,resetAt)
- api.saveAntigravityMode(A,'argon');windows(project(make(A,raw.slice(0,2))),null,null);assert.equal(api.getAntigravityMode(A),'argon')
- windows(project(make(A,[...raw.slice(0,2),{...argon,buckets:[]}])) ,null,null)
- windows(project(make(A,[...raw.slice(0,2),{...argon,buckets:[{...argon.buckets[0],remainingFraction:null}]}])),null,null)
- for(const displayName of ['Gemini 4 Argon Plus','gemini-4-argon-medium','Gemini Models Argon'])windows(project(make(A,[...raw.slice(0,2),{...argon,displayName}])) ,null,null)
- windows(project(make(A,[...raw.slice(0,2),{...argon,displayName:' Gemini 4 Argon '}])),null,remaining,null,resetAt)
- const legacy={...a,antigravity:undefined};windows(project(legacy),null,null);api.saveAntigravityMode(A,'summary');assert.equal(project(legacy),legacy)
- assert.equal(JSON.stringify(store.get(CACHE)),original);assert.equal(calls.length,0)
- // Actual fourth Picker option invokes cached widget entry for all 7 sizes, even with expired tokens.
- let saved=0,reloads=0,presentations=0;scripting.Widget.present=()=>presentations++;scripting.Widget.reloadAll=async()=>{reloads++;for(const family of families){scripting.Widget.family=family;await widget.runWidget()}}
- handler=async()=>{throw Error('Argon selection must not network')};states=[];let tree=page(a,'official',()=>saved++);await picker(tree).props.onChanged('argon');tree=page(a,'official',()=>saved++);assert.equal(picker(tree).props.value,'argon');assert.equal(saved,1);assert.equal(reloads,1);assert.equal(presentations,7);assert.equal(calls.length,0);assert.equal(kc.get(KEY),beforeKC);assert.equal(JSON.stringify(store.get(CACHE)),original)
- assert.equal(api.getAntigravityMode(B),'summary');windows(api.officialCached().accounts[0],null,remaining,null,resetAt);windows(api.cachedAccounts()[0],null,remaining);windows(api.managementAccounts()[0],null,remaining);assertDetails(a,null,remaining);assertWidgetTrees(a)
- // Source-local preference never turns Parrot/Sub2API into fabricated group/window support.
- for(const source of ['parrot','sub2api']){
-  api.saveSource(source);api.saveAntigravityMode(A,'argon',source);assert.equal(api.projectAntigravityAccount(a,source),a);states=[];assertModeSection(a,source);assert.equal(picker(page(a,source)),undefined);assert.equal(api.getAntigravityMode(A,'official'),'argon')
- }
- api.saveSource('official');const base=network();const routeStart=calls.length
- // Reproduce the live same-token/project/UA difference: production gives two groups,
- // daily gives all three. Calling the old host must fail this end-to-end read assertion.
+ // Retired stored 'argon' mode gracefully falls back to summary and cannot be saved again.
+ store.set('ai_usage_antigravity_mode_official_v1',{[A]:'argon'})
+ assert.equal(api.getAntigravityMode(A),'summary')
+ windows(project(a),100,remaining,raw[0].buckets[1].resetTime,resetAt)
+ states=[];let tree=page(a,'official',()=>{});assert.equal(picker(tree).props.value,'summary')
+ assertDetails(a,100,remaining);assertWidgetTrees(a);assertModeSection(a)
+ api.saveAntigravityMode(A,'gemini');api.saveAntigravityMode(A,'argon');assert.equal(api.getAntigravityMode(A),'gemini')
+ api.saveAntigravityMode(A,'summary')
+ assert.equal(JSON.stringify(store.get(CACHE)),original);assert.equal(calls.length,0);assert.equal(kc.get(KEY),beforeKC)
+ // Production load + daily summary routing still preserves all provider-returned groups in cache and detail.
+ const base=network(),routeStart=calls.length
  handler=(u,o)=>u.endsWith(':retrieveUserQuotaSummary')?ok({groups:new URL(u).hostname==='daily-cloudcode-pa.googleapis.com'?raw.slice().reverse():raw.slice(0,2)}):base(u,o)
- const refreshed=await api.loadOfficialUsage();assert.equal(refreshed.data.accounts[0].antigravity.groups.length,3);assert.ok(calls.slice(routeStart).filter(c=>c.u.endsWith(':retrieveUserQuotaSummary')).every(c=>new URL(c.u).hostname==='daily-cloudcode-pa.googleapis.com'));windows(refreshed.data.accounts[0],null,remaining,null,resetAt);assert.equal(api.getAntigravityMode(A),'argon');windows(store.get(CACHE).accounts[0],100,remaining);assert.equal(store.get(CACHE).accounts[0].antigravity.groups.length,3)
- handler=quotaHandler(raw.slice(0,2));await api.loadOfficialUsage();windows(api.officialCached().accounts[0],null,null);assert.equal(api.getAntigravityMode(A),'argon');handler=quotaHandler(raw);await api.loadOfficialUsage();windows(api.officialCached().accounts[0],null,remaining)
- api.saveWidgetName(A,'Argon weekly','official');api.saveAccountOrder([B,A],'official');assert.equal(api.getAntigravityMode(A),'argon');api.logoutOfficial(A);assert.equal(api.getAntigravityMode(A),'summary');assert.equal(api.getAntigravityMode(A,'parrot'),'argon');assert.equal(api.getAntigravityMode(B),'summary')
- console.log('PASS production-load/daily-summary real-profile regression and observed Google Argon weekly fixture: exact group/bucket/window/reset, all 4 modes across permutations, summary includes Argon/stable ties, missing/invalid/renamed groups remain unknown, old cache/3 preferences compatible; actual fourth Picker cache-only -> 7 widget entries, App/widget agreement, refresh persistence/missing group recovery, account/source isolation and deletion')
+ const refreshed=await api.loadOfficialUsage();assert.equal(refreshed.data.accounts[0].antigravity.groups.length,3);assert.ok(calls.slice(routeStart).filter(c=>c.u.endsWith(':retrieveUserQuotaSummary')).every(c=>new URL(c.u).hostname==='daily-cloudcode-pa.googleapis.com'));windows(refreshed.data.accounts[0],100,remaining,raw[0].buckets[1].resetTime,resetAt);windows(store.get(CACHE).accounts[0],100,remaining);assert.equal(store.get(CACHE).accounts[0].antigravity.groups.length,3)
+ console.log('PASS retired argon mode falls back to summary and cannot be saved; 3-option Picker enforced; daily summary & extra returned groups preserved in summary/detail')
 }
 async function retiredDiagnosticCases(){
- reset();const old=make(A);old.antigravityRead={version:'1.37',startedAt:now,groupNames:['Gemini Models'],project:true,host:'daily'};seed([old]);api.saveAntigravityMode(A,'argon');api.requestAntigravityWidgetProjection();handler=quotaHandler(argonSummary.groups)
+ reset();const old=make(A);old.antigravityRead={version:'1.37',startedAt:now,groupNames:['Gemini Models'],project:true,host:'daily'};seed([old]);api.saveAntigravityMode(A,'gemini');api.requestAntigravityWidgetProjection();handler=quotaHandler(argonSummary.groups)
  assert.equal(api.refreshAntigravityAccount,undefined)
  states=[];let tree=page(old);assert.ok(!tree.some(n=>typeof n==='string'&&(/诊断|采集代码|请求 profile|最后尝试|最后成功/.test(n))));assert.ok(!tree.some(n=>n?.type==='Button'&&n.props.title==='立即网络采集'));assert.equal(api.officialCached().accounts[0].antigravityRead,undefined)
  const before=calls.length;states=[];hook=0;scripting.Widget.reloadAll=async()=>{};const home=walk(app.SettingsView()),form=home.find(n=>n?.type==='Form'&&n.props.toolbar?.primaryAction);assert.ok(form);assert.equal(form.props.toolbar.primaryAction.props.title,'刷新');await form.props.toolbar.primaryAction.props.action();assert.ok(calls.length>before,'homepage refresh bypasses cache-only mode');assert.ok(calls.some(c=>c.u==='https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary'));assert.equal(store.get(CACHE).accounts[0].antigravityRead,undefined);assert.equal(store.get(CACHE).accounts[0].antigravity.groups.length,3)
  // Reopen detail with even the old NavigationLink snapshot: it must read newest canonical cache.
- states=[];tree=page(old);assert.ok(tree.includes('Gemini 4 Argon'));assert.equal(api.getAntigravityMode(A),'argon');windows(api.officialCached().accounts[0],null,0.8876151*100);assertWidgetTrees(api.officialCached().accounts[0])
+ states=[];tree=page(old);assert.ok(tree.includes('Gemini 4 Argon'));assert.equal(api.getAntigravityMode(A),'gemini');windows(api.officialCached().accounts[0],100,100);assertWidgetTrees(api.officialCached().accounts[0])
  // Failed fetch also must not re-persist retired diagnostic metadata.
  store.set(CACHE,usage([old]));handler=()=>{throw Error('offline')};await api.loadOfficialUsage();assert.equal(store.get(CACHE).accounts[0].antigravityRead,undefined)
  // Concurrent reads use an in-memory sequence (also safe at equal wall clock times).
  reset();seed([make(A)]);let release;handler=async(u,o)=>{const result=quotaHandler(groups)(u,o);if(u.endsWith(':retrieveUserQuotaSummary'))await new Promise(r=>release=r);return result};const slow=api.loadOfficialUsage();await flush();assert.ok(release);handler=quotaHandler(argonSummary.groups);await api.loadOfficialUsage();release();await slow;assert.equal(store.get(CACHE).accounts[0].antigravity.groups.length,3);assert.equal(store.get(CACHE).accounts[0].antigravityRead,undefined)
  for(const action of ['source','logout']){reset();seed([make(A)]);release=null;handler=async(u,o)=>{const result=quotaHandler()(u,o);if(u.endsWith(':retrieveUserQuotaSummary'))await new Promise(r=>release=r);return result};const pending=api.loadUsage();await flush();assert.ok(release);if(action==='source')api.saveSource('parrot');else api.logoutOfficial(A);release();const result=await pending;if(action==='source')assert.equal(result.data,null);else assert.equal(api.officialCached().accounts.length,0)}
- console.log('PASS retired diagnostic UI/button/API removed; old metadata stripped on read/success/failure writes; regular refresh retrieves daily Argon, reopened detail uses latest cache, four preferences/widgets unchanged; equal-time overlapping reads keep newest result, source/logout isolation retained')
+ console.log('PASS retired diagnostic UI/button/API removed; old metadata stripped on read/success/failure writes; regular refresh retrieves daily summary, reopened detail uses latest cache, three preferences/widgets unchanged; equal-time overlapping reads keep newest result, source/logout isolation retained')
 }
 async function main(){
  await retiredDiagnosticCases()
- await argonCases()
+ await extraGroupAndLegacyModeCases()
  reset();seed();states=[];hook=0;const positioned=app.WidgetNamePage({account:make(),source:'official',onSaved:()=>{}}).props.children;assert.equal(positioned[0].props.children[0].props.title,'自定义小组件用户名');assert.equal(positioned[1].props.header.props.children,'小组件额度显示');assert.equal(positioned[2].type,app.AccountCacheSections);const a=make(),original=JSON.stringify(a),rawCache=JSON.stringify(store.get(CACHE));assert.equal(api.getAntigravityMode(A),'summary');windows(project(a),32,41,groups[1].buckets[0].resetTime,groups[0].buckets[1].resetTime)
  for(const raw of [groups,[...groups].reverse()])for(const [mode,five,seven,r5,r7]of [['summary',32,41,groups[1].buckets[0].resetTime,groups[0].buckets[1].resetTime],['gemini',85,41,groups[0].buckets[0].resetTime,groups[0].buckets[1].resetTime],['claude_gpt',32,78,groups[1].buckets[0].resetTime,groups[1].buckets[1].resetTime]]){api.saveAntigravityMode(A,mode);const account=make(A,raw),p=project(account);windows(p,five,seven,r5,r7);assert.equal(p.antigravity,account.antigravity,'raw groups must be retained by reference');assertDetails(account,five,seven);assertWidgetTrees(account);assertModeSection(account)}
  assert.equal(JSON.stringify(a),original);assert.equal(JSON.stringify(store.get(CACHE)),rawCache);assert.equal(calls.length,0)
@@ -153,9 +143,9 @@ async function main(){
  reset();seed([make(A),make(B)]);api.saveAntigravityMode(A,'gemini','official');api.saveAntigravityMode(B,'claude_gpt','official');api.saveAntigravityMode(A,'claude_gpt','parrot');api.saveAntigravityMode(A,'gemini','sub2api');assert.equal(api.getAntigravityMode(A,'official'),'gemini');assert.equal(api.getAntigravityMode(A,'parrot'),'claude_gpt');assert.equal(api.getAntigravityMode(A,'sub2api'),'gemini');windows(project(make(A)),85,41);windows(project(make(B)),32,78)
  for(const source of ['parrot','sub2api']){api.saveSource(source);assert.equal(api.projectAntigravityAccount(a,source),a);states=[];assertModeSection(a,source);const tree=page(a,source);assert.equal(picker(tree),undefined);assert.ok(tree.some(n=>typeof n==='string'&&n.includes('不支持分组切换')));store.set(source==='parrot'?'ai_usage_cache_v1':'ai_usage_sub2api_quota_v1',usage([a]));assert.equal(api.cachedAccounts()[0].fiveHour.remainingPercent,a.fiveHour.remainingPercent);assert.equal(api.widgetAccounts([a])[0].fiveHour.remainingPercent,a.fiveHour.remainingPercent)}
  api.saveSource('official');assert.equal(api.getAntigravityMode(A),'gemini');api.saveAntigravityMode('__proto__','claude_gpt');assert.equal(api.getAntigravityMode('__proto__'),'claude_gpt');api.saveAntigravityMode('__proto__','summary');assert.equal(api.getAntigravityMode('__proto__'),'summary')
- console.log('PASS exact section tree: official only retains four-option Picker below custom name, no footer/second hint; Parrot/Sub2API retain one unsupported Text row, never empty; independent accounts/sources and standard windows unchanged')
+ console.log('PASS exact section tree: official only retains three-option Picker below custom name, no footer/second hint; Parrot/Sub2API retain one unsupported Text row, never empty; independent accounts/sources and standard windows unchanged')
  // A real picker change causes Widget.reloadAll, whose actual widget entry must use only cache.
- reset();seed([make(A),make(B)],true);const beforeKC=kc.get(KEY),beforeCache=JSON.stringify(store.get(CACHE));let saved=0,reloads=0,presentations=[];scripting.Widget.present=(node,options)=>presentations.push({tree:walk(node),options});scripting.Widget.reloadAll=async()=>{reloads++;for(const f of families){scripting.Widget.family=f;await widget.runWidget()}};handler=async()=>{throw Error('unexpected network during selection')};states=[];let tree=page(a,'official',()=>saved++);assert.deepEqual(Array.from(picker(tree).props.children,n=>n.props.children),['最低剩余额度汇总','Gemini Models','Claude and GPT models','Gemini 4 Argon']);await picker(tree).props.onChanged('gemini');tree=page(a,'official',()=>saved++);assert.equal(picker(tree).props.value,'gemini');assert.equal(saved,1);assert.equal(reloads,1);assert.equal(presentations.length,7);assert.equal(calls.length,0);assert.equal(kc.get(KEY),beforeKC,'even expired token must not renew');assert.equal(JSON.stringify(store.get(CACHE)),beforeCache);windows(api.officialCached().accounts[0],85,41);windows(api.cachedAccounts()[0],85,41);windows(api.managementAccounts()[0],85,41);assertDetails(a,85,41);assertWidgetTrees(a);assert.ok(api.cachedAntigravityWidgetProjection().data.statistics.fetchedAt<now)
+ reset();seed([make(A),make(B)],true);const beforeKC=kc.get(KEY),beforeCache=JSON.stringify(store.get(CACHE));let saved=0,reloads=0,presentations=[];scripting.Widget.present=(node,options)=>presentations.push({tree:walk(node),options});scripting.Widget.reloadAll=async()=>{reloads++;for(const f of families){scripting.Widget.family=f;await widget.runWidget()}};handler=async()=>{throw Error('unexpected network during selection')};states=[];let tree=page(a,'official',()=>saved++);assert.deepEqual(Array.from(picker(tree).props.children,n=>n.props.children),['最低剩余额度汇总','Gemini Models','Claude and GPT models']);await picker(tree).props.onChanged('gemini');tree=page(a,'official',()=>saved++);assert.equal(picker(tree).props.value,'gemini');assert.equal(saved,1);assert.equal(reloads,1);assert.equal(presentations.length,7);assert.equal(calls.length,0);assert.equal(kc.get(KEY),beforeKC,'even expired token must not renew');assert.equal(JSON.stringify(store.get(CACHE)),beforeCache);windows(api.officialCached().accounts[0],85,41);windows(api.cachedAccounts()[0],85,41);windows(api.managementAccounts()[0],85,41);assertDetails(a,85,41);assertWidgetTrees(a);assert.ok(api.cachedAntigravityWidgetProjection().data.statistics.fetchedAt<now)
  for(const p of presentations)assert.equal(p.options.reloadPolicy.date.getTime(),now+api.getRefreshMinutes()*60000)
  // Multiple widget instances do not consume a single-use flag; none may accidentally renew.
  for(let i=0;i<3;i++)await widget.runWidget();assert.equal(calls.length,0);api.saveSource('parrot');assert.equal(api.cachedAntigravityWidgetProjection(),null);api.saveSource('official')

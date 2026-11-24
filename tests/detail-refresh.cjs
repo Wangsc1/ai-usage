@@ -122,8 +122,8 @@ async function main(){
  }
  {
   const r=runtime('official','antigravity'),release=r.hold(),pending=r.button().props.action();await r.flush()
-  const picker=r.render().find(n=>n?.type==='Picker'&&n.props.title==='显示额度');await picker.props.onChanged('argon');assert.equal(r.calls.length,1,'mode change does not fetch');release();await pending
-  assert.equal(r.api.getAntigravityMode(r.id,'official'),'argon');assert.ok(text(r).includes('剩余额度 89%'));assert.equal(r.store.get(r.cacheKey).accounts.find(a=>a.id===r.id).antigravity.groups[2].buckets[0].remainingPercent,88.76151)
+  const picker=r.render().find(n=>n?.type==='Picker'&&n.props.title==='显示额度');await picker.props.onChanged('gemini');assert.equal(r.calls.length,1,'mode change does not fetch');release();await pending
+  assert.equal(r.api.getAntigravityMode(r.id,'official'),'gemini');assert.ok(text(r).includes('剩余额度 100%'));assert.equal(r.store.get(r.cacheKey).accounts.find(a=>a.id===r.id).antigravity.groups[2].buckets[0].remainingPercent,88.76151)
  }
  {
   const r=runtime('parrot','openai'),release=r.hold(),pending=r.button().props.action();await r.flush();r.render().find(n=>n?.type==='TextField').props.onChanged(' New Alias ')
