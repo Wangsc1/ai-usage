@@ -1,14 +1,10 @@
-import { refreshAccount, requestLocalWidgetProjection, accountScope, hiddenAccountIds, hideAccount, restoreHiddenAccounts, saveVisibleAccountOrder } from "./api"
-import { ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, antigravityBrandImage, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin } from "./api"
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, WebView, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { VERSION, getStatisticsSource, saveStatisticsSource, StatisticsSource, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, getConfig, saveConfig, loadUsage, Account, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, cachedAccounts, managementAccounts, sortAccounts, getRefreshMinutes, saveRefreshMinutes, REFRESH_OPTIONS, getSource, saveSource, DataSource, getWidgetName, saveWidgetName } from "./api"
-import { beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, CodexBrowserLogin, officialAccounts, logoutOfficial, saveAccountOrder, addDeepSeekAccount } from "./api"
-import { workBuddyBrandImage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin } from "./api"
-import { beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, ClaudeLogin, claudeCooldownUntil, claudeCooldownMessage } from "./api"
+import { VERSION, Account, DataSource, StatisticsSource, REFRESH_OPTIONS, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, antigravityBrandImage, workBuddyBrandImage, getSource, saveSource, getStatisticsSource, saveStatisticsSource, getRefreshMinutes, saveRefreshMinutes, getConfig, saveConfig, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, loadUsage, refreshAccount, requestLocalWidgetProjection, accountScope, cachedAccounts, managementAccounts, sortAccounts, saveAccountOrder, saveVisibleAccountOrder, hiddenAccountIds, hideAccount, restoreHiddenAccounts, getWidgetName, getWidgetNames, saveWidgetName } from "./api"
+import { officialAccounts, logoutOfficial, addDeepSeekAccount, ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin, CodexBrowserLogin, beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin, ClaudeLogin, beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, claudeCooldownUntil, claudeCooldownMessage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin } from "./api"
 
 // Modern ForEach uses Observable data + builder + editActions="move" (views/for_each).
 // Guard their presence so a runtime without these exports keeps the long-press sub-page instead of failing to render.
@@ -307,7 +303,11 @@ function SettingsView() {
     setAuthorization(destination)
     return () => setAuthorization(current => current === destination ? null : current)
   }
+  const [init] = useState<{ logins?: ReturnType<typeof officialAccounts>; parrot?: boolean; sub?: boolean }>({})
   const [source, setSource] = useState<DataSource>(getSource())
+  const [statisticsSource, setStatisticsSource] = useState<StatisticsSource>(getStatisticsSource())
+  const needParrot = source === "parrot" || statisticsSource === "parrot"
+  const needSub = source === "sub2api" || statisticsSource === "sub2api"
   const [loginProvider, setLoginProvider] = useState("codex")
   const [claude, setClaude] = useState<ClaudeLogin | null>(null)
   const [claudeCode, setClaudeCode] = useState("")
@@ -324,31 +324,50 @@ function SettingsView() {
   const [wbPreparing, setWBPreparing] = useState(false)
   const [dsToken, setDSToken] = useState("")
   const [dsAdding, setDSAdding] = useState(false)
-  const [logins, setLogins] = useState(officialAccounts())
+  if (source === "official" && !init.logins) init.logins = officialAccounts()
+  const [logins, setLogins] = useState(init.logins ?? [])
   const [auth] = useState({ antigravity: null as AntigravityLogin | null, codex: null as CodexBrowserLogin | null, alive: true, running: false, epoch: 0, workbuddy: null as WorkBuddyLogin | null, claude: null as ClaudeLogin | null, releaseBrowser: null as (() => void) | null })
   const stopAuth = () => { if (auth.antigravity) cancelAntigravityLogin(auth.antigravity); auth.antigravity = null; setAGBrowser(null); auth.running = false; setWBPreparing(false); if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; setWorkbuddy(null); if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; setCodexBrowser(null); setDSAdding(false); setDSToken(""); auth.epoch++; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; setClaude(null); setClaudeCode(""); setClaudeProgress("") }
   const dismiss = () => { auth.alive = false; stopAuth(); close() }
-  const [statisticsSource, setStatisticsSource] = useState<StatisticsSource>(getStatisticsSource())
-  const subCur = getSub2APIConfig()
+  const subCur = needSub ? getSub2APIConfig() : { baseUrl: "", adminKey: "", timezone: "" }
+  if (needSub) init.sub = true
   const [subUrl, setSubUrl] = useState(subCur.baseUrl ?? "")
   const [subKey, setSubKey] = useState("")
   const [subKeyEditing, setSubKeyEditing] = useState(false)
   const [hasSubKey, setHasSubKey] = useState(!!subCur.adminKey)
-  const cur = getConfig()
+  const cur = needParrot ? getConfig() : { baseUrl: "", managementKey: "" }
+  if (needParrot) init.parrot = true
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
   const [key, setKey] = useState("")
   const [keyEditing, setKeyEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [browserError, setBrowserError] = useState("")
   const [refreshMinutes, setRefreshMinutes] = useState(String(getRefreshMinutes()))
-  const localAccounts = cachedAccounts()
-  const [, setAccounts] = useState<Account[]>(localAccounts)
+  const [, setAccounts] = useState<Account[]>([])
   const listScope = accountScope(source)
-  const visible = getSource() === source ? localAccounts : []
-  const sortedLogins = sortAccounts(logins, "official")
-  const loginAccountById = new Map((source === "official" && logins.length ? managementAccounts() : []).map(a => [a.id, a]))
+  const visible = source !== "official" && getSource() === source ? cachedAccounts() : []
+  const sortedLogins = source === "official" ? sortAccounts(logins, "official") : []
+  const loginAccountById = new Map((source === "official" && logins.length ? managementAccounts(logins, false) : []).map(a => [a.id, a]))
   const hiddenCount = hiddenAccountIds(source).length
+  const widgetNames = getWidgetNames(source) ?? {}
   const [agBrowser, setAGBrowser] = useState<AntigravityLogin | null>(null)
+
+  function ensureSourceConfig(nextSource: DataSource, nextStats: StatisticsSource) {
+    if (nextSource === "official" && !init.logins) {
+      init.logins = officialAccounts()
+      setLogins(init.logins)
+    }
+    if ((nextSource === "parrot" || nextStats === "parrot") && !init.parrot) {
+      init.parrot = true
+      setBaseUrl(getConfig().baseUrl ?? "")
+    }
+    if ((nextSource === "sub2api" || nextStats === "sub2api") && !init.sub) {
+      init.sub = true
+      const sc = getSub2APIConfig()
+      setSubUrl(sc.baseUrl ?? "")
+      setHasSubKey(!!sc.adminKey)
+    }
+  }
 
   useEffect(() => () => { if (auth.antigravity) cancelAntigravityLogin(auth.antigravity); auth.antigravity = null; if (auth.workbuddy) cancelWorkBuddyLogin(auth.workbuddy); auth.workbuddy = null; if (auth.codex) cancelCodexBrowserLogin(auth.codex); auth.codex = null; auth.alive = false; auth.releaseBrowser?.(); auth.releaseBrowser = null; if (auth.claude) cancelClaudeLogin(auth.claude); auth.claude = null; auth.epoch++ }, [])
 
@@ -358,8 +377,10 @@ function SettingsView() {
       setSortUI(current => ({ ...current, editing: false }))
     } catch { setSortUI({ editing: false, failed: true }) }
     stopAuth()
-    saveSource(value as DataSource)
-    setSource(value as DataSource)
+    const next = value as DataSource
+    saveSource(next)
+    setSource(next)
+    ensureSourceConfig(next, statisticsSource)
     setAccounts(cachedAccounts())
     if (!await test()) await Widget.reloadAll()
   }
@@ -371,16 +392,8 @@ function SettingsView() {
     }
     if (loginProvider === "workbuddy") { await startWorkBuddy(); return }
     if (loginProvider === "claude") { startClaude(); return }
-    if (loginProvider === "antigravity") { startAG(); return }
-    if (auth.running || busy) return
-    stopAuth(); setBrowserError("")
-    if (typeof WebViewController !== "function") { setBrowserError("Codex浏览器登录缺少WebViewController，请重新登录"); return }
-    try {
-      const d = beginCodexBrowserLogin(() => { if (auth.codex === d) void completeCodex(d) }, () => {
-        if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex本次本机登录等待超时，请重新登录") }
-      }, () => { if (auth.codex === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Codex官方授权未完成，请重新登录") } })
-      auth.codex = d; setCodexBrowser(d)
-    } catch (e: any) { setBrowserError(e.message) }
+    if (loginProvider === "antigravity") { startLoopback("antigravity"); return }
+    startLoopback("codex")
   }
   async function startWorkBuddy() {
     if (!auth.alive || auth.running || busy || getSource() !== "official") return
@@ -417,62 +430,44 @@ function SettingsView() {
       if (valid()) { cancelWorkBuddyLogin(d); auth.workbuddy = null; setWorkbuddy(null); if (e !== browserCancelled) setBrowserError(e.message || "WorkBuddy登录失败，请重试"); auth.releaseBrowser?.(); auth.releaseBrowser = null }
     } finally { if (auth.alive && epoch === auth.epoch) { auth.running = false; setBusy(false) } }
   }
-  async function completeCodex(d: CodexBrowserLogin) {
-    const epoch = auth.epoch
-    const valid = () => auth.alive && auth.codex === d && auth.epoch === epoch && getSource() === "official"
-    if (!valid() || d.consumed) return
-    auth.running = true; setBusy(true)
-    try {
-      await finishCodexBrowserLogin(d, valid)
-      if (!valid()) return
-      auth.codex = null; setCodexBrowser(null); setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null; await test()
-    } catch (e: any) { if (valid()) { auth.codex = null; setCodexBrowser(null); setBrowserError(e.message || "Codex浏览器登录失败，请重新登录") } }
-    finally { if (auth.alive && epoch === auth.epoch) { auth.running = false; setBusy(false) } }
-  }
-  async function openCodex() {
-    const d = auth.codex
-    if (!d || auth.running) return
-    const epoch = auth.epoch
-    const valid = () => auth.alive && auth.codex === d && auth.epoch === epoch
-    auth.running = true; setBusy(true); setBrowserError("")
-    try { await presentIsolatedAuthorization(release => { if (valid()) auth.releaseBrowser = release }, d.url, pushAuthorization) }
-    catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Codex授权页") + "，请重试登录") }
-    finally {
-      // Native back/load failure ends an unconsumed attempt, not a token exchange.
-      if (valid() && !d.consumed) { stopAuth(); setBusy(false) }
-    }
-  }
-  function startAG() {
+  const loopbackProviders = {
+    codex: { label: "Codex", begin: beginCodexBrowserLogin, finish: finishCodexBrowserLogin, set: setCodexBrowser },
+    antigravity: { label: "Antigravity", begin: beginAntigravityLogin, finish: finishAntigravityLogin, set: setAGBrowser },
+  } as const
+  function startLoopback(kind: keyof typeof loopbackProviders) {
     if (!auth.alive || getSource() !== "official" || auth.running || busy) return
+    const p = loopbackProviders[kind]
     stopAuth(); setBrowserError("")
-    if (typeof WebViewController !== "function") { setBrowserError("Antigravity浏览器登录缺少WebViewController，请重新登录"); return }
+    if (typeof WebViewController !== "function") { setBrowserError(`${p.label}浏览器登录缺少WebViewController，请重新登录`); return }
     try {
-      const d = beginAntigravityLogin(() => { if (auth.antigravity === d) void completeAG(d) }, () => {
-        if (auth.antigravity === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Antigravity本次本机登录等待超时，请重新登录") }
-      }, () => { if (auth.antigravity === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError("Antigravity官方授权未完成，请重新登录") } })
-      auth.antigravity = d; setAGBrowser(d)
+      const d = p.begin(
+        () => { if (auth[kind] === d) void completeLoopback(kind, d) },
+        () => { if (auth[kind] === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError(`${p.label}本次本机登录等待超时，请重新登录`) } },
+        () => { if (auth[kind] === d) { stopAuth(); auth.running = false; setBusy(false); setBrowserError(`${p.label}官方授权未完成，请重新登录`) } },
+      )
+      auth[kind] = d as any; p.set(d as any)
     } catch (e: any) { setBrowserError(e.message) }
   }
-  async function completeAG(d: AntigravityLogin) {
-    const epoch = auth.epoch
-    const valid = () => auth.alive && auth.antigravity === d && auth.epoch === epoch && getSource() === "official"
+  async function completeLoopback(kind: keyof typeof loopbackProviders, d: CodexBrowserLogin) {
+    const p = loopbackProviders[kind], epoch = auth.epoch
+    const valid = () => auth.alive && auth[kind] === d && auth.epoch === epoch && getSource() === "official"
     if (!valid() || d.consumed) return
     auth.running = true; setBusy(true)
     try {
-      await finishAntigravityLogin(d, valid)
+      await (p.finish as (d: any, active: () => boolean) => Promise<void>)(d, valid)
       if (!valid()) return
-      auth.antigravity = null; setAGBrowser(null); setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null; await test()
-    } catch (e: any) { if (valid()) { auth.antigravity = null; setAGBrowser(null); setBrowserError(e.message || "Antigravity浏览器登录失败，请重新登录") } }
+      auth[kind] = null; p.set(null); setLogins(officialAccounts()); auth.releaseBrowser?.(); auth.releaseBrowser = null; await test()
+    } catch (e: any) { if (valid()) { auth[kind] = null; p.set(null); setBrowserError(e.message || `${p.label}浏览器登录失败，请重新登录`) } }
     finally { if (auth.alive && epoch === auth.epoch) { auth.running = false; setBusy(false) } }
   }
-  async function openAG() {
-    const d = auth.antigravity
+  async function openLoopback(kind: keyof typeof loopbackProviders) {
+    const p = loopbackProviders[kind], d = auth[kind]
     if (!d || auth.running) return
     const epoch = auth.epoch
-    const valid = () => auth.alive && auth.antigravity === d && auth.epoch === epoch
+    const valid = () => auth.alive && auth[kind] === d && auth.epoch === epoch
     auth.running = true; setBusy(true); setBrowserError("")
     try { await presentIsolatedAuthorization(release => { if (valid()) auth.releaseBrowser = release }, d.url, pushAuthorization) }
-    catch (e: any) { if (valid()) setBrowserError((e.message || "无法打开Antigravity授权页") + "，请重试登录") }
+    catch (e: any) { if (valid()) setBrowserError((e.message || `无法打开${p.label}授权页`) + "，请重试登录") }
     finally {
       // Native back/load failure ends an unconsumed attempt, not a token exchange.
       if (valid() && !d.consumed) { stopAuth(); setBusy(false) }
@@ -596,7 +591,7 @@ function SettingsView() {
     <NavigationLink destination={<WidgetNamePage account={a} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
       <VStack alignment="leading" spacing={3}>
         <AccountLine index={i} provider={a.provider} name={a.name} />
-        <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, source) || "使用原名（点此设置）"}</Text>
+        <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{widgetNames[a.id] || "使用原名（点此设置）"}</Text>
       </VStack>
     </NavigationLink>
     <Spacer />
@@ -625,7 +620,7 @@ function SettingsView() {
           <NavigationLink destination={<WidgetNamePage account={loginAccountById.get(a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
             <VStack alignment="leading" spacing={3}>
               <AccountLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed />
-              <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{getWidgetName(a.id, "official") || "使用原名（点此设置）"}</Text>
+              <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{widgetNames[a.id] || "使用原名（点此设置）"}</Text>
             </VStack>
           </NavigationLink>
           <Spacer />
@@ -659,7 +654,8 @@ function SettingsView() {
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
         <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async value => {
-          saveStatisticsSource(value as StatisticsSource); setStatisticsSource(value as StatisticsSource); await test()
+          const next = value as StatisticsSource
+          saveStatisticsSource(next); setStatisticsSource(next); ensureSourceConfig(source, next); await test()
         }}>
           <Text tag="parrot">Parrot</Text><Text tag="sub2api">Sub2API</Text>
         </Picker>
@@ -713,12 +709,12 @@ function SettingsView() {
           <Button title="取消登录" action={() => { stopAuth(); auth.running = false; setBusy(false) }} />
         </> : null}
         {agBrowser ? <>
-          <Button title="点击登录" action={openAG} disabled={busy} />
+          <Button title="点击登录" action={() => openLoopback("antigravity")} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
           <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}
         {codexBrowser ? <>
-          <Button title="点击登录" action={openCodex} disabled={busy} />
+          <Button title="点击登录" action={() => openLoopback("codex")} disabled={busy} />
           {browserError ? <Text font={12} foregroundStyle="systemRed">{browserError}</Text> : null}
           <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} />
         </> : null}

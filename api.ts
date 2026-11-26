@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.65"
+export const VERSION = "1.66"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
@@ -34,9 +34,14 @@ export function clearSub2APIConfig() { resetRemoteAccountScope("sub2api"); Keych
 
 // Local widget-only names: stable account ID within the explicitly separate data source.
 const widgetNameKey = (source: DataSource) => `ai_usage_widget_names_${source}_v1`
+export function getWidgetNames(source: DataSource = getSource()): Record<string, string> {
+  const raw = Storage.get<Record<string, string>>(widgetNameKey(source)) ?? {}
+  const out: Record<string, string> = Object.create(null)
+  for (const k of Object.keys(raw)) if (typeof raw[k] === "string") out[k] = raw[k]
+  return out
+}
 export function getWidgetName(id: string, source: DataSource = getSource()): string {
-  const names = Storage.get<Record<string, string>>(widgetNameKey(source)) ?? {}
-  return Object.prototype.hasOwnProperty.call(names, id) && typeof names[id] === "string" ? names[id] : ""
+  return getWidgetNames(source)[id] ?? ""
 }
 export function saveWidgetName(id: string, value: string, source: DataSource = getSource()) {
   const names = { ...(Storage.get<Record<string, string>>(widgetNameKey(source)) ?? {}) }
@@ -44,6 +49,21 @@ export function saveWidgetName(id: string, value: string, source: DataSource = g
   if (name) Object.defineProperty(names, id, { value: name, enumerable: true, configurable: true, writable: true })
   else delete names[id]
   Storage.set(widgetNameKey(source), names)
+}
+
+const base64url = (data: any): string => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+const formEncode = (params: Record<string, string>): string => Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&")
+const HTTP_DATE_RE = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/
+function retryAfterMs(response: any): number {
+  let retry = ""
+  try { retry = String(response.headers?.get("Retry-After") || "").trim() } catch { /* unreadable header = absent */ }
+  const ms = /^\d+$/.test(retry) ? Number(retry) * 1000 : HTTP_DATE_RE.test(retry) ? Date.parse(retry) - Date.now() : 0
+  return Number.isFinite(ms) && ms > 0 ? ms : 0
+}
+function retryAfterUntil(response: any): number {
+  const ms = retryAfterMs(response)
+  const until = ms ? Date.now() + ms : 0
+  return Number.isFinite(until) && until > Date.now() && until <= 8640000000000000 ? until : 0
 }
 
 const KEY_BASE = "parrot_base_url"
@@ -145,9 +165,13 @@ function rawCachedAccounts(source: DataSource): Account[] {
 export function hiddenAccountIds(source: DataSource = getSource()): string[] { return source === "official" ? [] : Storage.get<string[]>(hiddenKey(source)) ?? [] }
 export function visibleAccounts(accounts: Account[], source: DataSource = getSource()): Account[] {
   const hidden = new Set(hiddenAccountIds(source))
-  return sortAccounts(accounts.filter(a => !hidden.has(a.id)).map(a => projectAntigravityAccount(a, source)), source)
+  const list = hidden.size ? accounts.filter(a => !hidden.has(a.id)) : accounts
+  return sortAccounts(source === "official" ? list.map(a => projectAntigravityAccount(a, source)) : list, source)
 }
-export function cachedAccounts(): Account[] { return visibleAccounts(rawCachedAccounts(getSource())) }
+export function cachedAccounts(): Account[] {
+  const source = getSource()
+  return source === "official" ? (officialCached()?.accounts ?? []) : visibleAccounts(rawCachedAccounts(source), source)
+}
 export function hideAccount(id: string, source: DataSource, scope = accountScope(source)): boolean {
   if (source === "official" || getSource() !== source || accountScope(source) !== scope || !rawCachedAccounts(source).some(a => a.id === id)) return false
   Storage.set(hiddenKey(source), [...new Set([...hiddenAccountIds(source), id])])
@@ -308,13 +332,15 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
     all.push(...(next?.items ?? []))
     pageLength = next?.items?.length ?? 0
   }
+  const prevAccounts = Storage.get<UsageData>(KEY_CACHE)?.accounts ?? []
+  const prevById = new Map(prevAccounts.map(x => [x.id, x]))
   const accounts: Account[] = await Promise.all(
     all.map(async (a: any) => {
       let d: any
       try { d = await apiGet(baseUrl, `/oauth/accounts/${encodeURIComponent(a.accountId)}`, cred) }
       catch (e) {
         if (a.provider !== "workbuddy" || e instanceof HttpError && e.status === 401) throw e
-        const old = Storage.get<UsageData>(KEY_CACHE)?.accounts.find(x => x.id === a.accountId)
+        const old = prevById.get(a.accountId)
         return { ...(old ?? { fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null }), id: a.accountId, enabled: !!a.enabled, available: !!a.available, provider: a.provider, name: String(a.displayName ?? a.identity ?? a.accountId), fiveHour: emptyWindow(), sevenDay: emptyWindow(), resetCredits: null, credits: { ...(old?.credits ?? WorkBuddyCN.unknown()), checkin: workBuddyCheckin(null, null, "Parrot详情读取失败"), error: "Parrot WorkBuddy详情读取失败，显示此前快照" }, readError: "Parrot WorkBuddy详情读取失败" }
       }
       // 重置卡：Parrot 管理接口暂未提供只读字段；若日后账号详情返回 resetCreditCount 则自动显示
@@ -328,12 +354,12 @@ async function fetchAll(baseUrl: string, cred: string): Promise<UsageData> {
         available: !!a.available,
         fiveHour: a.provider === "workbuddy" ? emptyWindow() : toWindow(d?.usageWindows, "fiveHour"),
         sevenDay: a.provider === "workbuddy" ? emptyWindow() : toWindow(d?.usageWindows, "sevenDay"),
-        ...(a.provider === "workbuddy" ? { credits: WorkBuddyCN.parrot(d?.workbuddy, Storage.get<UsageData>(KEY_CACHE)?.accounts.find(x => x.id === a.accountId)?.credits) } : {}),
+        ...(a.provider === "workbuddy" ? { credits: WorkBuddyCN.parrot(d?.workbuddy, prevById.get(a.accountId)?.credits) } : {}),
       }
     })
   )
   // Claude 在前，其余按名称
-  const ds = await dsParrot(baseUrl, cred, (Storage.get<UsageData>(KEY_CACHE)?.accounts ?? []))
+  const ds = await dsParrot(baseUrl, cred, prevAccounts)
   accounts.push(...ds.accounts)
   accounts.sort((x, y) =>
     x.provider === y.provider ? x.name.localeCompare(y.name) : x.provider === "claude" ? -1 : y.provider === "claude" ? 1 : x.provider.localeCompare(y.provider)
@@ -767,27 +793,30 @@ export function officialAccounts(): { id: string; name: string; email: string; p
   return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const })), ...claudeAccounts(), ...dsCredentials().map(a => ({ id: a.id, name: a.name, email: "", provider: "deepseek" as const })), ...WorkBuddyCN.accounts(), ...Antigravity.accounts()]
 }
 // Local management includes authorized accounts even before their first usage collection.
-export function managementAccounts(): Account[] {
+export function managementAccounts(knownOfficial?: ReturnType<typeof officialAccounts>, sort = true): Account[] {
   if (getSource() !== "official") return cachedAccounts()
-  const cached = new Map((officialCached()?.accounts ?? []).map(a => [a.id, a]))
-  return sortAccounts(officialAccounts().map(a => cached.get(a.id) ?? {
+  const accounts = knownOfficial ?? officialAccounts()
+  const cached = new Map((officialCached(accounts, false)?.accounts ?? []).map(a => [a.id, a]))
+  const list = accounts.map(a => cached.get(a.id) ?? {
     id: a.id, name: a.name, provider: a.provider, enabled: true, available: true,
     fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null },
     sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null,
-  }), "official")
+  })
+  return sort ? sortAccounts(list, "official") : list
 }
-function officialSnapshot(): UsageData | null {
+function officialSnapshot(accounts = officialAccounts(), sort = true): UsageData | null {
   const cache = Storage.get<UsageData>(CACHE)
   if (!cache) return null
-  const names = new Map(officialAccounts().map(a => [a.id, a.name]))
-  return { ...cache, accounts: sortAccounts(cache.accounts.map(a => {
+  const names = new Map(accounts.map(a => [a.id, a.name]))
+  const list = cache.accounts.map(a => {
     const clean = { ...a } as Account & { antigravityRead?: unknown }
     delete clean.antigravityRead // discard retired 1.37 diagnostic metadata, including fallback writes
     return { ...clean, name: names.get(a.id) ?? a.name }
-  }), "official") }
+  })
+  return { ...cache, accounts: sort ? sortAccounts(list, "official") : list }
 }
-export function officialCached(): UsageData | null {
-  const cache = officialSnapshot()
+export function officialCached(accounts?: ReturnType<typeof officialAccounts>, sort = true): UsageData | null {
+  const cache = officialSnapshot(accounts, sort)
   return cache ? { ...cache, accounts: cache.accounts.map(a => projectAntigravityAccount(a, "official")) } : null
 }
 export function logoutOfficial(id: string) {
@@ -864,39 +893,51 @@ export type CodexBrowserLogin = {
   url: string; redirect: string; verifier: string; state: string; expiresAt: number;
   cancelled: boolean; consumed: boolean; code: string | null; server: any; timer: any;
 }
-function closeCodexListener(d: CodexBrowserLogin) {
+function closeLoopbackListener(d: CodexBrowserLogin) {
   if (d.timer != null) { clearTimeout(d.timer); d.timer = null }
   if (d.server) { try { d.server.stop() } catch {} d.server = null }
 }
-export function cancelCodexBrowserLogin(d: CodexBrowserLogin) {
-  d.cancelled = true; closeCodexListener(d); d.verifier = ""; d.state = ""; d.code = null; d.url = ""
+function cancelLoopbackOAuth(d: CodexBrowserLogin) {
+  d.cancelled = true; closeLoopbackListener(d); d.verifier = ""; d.state = ""; d.code = null; d.url = ""
 }
-export function beginCodexBrowserLogin(onCode: () => void, onExpire: () => void, onFailure: () => void = onExpire): CodexBrowserLogin {
+function beginLoopbackOAuth<T extends CodexBrowserLogin>(
+  opts: {
+    label: string
+    ports: number[]
+    callbackPath: string
+    redirectHost: string
+    bindError: string
+    buildUrl: (redirect: string, challenge: string, state: string) => string
+    extra?: Omit<T, keyof CodexBrowserLogin>
+  },
+  onCode: () => void,
+  onExpire: () => void,
+  onFailure: () => void = onExpire,
+): T {
   if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function" || typeof Crypto.sha256 !== "function")
-    throw new Error("Codex浏览器登录缺少PKCE能力，请重新登录")
+    throw new Error(`${opts.label}浏览器登录缺少PKCE能力，请重新登录`)
   if (typeof HttpServer !== "function" || typeof HttpResponse === "undefined" || typeof HttpResponseBody === "undefined" || typeof HttpResponse.ok !== "function" || typeof HttpResponseBody.html !== "function")
-    throw new Error("Codex浏览器登录缺少本机回调能力，请重新登录")
-  const base = (data: any) => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
-  const verifier = base(Crypto.generateSymmetricKey(256)), state = base(Crypto.generateSymmetricKey(256))
+    throw new Error(`${opts.label}浏览器登录缺少本机回调能力，请重新登录`)
+  const verifier = base64url(Crypto.generateSymmetricKey(256)), state = base64url(Crypto.generateSymmetricKey(256))
   const input = Data.fromRawString(verifier)
-  if (!input) throw new Error("Codex PKCE生成失败，请重新登录")
-  const challenge = base(Crypto.sha256(input))
-  const d: CodexBrowserLogin = { url: "", redirect: "", verifier, state, expiresAt: Date.now() + 15 * 60000,
-    cancelled: false, consumed: false, code: null, server: null, timer: null }
+  if (!input) throw new Error(`${opts.label} PKCE生成失败，请重新登录`)
+  const challenge = base64url(Crypto.sha256(input))
+  const d = { ...(opts.extra as object), url: "", redirect: "", verifier, state, expiresAt: Date.now() + 15 * 60000,
+    cancelled: false, consumed: false, code: null, server: null, timer: null } as T
   const reply = (ok: boolean) => HttpResponse.ok(HttpResponseBody.html(ok
     ? '<!doctype html><meta charset="utf-8"><p>已收到授权回调，请返回脚本等待保存。此页面不代表登录成功。</p>'
     : '<!doctype html><meta charset="utf-8"><p>本次回调无效或已失效，请返回脚本重新登录。</p>'))
-  for (const port of [1455, 1457]) {
+  for (const port of opts.ports) {
     let server: any = null
     try {
       server = new HttpServer(); server.listenAddressIPv4 = "127.0.0.1"
       if (server.listenAddressIPv4 !== "127.0.0.1") throw new Error()
-      server.registerHandler("/auth/callback", (req: any) => {
+      server.registerHandler(opts.callbackPath, (req: any) => {
         const values = (key: string) => (req.queryParams ?? []).filter((x: any) => x.key === key).map((x: any) => x.value)
         const codes = values("code"), states = values("state")
-        if (!d.cancelled && Date.now() >= d.expiresAt) { cancelCodexBrowserLogin(d); Promise.resolve().then(onExpire); return reply(false) }
+        if (!d.cancelled && Date.now() >= d.expiresAt) { cancelLoopbackOAuth(d); Promise.resolve().then(onExpire); return reply(false) }
         if (req.method === "GET" && !d.cancelled && !d.consumed && states.length === 1 && states[0] === d.state && values("error").length > 0) {
-          cancelCodexBrowserLogin(d); Promise.resolve().then(onFailure); return reply(false)
+          cancelLoopbackOAuth(d); Promise.resolve().then(onFailure); return reply(false)
         }
         const valid = req.method === "GET" && !d.cancelled && !d.consumed && !d.code && Date.now() < d.expiresAt &&
           values("error").length === 0 && states.length === 1 && states[0] === d.state && codes.length === 1 && typeof codes[0] === "string" && !!codes[0]
@@ -907,23 +948,36 @@ export function beginCodexBrowserLogin(onCode: () => void, onExpire: () => void,
       })
       const error = server.start({ port, forceIPv4: true })
       if (error || server.port !== port) throw new Error()
-      d.server = server; d.redirect = `http://127.0.0.1:${port}/auth/callback`; break
+      d.server = server; d.redirect = `http://${opts.redirectHost}:${port}${opts.callbackPath}`; break
     } catch { try { server?.stop() } catch {} }
   }
-  if (!d.server) { cancelCodexBrowserLogin(d); throw new Error("Codex本机回调无法绑定127.0.0.1:1455或1457，请重新登录") }
-  const params = { response_type: "code", client_id: CLIENT, redirect_uri: d.redirect,
-    scope: "openid profile email offline_access api.connectors.read api.connectors.invoke", code_challenge: challenge,
-    code_challenge_method: "S256", state, id_token_add_organizations: "true", codex_cli_simplified_flow: "true", originator: "codex_cli_rs" }
-  d.url = AUTH + "/oauth/authorize?" + Object.entries(params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&")
-  d.timer = setTimeout(() => { if (!d.cancelled) { cancelCodexBrowserLogin(d); onExpire() } }, 15 * 60000)
+  if (!d.server) { cancelLoopbackOAuth(d); throw new Error(opts.bindError) }
+  d.url = opts.buildUrl(d.redirect, challenge, state)
+  d.timer = setTimeout(() => { if (!d.cancelled) { cancelLoopbackOAuth(d); onExpire() } }, 15 * 60000)
   return d
+}
+export function cancelCodexBrowserLogin(d: CodexBrowserLogin) { cancelLoopbackOAuth(d) }
+export function beginCodexBrowserLogin(onCode: () => void, onExpire: () => void, onFailure: () => void = onExpire): CodexBrowserLogin {
+  return beginLoopbackOAuth<CodexBrowserLogin>({
+    label: "Codex",
+    ports: [1455, 1457],
+    callbackPath: "/auth/callback",
+    redirectHost: "127.0.0.1",
+    bindError: "Codex本机回调无法绑定127.0.0.1:1455或1457，请重新登录",
+    buildUrl: (redirect, challenge, state) => AUTH + "/oauth/authorize?" + formEncode({
+      response_type: "code", client_id: CLIENT, redirect_uri: redirect,
+      scope: "openid profile email offline_access api.connectors.read api.connectors.invoke",
+      code_challenge: challenge, code_challenge_method: "S256", state,
+      id_token_add_organizations: "true", codex_cli_simplified_flow: "true", originator: "codex_cli_rs",
+    }),
+  }, onCode, onExpire, onFailure)
 }
 export async function finishCodexBrowserLogin(d: CodexBrowserLogin, active: () => boolean): Promise<void> {
   if (Date.now() >= d.expiresAt || !active()) cancelCodexBrowserLogin(d)
   if (d.cancelled || d.consumed || !d.code) throw new Error("Codex本次浏览器授权已失效，请重新登录")
   d.consumed = true
-  const body = Object.entries({ grant_type: "authorization_code", client_id: CLIENT, code: d.code,
-    redirect_uri: d.redirect, code_verifier: d.verifier }).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&")
+  const body = formEncode({ grant_type: "authorization_code", client_id: CLIENT, code: d.code,
+    redirect_uri: d.redirect, code_verifier: d.verifier })
   try {
     const r = await request(AUTH + "/oauth/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body })
     if (r.status !== 200) throw new Error(`Codex浏览器令牌交换失败（HTTP ${r.status}），请重新登录`)
@@ -945,10 +999,7 @@ function renewalDue(expiresAt: number): boolean {
   return typeof expiresAt !== "number" || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + 60000
 }
 async function renewalFailure(provider: string, id: string, response: any): Promise<Error> {
-  let retry = ""
-  try { retry = String(response.headers?.get("Retry-After") || "").trim() } catch { /* no raw headers */ }
-  let until = /^\d+$/.test(retry) ? Date.now() + Number(retry) * 1000 : /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retry) ? Date.parse(retry) : 0
-  if (!Number.isFinite(until) || until <= Date.now() || until > 8640000000000000) until = 0
+  let until = retryAfterUntil(response)
   const fallback = response.status === 429 && !until
   if (fallback) until = Date.now() + 300000 // Local backoff only, not a claimed service deadline.
   if (response.status === 429 || response.status >= 500) {
@@ -1111,11 +1162,7 @@ export function claudeCooldownMessage(): string {
 }
 async function tokenRateLimit(r: any): Promise<Error> {
   const header = (name: string): string => { try { return r.headers?.get(name) || "" } catch { return "" } }
-  const retry = header("Retry-After").trim()
-  let until = 0
-  if (/^\d+$/.test(retry)) until = Date.now() + Number(retry) * 1000
-  else if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retry)) until = Date.parse(retry)
-  if (!Number.isFinite(until) || until <= Date.now() || until > 8640000000000000) until = 0
+  const until = retryAfterUntil(r)
   if (until) { try { Storage.set(COOLDOWN, Math.max(until, claudeCooldownUntil())) } catch { /* no raw storage errors */ } }
   const mime = header("Content-Type").split(";")[0].trim().toLowerCase()
   const format = mime === "application/json" || mime.endsWith("+json") ? "JSON" : mime === "text/html" ? "HTML" : "other"
@@ -1192,7 +1239,6 @@ export function claudeAccounts(): { id: string; name: string; email: string; pro
   return credentials().map((a, i) => ({ id: a.id, name: a.email || `Claude账号 ${i + 1}（邮箱未提供）`, email: a.email, provider: "claude" as const }))
 }
 export function logoutClaude(id: string) { persist(credentials().filter(a => a.id !== id)); forgetRenewal(id); forgetClaudeUsageState(id) }
-const base64url = (data: any): string => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 function active(d: ClaudeLogin) {
   if (d.cancelled || Date.now() >= d.expiresAt) throw new Error("Claude本次授权已取消或过期，请重新开始")
 }
@@ -1263,7 +1309,7 @@ export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => 
   // Parameters are those in the official CLI buildAuthUrl; no cookie extraction or invented redirect.
   const params: Record<string, string> = { code: "true", client_id: CLIENT, response_type: "code", redirect_uri: d.redirect,
     scope: SCOPE, code_challenge: challenge, code_challenge_method: "S256", state }
-  d.url = "https://claude.com/cai/oauth/authorize?" + Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&")
+  d.url = "https://claude.com/cai/oauth/authorize?" + formEncode(params)
   if (d.manual) d.progress = "等待Claude手动授权码"
   d.timer = setTimeout(() => { if (!d.cancelled) { cancelClaudeLogin(d); onExpire() } }, 15 * 60 * 1000)
   return d
@@ -1406,12 +1452,8 @@ function deadline(key: string, id: string): number {
   return typeof value === "number" && Number.isFinite(value) && value > Date.now() ? value : 0
 }
 function remember429(key: string, id: string, r: any): number {
-  let retry = ""
-  try { retry = String(r.headers?.get("Retry-After") || "").trim() } catch { /* unreadable header = absent */ }
-  let ms = 0
-  if (/^\d+$/.test(retry)) ms = Number(retry) * 1000
-  else if (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retry)) ms = Date.parse(retry) - Date.now()
-  const until = Date.now() + Math.min(Number.isFinite(ms) && ms > 0 ? ms : 300000, 3600000)
+  const ms = retryAfterMs(r)
+  const until = Date.now() + Math.min(ms || 300000, 3600000)
   const all = Storage.get<Deadlines>(key) ?? {}
   Storage.set(key, { ...all, [id]: Math.max(until, deadline(key, id)) })
   return until
@@ -2095,67 +2137,25 @@ function persist(items: Credential[]) { if (!Keychain.set(KEY, JSON.stringify(it
 export function accounts() { return credentials().map(c => ({ id: c.id, name: c.email, email: c.email, provider: "antigravity" as const })) }
 let loginEpoch = 0
 export function logout(id: string) { persist(credentials().filter(c => c.id !== id)); changeDetailIdentity(id); loginEpoch++; rotated.delete(id); completedReads.delete(id) }
-export type Login = {
-  epoch: number;
-  url: string; redirect: string; verifier: string; state: string; expiresAt: number;
-  cancelled: boolean; consumed: boolean; code: string | null; server: any; timer: any;
-}
-function closeListener(d: Login) {
-  if (d.timer != null) { clearTimeout(d.timer); d.timer = null }
-  if (d.server) { try { d.server.stop() } catch {} d.server = null }
-}
-export function cancel(d: Login) {
-  d.cancelled = true; closeListener(d); d.verifier = ""; d.state = ""; d.code = null; d.url = ""
-}
+export type Login = CodexBrowserLogin & { epoch: number }
+export function cancel(d: Login) { cancelLoopbackOAuth(d) }
 export function begin(onCode: () => void, onExpire: () => void, onFailure: () => void = onExpire): Login {
-  if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function" || typeof Crypto.sha256 !== "function")
-    throw new Error("Antigravity浏览器登录缺少PKCE能力，请重新登录")
-  if (typeof HttpServer !== "function" || typeof HttpResponse === "undefined" || typeof HttpResponseBody === "undefined" || typeof HttpResponse.ok !== "function" || typeof HttpResponseBody.html !== "function")
-    throw new Error("Antigravity浏览器登录缺少本机回调能力，请重新登录")
-  const base = (data: any) => data.toBase64String().replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
-  const verifier = base(Crypto.generateSymmetricKey(256)), state = base(Crypto.generateSymmetricKey(256))
-  const input = Data.fromRawString(verifier)
-  if (!input) throw new Error("Antigravity PKCE生成失败，请重新登录")
-  const challenge = base(Crypto.sha256(input))
-  const d: Login = { epoch: loginEpoch, url: "", redirect: "", verifier, state, expiresAt: Date.now() + 15 * 60000,
-    cancelled: false, consumed: false, code: null, server: null, timer: null }
-  const reply = (ok: boolean) => HttpResponse.ok(HttpResponseBody.html(ok
-    ? '<!doctype html><meta charset="utf-8"><p>已收到授权回调，请返回脚本等待保存。此页面不代表登录成功。</p>'
-    : '<!doctype html><meta charset="utf-8"><p>本次回调无效或已失效，请返回脚本重新登录。</p>'))
-  for (const port of [51121]) {
-    let server: any = null
-    try {
-      server = new HttpServer(); server.listenAddressIPv4 = "127.0.0.1"
-      if (server.listenAddressIPv4 !== "127.0.0.1") throw new Error()
-      server.registerHandler("/oauth-callback", (req: any) => {
-        const values = (key: string) => (req.queryParams ?? []).filter((x: any) => x.key === key).map((x: any) => x.value)
-        const codes = values("code"), states = values("state")
-        if (!d.cancelled && Date.now() >= d.expiresAt) { cancel(d); Promise.resolve().then(onExpire); return reply(false) }
-        if (req.method === "GET" && !d.cancelled && !d.consumed && states.length === 1 && states[0] === d.state && values("error").length > 0) {
-          cancel(d); Promise.resolve().then(onFailure); return reply(false)
-        }
-        const valid = req.method === "GET" && !d.cancelled && !d.consumed && !d.code && Date.now() < d.expiresAt &&
-          values("error").length === 0 && states.length === 1 && states[0] === d.state && codes.length === 1 && typeof codes[0] === "string" && !!codes[0]
-        if (!valid) return reply(false)
-        d.code = codes[0]
-        Promise.resolve().then(onCode)
-        return reply(true)
-      })
-      const error = server.start({ port, forceIPv4: true })
-      if (error || server.port !== port) throw new Error()
-      d.server = server; d.redirect = `http://localhost:${port}/oauth-callback`; break
-    } catch { try { server?.stop() } catch {} }
-  }
-  if (!d.server) { cancel(d); throw new Error("Antigravity本机回调无法绑定127.0.0.1:51121，请重新登录") }
-  const params = { response_type: "code", client_id: CLIENT, redirect_uri: d.redirect,
-    scope: ["cloud-platform", "userinfo.email", "userinfo.profile", "cclog", "experimentsandconfigs", "aicode"].map(s => "https://www.googleapis.com/auth/" + s).join(" "),
-    code_challenge: challenge, code_challenge_method: "S256", state, access_type: "offline", prompt: "consent" }
-  d.url = "https://accounts.google.com/o/oauth2/v2/auth?" + Object.entries(params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&")
-  d.timer = setTimeout(() => { if (!d.cancelled) { cancel(d); onExpire() } }, 15 * 60000)
-  return d
+  return beginLoopbackOAuth<Login>({
+    label: "Antigravity",
+    ports: [51121],
+    callbackPath: "/oauth-callback",
+    redirectHost: "localhost",
+    bindError: "Antigravity本机回调无法绑定127.0.0.1:51121，请重新登录",
+    extra: { epoch: loginEpoch },
+    buildUrl: (redirect, challenge, state) => "https://accounts.google.com/o/oauth2/v2/auth?" + formEncode({
+      response_type: "code", client_id: CLIENT, redirect_uri: redirect,
+      scope: ["cloud-platform", "userinfo.email", "userinfo.profile", "cclog", "experimentsandconfigs", "aicode"].map(s => "https://www.googleapis.com/auth/" + s).join(" "),
+      code_challenge: challenge, code_challenge_method: "S256", state, access_type: "offline", prompt: "consent",
+    }),
+  }, onCode, onExpire, onFailure)
 }
 async function token(body: Record<string, string>) {
-  return request(TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: Object.entries({ client_id: CLIENT, client_secret: SECRET, ...body }).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join("&") })
+  return request(TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: formEncode({ client_id: CLIENT, client_secret: SECRET, ...body }) })
 }
 function credential(b: any, old?: Credential): Credential {
   const seconds = Number(b?.expires_in)
