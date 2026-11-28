@@ -1,7 +1,7 @@
 import {
   Button, EditButton, ForEach, Form, HStack, Spacer, Navigation, NavigationLink, NavigationStack, Picker, Script, Section,
   SecureField, SVG, Image, Text, TextField, Widget, WebView, VStack, useState, useEffect,
-  ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
+  ScrollView, LazyVGrid, ReorderableForEach, Rectangle, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
 import { VERSION, Account, Metric, DataSource, StatisticsSource, REFRESH_OPTIONS, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, antigravityBrandImage, workBuddyBrandImage, getSource, saveSource, getStatisticsSource, saveStatisticsSource, getRefreshMinutes, saveRefreshMinutes, getConfig, saveConfig, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, loadUsage, refreshAccount, requestLocalWidgetProjection, accountScope, cachedAccounts, cachedDashboardOverview, managementAccounts, sortAccounts, saveAccountOrder, saveVisibleAccountOrder, hiddenAccountIds, hideAccount, restoreHiddenAccounts, getWidgetName, getWidgetNames, saveWidgetName, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd } from "./api"
 import { officialAccounts, logoutOfficial, addDeepSeekAccount, ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin, CodexBrowserLogin, beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin, ClaudeLogin, beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, claudeCooldownUntil, claudeCooldownMessage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin } from "./api"
@@ -59,13 +59,13 @@ const ACCENT = C("#0A84FF", "#409CFF")
 const GREEN = C("#2E9E4F", "#7ED957")
 const ORANGE = C("#D9770B", "#FF9F0A")
 const RED = C("#D93025", "#FF453A")
-const HERO_BG = C("#EAF4FC", "#1E293B")
-const HERO_TILE_BG = C("rgba(255, 255, 255, 0.80)", "rgba(255, 255, 255, 0.08)")
+const SEG_OFF = C("rgba(0, 0, 0, 0.13)", "rgba(255, 255, 255, 0.14)")
+const DIVIDER = C("rgba(0, 0, 0, 0.08)", "rgba(255, 255, 255, 0.10)")
 const PILL_BG = C("rgba(10, 132, 255, 0.12)", "rgba(64, 156, 255, 0.20)")
 const MUTED_PILL_BG = C("rgba(0, 0, 0, 0.06)", "rgba(255, 255, 255, 0.11)")
 const GREEN_PILL_BG = C("rgba(46, 158, 79, 0.13)", "rgba(126, 217, 87, 0.18)")
+const ORANGE_PILL_BG = C("rgba(217, 119, 11, 0.12)", "rgba(255, 159, 10, 0.18)")
 const RED_PILL_BG = C("rgba(217, 48, 37, 0.12)", "rgba(255, 69, 58, 0.18)")
-const BAR_TRACK = C("rgba(0, 0, 0, 0.08)", "rgba(255, 255, 255, 0.14)")
 
 function quotaColor(remaining: number | null): DC {
   if (remaining == null) return SUB
@@ -83,17 +83,34 @@ function cacheRateText(m: Metric): string {
   return inputSide > 0 ? (m.cacheReadTokens / inputSide * 100).toFixed(1) + "%" : "--"
 }
 function Pill({ text, color = SUB, bg = MUTED_PILL_BG }: { text: string; color?: DC; bg?: DC }) {
-  return <HStack background={<RoundedRectangle cornerRadius={6} fill={bg} />}>
+  return <HStack fixedSize={{ horizontal: true, vertical: true }} background={<RoundedRectangle cornerRadius={6} fill={bg} />}>
     <Text font={10} fontWeight="semibold" monospacedDigit foregroundStyle={color} lineLimit={1} padding={{ horizontal: 6, vertical: 2 }}>{text}</Text>
   </HStack>
 }
-function MiniQuotaBar({ remaining, muted = false }: { remaining: number | null; muted?: boolean }) {
-  const count = 10
+// Matches widget.tsx SegBar: lit body uses FG, rightmost lit head uses status color, unlit uses SEG_OFF.
+function MiniQuotaBar({ remaining, count = 10, height = 4, muted = false }: { remaining: number | null; count?: number; height?: number; muted?: boolean }) {
   const lit = remaining == null ? 0 : Math.round((Math.max(0, Math.min(100, remaining)) / 100) * count)
-  const activeColor = muted ? SUB : quotaColor(remaining)
-  return <HStack spacing={2}>
-    {Array.from({ length: count }, (_, i) => <RoundedRectangle key={String(i)} cornerRadius={2} fill={i < lit ? activeColor : BAR_TRACK} frame={{ maxWidth: "infinity", height: 4 }} />)}
+  const head = quotaColor(remaining)
+  return <HStack spacing={height * 0.45}>
+    {Array.from({ length: count }, (_, i) => {
+      const color = i < lit ? (muted ? SUB : i < lit - 1 ? FG : head) : SEG_OFF
+      return <RoundedRectangle key={String(i)} cornerRadius={height * 0.3} fill={color} frame={{ maxWidth: "infinity", height }} />
+    })}
   </HStack>
+}
+function DetailKV({ label, value, valueColor = FG, mono = false }: { label: string; value: string; valueColor?: DC; mono?: boolean }) {
+  return <HStack spacing={8}>
+    <Text font={13} foregroundStyle={SUB} lineLimit={1}>{label}</Text>
+    <Spacer />
+    <Text font={13} fontWeight="medium" monospacedDigit={mono} foregroundStyle={valueColor} lineLimit={1} minScaleFactor={0.75}>{value}</Text>
+  </HStack>
+}
+function ProviderMark({ provider, size = ICON_SIZE }: { provider: string; size?: number }) {
+  const code = providerIconCode(provider)
+  if (provider === "antigravity") return <Image image={antigravityBrandImage()} renderingMode="original" resizable frame={{ width: size, height: size }} />
+  if (provider === "workbuddy") return <Image image={workBuddyBrandImage()} renderingMode="original" resizable frame={{ width: size, height: size }} />
+  if (code) return <SVG code={code} resizable frame={{ width: size, height: size }} />
+  return <Image systemName="sparkle" font={size * 0.85} foregroundStyle={SUB} frame={{ width: size, height: size }} />
 }
 function MiniQuotaBlock({ label, remaining, resetsAt, fmt, muted = false }: { label: string; remaining: number | null; resetsAt: string | null; fmt: (iso: string | null) => string; muted?: boolean }) {
   const countdown = fmt(resetsAt)
@@ -108,18 +125,15 @@ function MiniQuotaBlock({ label, remaining, resetsAt, fmt, muted = false }: { la
     <MiniQuotaBar remaining={remaining} muted={muted} />
   </VStack>
 }
-function AccountDashboardMeta({ acc, alias }: { acc?: Account; alias: string }) {
+function AccountDashboardMeta({ acc }: { acc?: Account }) {
   const exhausted = isAccountExhausted(acc)
-  const hasReset = typeof acc?.resetCredits === "number" && Number.isFinite(acc.resetCredits) && acc.resetCredits > 0
-  const hasBadges = !!alias || hasReset || (acc ? acc.enabled && !acc.available : false)
-  let detail: any = null
   if (acc?.provider === "workbuddy") {
     const c = acc.credits
     const checkin = fmtWorkBuddyCheckin(c?.checkin)
     const checkedIn = checkin === "已签到"
     const pct = c?.reliable && typeof c.remaining === "number" && typeof c.capacity === "number" && c.capacity > 0
       ? (c.remaining / c.capacity) * 100 : null
-    detail = c ? <VStack alignment="leading" spacing={4}>
+    return c ? <VStack alignment="leading" spacing={4}>
       <HStack spacing={6}>
         <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={exhausted ? SUB : FG} lineLimit={1}>
           {`剩余积分 ${c.reliable ? fmtWorkBuddyNumber(c.remaining) : "未提供"}`}
@@ -130,13 +144,14 @@ function AccountDashboardMeta({ acc, alias }: { acc?: Account; alias: string }) 
       {pct != null ? <MiniQuotaBar remaining={pct} muted={exhausted} /> : null}
       {c.error || acc.readError ? <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{c.error || acc.readError}</Text> : null}
     </VStack> : <Text font={11} foregroundStyle={SUB}>点此查看详情或设置小组件名</Text>
-  } else if (acc?.provider === "deepseek") {
+  }
+  if (acc?.provider === "deepseek") {
     const b = acc.balance
     const moneyText = b?.money?.length ? b.money.map(m => fmtDeepSeekMoney(m.currency, m.total)).join(" · ") : ""
     const subText = b?.money?.length ? b.money.map(m => b.auth === "网页Token"
       ? `近7日 ${fmtDeepSeekMoney(m.currency, m.weekCost)}`
       : `充值 ${fmtDeepSeekMoney(m.currency, m.toppedUp)} · 赠送 ${fmtDeepSeekMoney(m.currency, m.granted)}`).join(" · ") : ""
-    detail = moneyText ? <VStack alignment="leading" spacing={2}>
+    return moneyText ? <VStack alignment="leading" spacing={2}>
       <HStack spacing={6}>
         <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1}>{`余额 ${moneyText}`}</Text>
         <Spacer />
@@ -145,27 +160,29 @@ function AccountDashboardMeta({ acc, alias }: { acc?: Account; alias: string }) 
       {subText ? <Text font={11} foregroundStyle={SUB} lineLimit={1}>{subText}</Text> : null}
       {b?.error || acc.readError ? <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{b?.error || acc.readError}</Text> : null}
     </VStack> : <Text font={11} foregroundStyle={b?.error || acc.readError ? ORANGE : SUB} lineLimit={1}>{b?.error || acc.readError || "点此查看详情或设置小组件名"}</Text>
-  } else if (acc && (acc.fiveHour?.remainingPercent != null || acc.sevenDay?.remainingPercent != null)) {
-    detail = <VStack alignment="leading" spacing={4}>
+  }
+  if (acc && (acc.fiveHour?.remainingPercent != null || acc.sevenDay?.remainingPercent != null)) {
+    return <VStack alignment="leading" spacing={4}>
       <HStack spacing={12}>
         <MiniQuotaBlock label="5h" remaining={acc.fiveHour?.remainingPercent ?? null} resetsAt={acc.fiveHour?.resetsAt ?? null} fmt={fmtReset} muted={exhausted} />
         <MiniQuotaBlock label="7d" remaining={acc.sevenDay?.remainingPercent ?? null} resetsAt={acc.sevenDay?.resetsAt ?? null} fmt={fmtResetDays} muted={exhausted} />
       </HStack>
       {acc.readError ? <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{acc.readError}</Text> : null}
     </VStack>
-  } else if (acc?.readError) {
-    detail = <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{acc.readError}</Text>
-  } else {
-    detail = <Text font={11} foregroundStyle={SUB} lineLimit={1}>暂未读取缓存 · 点此查看详情或设置名称</Text>
   }
-  return <VStack alignment="leading" spacing={5}>
-    {hasBadges ? <HStack spacing={6}>
-      {alias ? <Pill text={alias} color={ACCENT} bg={PILL_BG} /> : null}
-      {hasReset ? <Pill text={`RE:${acc!.resetCredits}`} /> : null}
-      {acc && acc.enabled && !acc.available ? <Pill text="不可用" color={RED} bg={RED_PILL_BG} /> : null}
-    </HStack> : null}
-    {detail}
-  </VStack>
+  if (acc?.readError) return <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{acc.readError}</Text>
+  return <Text font={11} foregroundStyle={SUB} lineLimit={1}>暂未读取缓存 · 点此查看详情或设置名称</Text>
+}
+function AccountHeaderLine({ index, provider, name, fixed = false, alias = "", acc }: { index: number; provider: string; name: string; fixed?: boolean; alias?: string; acc?: Account }) {
+  const hasReset = typeof acc?.resetCredits === "number" && Number.isFinite(acc.resetCredits) && acc.resetCredits > 0
+  const unavailable = !!acc && acc.enabled && !acc.available
+  return <HStack spacing={6}>
+    <AccountLine index={index} provider={provider} name={name} fixed={fixed} />
+    {alias ? <Pill text={alias} color={ACCENT} bg={PILL_BG} /> : null}
+    {hasReset || unavailable ? <Spacer /> : null}
+    {hasReset ? <Pill text={`RE:${acc!.resetCredits}`} /> : null}
+    {unavailable ? <Pill text="不可用" color={RED} bg={RED_PILL_BG} /> : null}
+  </HStack>
 }
 function DashboardHeroCard({ source, statisticsSource, accountCount, hiddenCount }: { source: DataSource; statisticsSource: StatisticsSource; accountCount: number; hiddenCount: number }) {
   const overview = (typeof cachedDashboardOverview === "function" ? cachedDashboardOverview(source, statisticsSource) : null)
@@ -173,41 +190,44 @@ function DashboardHeroCard({ source, statisticsSource, accountCount, hiddenCount
   const sourceLabel = source === "official" ? "官方直连" : source === "sub2api" ? "Sub2API" : "Parrot"
   const statsLabel = statisticsSource === "sub2api" ? "Sub2API" : "Parrot"
   const latestAt = overview.quotaFetchedAt ?? overview.statsFetchedAt
-  const tile = (title: string, badge: string, m: Metric) => <VStack frame={{ maxWidth: "infinity", alignment: "leading" as any }} background={<RoundedRectangle cornerRadius={11} fill={HERO_TILE_BG} />}>
-    <VStack alignment="leading" spacing={5} padding={{ horizontal: 11, vertical: 10 }} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-      <HStack spacing={4}>
-        <Text font={11} fontWeight="semibold" foregroundStyle={SUB}>{title}</Text>
-        <Spacer />
-        <Text font={10} foregroundStyle={SUB}>{badge}</Text>
-      </HStack>
-      <Text font={21} fontWeight="bold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.75}>{fmtUsd(m.costUsd)}</Text>
-      <HStack spacing={6}>
-        <Text font={11} monospacedDigit foregroundStyle={SUB} lineLimit={1}>{`Token ${fmtTokens(m.totalTokens)}`}</Text>
-        <Spacer />
-        <Text font={11} fontWeight="medium" monospacedDigit foregroundStyle={ACCENT} lineLimit={1}>{`缓存 ${cacheRateText(m)}`}</Text>
-      </HStack>
-    </VStack>
+  const metricCell = (label: string, value: string, accent = false) => <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+    <Text font={10} foregroundStyle={SUB} lineLimit={1}>{label}</Text>
+    <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={accent ? ACCENT : FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
   </VStack>
-  return <VStack frame={{ maxWidth: "infinity", alignment: "leading" as any }} background={<RoundedRectangle cornerRadius={14} fill={HERO_BG} />}>
-    <VStack alignment="leading" spacing={11} padding={{ horizontal: 13, vertical: 13 }} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-      <HStack spacing={6}>
-        <Image systemName="gauge.with.dots.needle.67percent" font={14} foregroundStyle={ACCENT} />
-        <Text font={14} fontWeight="bold" foregroundStyle={FG}>{sourceLabel}</Text>
-        <Pill text={`${accountCount} 账号`} color={ACCENT} bg={PILL_BG} />
-        {hiddenCount > 0 ? <Pill text={`${hiddenCount} 隐藏`} /> : null}
-        <Spacer />
-        <Text font={11} monospacedDigit foregroundStyle={SUB}>{latestAt ? `更新 ${fmtTime(latestAt)}` : "本机缓存"}</Text>
-      </HStack>
-      {overview.today && overview.month ? <HStack spacing={9}>
-        {tile("今日用量", statsLabel, overview.today)}
-        {tile("本月用量", "全站汇总", overview.month)}
-      </HStack> : <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }} background={<RoundedRectangle cornerRadius={10} fill={HERO_TILE_BG} />}>
-        <HStack spacing={8} padding={{ horizontal: 11, vertical: 9 }} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
-          <Image systemName="chart.bar.xaxis" font={13} foregroundStyle={ACCENT} />
-          <Text font={12} foregroundStyle={SUB} lineLimit={2}>{`今日/本月统计暂未缓存（${statsLabel}），点击右上角刷新获取`}</Text>
-        </HStack>
-      </HStack>}
-    </VStack>
+  const periodRow = (title: string, m: Metric, badge?: string) => <VStack alignment="leading" spacing={7}>
+    <HStack spacing={6}>
+      <Text font={12} fontWeight="semibold" foregroundStyle={SUB}>{title}</Text>
+      <Pill text={`请求 ${fmtTokens(m.requests)}`} />
+      {badge ? <Pill text={badge} color={ACCENT} bg={PILL_BG} /> : null}
+      <Spacer />
+      <Text font={18} fontWeight="bold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.75}>{fmtUsd(m.costUsd)}</Text>
+    </HStack>
+    <HStack spacing={6}>
+      {metricCell("输入", fmtTokens(m.inputTokens))}
+      {metricCell("输出", fmtTokens(m.outputTokens))}
+      {metricCell("缓存", fmtTokens(m.cacheReadTokens + m.cacheCreationTokens))}
+      {metricCell("缓存率", cacheRateText(m), true)}
+      {metricCell("Token", fmtTokens(m.totalTokens))}
+    </HStack>
+  </VStack>
+  return <VStack alignment="leading" spacing={10} padding={{ vertical: 4 }} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+    <HStack spacing={6}>
+      <Image systemName="gauge.with.dots.needle.67percent" font={14} foregroundStyle={ACCENT} />
+      <Text font={15} fontWeight="bold">{sourceLabel}</Text>
+      <Pill text={`${accountCount} 账号`} color={ACCENT} bg={PILL_BG} />
+      {hiddenCount > 0 ? <Pill text={`${hiddenCount} 隐藏`} /> : null}
+      <Spacer />
+      <Text font={11} monospacedDigit foregroundStyle={SUB}>{latestAt ? `更新 ${fmtTime(latestAt)}` : "本机缓存"}</Text>
+    </HStack>
+    <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
+    {overview.today && overview.month ? <>
+      {periodRow("今日用量", overview.today, statsLabel)}
+      <Rectangle fill={DIVIDER} frame={{ maxWidth: "infinity", height: 1 }} />
+      {periodRow("本月用量", overview.month)}
+    </> : <HStack spacing={8} padding={{ vertical: 2 }}>
+      <Image systemName="chart.bar.xaxis" font={13} foregroundStyle={SUB} />
+      <Text font={12} foregroundStyle={SUB} lineLimit={2}>{`今日/本月统计暂未缓存（${statsLabel}），点击右上角刷新获取`}</Text>
+    </HStack>}
   </VStack>
 }
 function providerIconCode(provider: string) {
@@ -313,7 +333,7 @@ function WidgetNamePage({ account, source, onSaved, expectedScope }: { account: 
     toolbar={{ primaryAction: <Button title={refreshing ? "刷新中…" : "刷新"} systemImage="arrow.clockwise" disabled={refreshing} action={refresh} /> }}>
     <Section header={<Text>小组件用户名</Text>}>
       <TextField title="自定义小组件用户名" value={name} onChanged={setName} prompt="留空使用原名" />
-      <Button title="保存" action={save} />
+      <Button title="保存" systemImage="checkmark.circle.fill" action={save} />
     </Section>
     {account.provider === "antigravity" ? <Section header={<Text>小组件额度显示</Text>}>
       {source === "official" ? <Picker title="显示额度" value={quotaMode} onChanged={async (value: string) => {
@@ -336,6 +356,8 @@ function WidgetNamePage({ account, source, onSaved, expectedScope }: { account: 
 // Shared detail content consumes only the passed cached account and source-local cache timestamps.
 function AccountCacheSections({ account, source = getSource(), refreshError = "" }: { account: Account; source?: DataSource; refreshError?: string }) {
   account = projectAntigravityAccount(account, source)
+  const exhausted = isAccountExhausted(account)
+  const sourceLabel = source === "official" ? "官方直连" : source === "sub2api" ? "Sub2API" : "Parrot"
   const beijingTime = (at: number) => {
     const d = new Date(at + 8 * 3600000), p = (n: number, w = 2) => String(n).padStart(w, "0")
     return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
@@ -350,64 +372,162 @@ function AccountCacheSections({ account, source = getSource(), refreshError = ""
     if (!Number.isFinite(at)) return v
     return beijingTime(at)
   }
-  if (account.provider === "workbuddy") return <>
-          <Section header={<Text>WorkBuddy个人积分</Text>}>
-            <Text>{account.credits?.reliable ? `剩余积分 ${fmtWorkBuddyNumber(account.credits.remaining)}` : "积分未可靠提供"}</Text>
-            <Text>{fmtWorkBuddyUsed(account.credits?.used, account.credits?.capacity)}</Text>
-            <Text>{fmtWorkBuddyCheckin(account.credits?.checkin)}</Text>
-            {refreshError || account.credits?.error || account.readError ? <Text>{refreshError || account.credits?.error || account.readError}</Text> : null}
-          </Section>
-          {(account.credits?.packages ?? []).map((p, i) => <Section key={String(i)} header={<Text>{p.name}</Text>}>
-            <Text>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · ${fmtWorkBuddyUsed(p.used, p.capacity)}`}</Text>
-            <Text>{`资源到期 ${cnTime(p.expiresAt)}`}</Text>
-            <Text>{`周期结束 ${cnTime(p.cycleEnd)}（不等同资源到期）`}</Text>
-          </Section>)}
-  </>
+  const identityHeader = <Section>
+    <HStack spacing={10} padding={{ vertical: 2 }}>
+      <ProviderMark provider={account.provider} size={22} />
+      <VStack alignment="leading" spacing={3}>
+        <Text font={15} fontWeight="semibold" fixedSize={{ horizontal: false, vertical: true }}>{account.name}</Text>
+        <HStack spacing={6}>
+          <Pill text={providerWord(account.provider)} color={ACCENT} bg={PILL_BG} />
+          <Pill text={sourceLabel} />
+          {account.enabled && !account.available ? <Pill text="不可用" color={RED} bg={RED_PILL_BG} /> : null}
+        </HStack>
+      </VStack>
+      <Spacer />
+    </HStack>
+  </Section>
+  const warningRow = (msg: string) => <HStack spacing={7} padding={{ vertical: 2 }}>
+    <Image systemName="exclamationmark.triangle.fill" font={13} foregroundStyle={ORANGE} />
+    <Text font={12} foregroundStyle={ORANGE} fixedSize={{ horizontal: false, vertical: true }}>{msg}</Text>
+  </HStack>
+  if (account.provider === "workbuddy") {
+    const c = account.credits
+    const checkinText = fmtWorkBuddyCheckin(c?.checkin)
+    const checkedIn = checkinText === "已签到"
+    const totalPct = c?.reliable && typeof c.remaining === "number" && typeof c.capacity === "number" && c.capacity > 0
+      ? (c.remaining / c.capacity) * 100 : null
+    const err = refreshError || c?.error || account.readError
+    return <>
+      {identityHeader}
+      <Section header={<Text>WorkBuddy个人积分</Text>}>
+        <VStack alignment="leading" spacing={7} padding={{ vertical: 2 }}>
+          <HStack spacing={8}>
+            <Text font={13} foregroundStyle={SUB}>{c?.reliable ? "剩余积分" : "积分状态"}</Text>
+            <Spacer />
+            <Text font={c?.reliable ? 20 : 14} fontWeight={c?.reliable ? "bold" : "medium"} monospacedDigit foregroundStyle={c?.reliable ? (exhausted ? SUB : FG) : SUB}>
+              {c?.reliable ? fmtWorkBuddyNumber(c.remaining) : "积分未可靠提供"}
+            </Text>
+          </HStack>
+          {totalPct != null ? <MiniQuotaBar remaining={totalPct} count={20} height={5} muted={exhausted} /> : null}
+        </VStack>
+        <DetailKV label="积分消耗" value={fmtWorkBuddyUsed(c?.used, c?.capacity)} mono />
+        <HStack spacing={8}>
+          <Text font={13} foregroundStyle={SUB}>签到状态</Text>
+          <Spacer />
+          <Pill text={checkinText} color={checkedIn ? GREEN : SUB} bg={checkedIn ? GREEN_PILL_BG : MUTED_PILL_BG} />
+        </HStack>
+        {err ? warningRow(err) : null}
+      </Section>
+      {(c?.packages ?? []).map((p, i) => {
+        const pkgPct = typeof p.remaining === "number" && typeof p.capacity === "number" && p.capacity > 0
+          ? (p.remaining / p.capacity) * 100 : null
+        return <Section key={String(i)} header={<Text>{p.name}</Text>}>
+          <VStack alignment="leading" spacing={6} padding={{ vertical: 2 }}>
+            <HStack spacing={6}>
+              <Text font={13} fontWeight="semibold" monospacedDigit>{`剩余 ${fmtWorkBuddyNumber(p.remaining)} · ${fmtWorkBuddyUsed(p.used, p.capacity)}`}</Text>
+              <Spacer />
+            </HStack>
+            {pkgPct != null ? <MiniQuotaBar remaining={pkgPct} count={16} height={4} muted={p.remaining === 0} /> : null}
+          </VStack>
+          <DetailKV label="资源到期" value={cnTime(p.expiresAt)} mono />
+          <DetailKV label="周期结束" value={`${cnTime(p.cycleEnd)}（不等同资源到期）`} mono />
+        </Section>
+      })}
+    </>
+  }
   if (account.provider === "deepseek") {
     const b = account.balance
+    const err = refreshError || b?.error || account.readError
+    const availText = b?.available == null ? "未提供" : b.available ? "可用" : "不可用"
+    const availColor = b?.available === true ? GREEN : b?.available === false ? RED : SUB
+    const availBg = b?.available === true ? GREEN_PILL_BG : b?.available === false ? RED_PILL_BG : MUTED_PILL_BG
     return <>
+      {identityHeader}
       <Section header={<Text>DeepSeek余额</Text>}>
-        <Text>{`认证方式 ${b?.auth || "未提供"}`}</Text>
-        <Text>{`可用状态 ${b?.available == null ? "未提供" : b.available ? "可用" : "不可用"}`}</Text>
-        <Text>{`余额采集时间 ${iso(b?.fetchedAt)}`}</Text>
-        {b?.stale ? <Text>此前余额缓存</Text> : null}
-        {refreshError || b?.error || account.readError ? <Text>{refreshError || b?.error || account.readError}</Text> : null}
-        {!b?.money?.length ? <Text>余额未提供</Text> : null}
+        <DetailKV label="认证方式" value={b?.auth || "未提供"} />
+        <HStack spacing={8}>
+          <Text font={13} foregroundStyle={SUB}>可用状态</Text>
+          <Spacer />
+          <Pill text={availText} color={availColor} bg={availBg} />
+        </HStack>
+        <DetailKV label="余额采集时间" value={iso(b?.fetchedAt)} mono />
+        {b?.stale ? <HStack spacing={8}><Text font={12} foregroundStyle={SUB}>缓存状态</Text><Spacer /><Pill text="此前余额缓存" color={ORANGE} bg={ORANGE_PILL_BG} /></HStack> : null}
+        {err ? warningRow(err) : null}
+        {!b?.money?.length ? <Text font={13} foregroundStyle={SUB}>余额未提供</Text> : null}
       </Section>
       {(b?.money ?? []).map((m, i) => <Section key={String(i)} header={<Text>{m.currency}</Text>}>
-        <Text>{`账户余额 ${fmtDeepSeekMoney(m.currency, m.total)}`}</Text>
-        <Text>{`充值余额 ${fmtDeepSeekMoney(m.currency, m.toppedUp)}`}</Text>
-        <Text>{`赠送余额 ${fmtDeepSeekMoney(m.currency, m.granted)}`}</Text>
+        <HStack spacing={8} padding={{ vertical: 2 }}>
+          <Text font={13} foregroundStyle={SUB}>账户余额</Text>
+          <Spacer />
+          <Text font={20} fontWeight="bold" monospacedDigit foregroundStyle={FG}>{fmtDeepSeekMoney(m.currency, m.total)}</Text>
+        </HStack>
+        <DetailKV label="充值余额" value={fmtDeepSeekMoney(m.currency, m.toppedUp)} mono />
+        <DetailKV label="赠送余额" value={fmtDeepSeekMoney(m.currency, m.granted)} mono />
         {b?.auth === "网页Token" || m.weekCost != null ? <>
-          <Text>{`近7日消费 ${fmtDeepSeekMoney(m.currency, m.weekCost)}`}</Text>
-          <Text>{`7日消费采集时间 ${iso(b?.weekFetchedAt)}`}</Text>
-          {b?.weekStale ? <Text>此前7日消费缓存</Text> : null}
+          <DetailKV label="近7日消费" value={fmtDeepSeekMoney(m.currency, m.weekCost)} mono />
+          <DetailKV label="7日消费采集时间" value={iso(b?.weekFetchedAt)} mono />
+          {b?.weekStale ? <HStack spacing={8}><Text font={12} foregroundStyle={SUB}>7日状态</Text><Spacer /><Pill text="此前7日消费缓存" color={ORANGE} bg={ORANGE_PILL_BG} /></HStack> : null}
         </> : null}
       </Section>)}
     </>
   }
   const percent = (v: number | null | undefined) => typeof v === "number" && Number.isFinite(v) ? `${account.provider === "antigravity" ? Math.round(v) : v}%` : "未提供"
+  const err = refreshError || account.readError
+  const hasCards = typeof account.resetCredits === "number" && Number.isFinite(account.resetCredits) && account.resetCredits >= 0
   return <>
-    {refreshError || account.readError ? <Section><Text>{refreshError || account.readError}</Text></Section> : null}
-    {([["5 h", account.fiveHour], ["7 d", account.sevenDay]] as const).map(([label, w]) => <Section key={label} header={<Text>{label}</Text>}>
-      <Text>{`剩余额度 ${percent(w?.remainingPercent)}`}</Text>
-      <Text>{`已用额度 ${percent(w?.usedPercent)}`}</Text>
-      <Text>{`重置时间 ${cnTime(w?.resetsAt)}`}</Text>
-    </Section>)}
+    {identityHeader}
+    {err ? <Section>{warningRow(err)}</Section> : null}
+    {([["5 h", account.fiveHour, fmtReset], ["7 d", account.sevenDay, fmtResetDays]] as const).map(([label, w, fmtCountdown]) => {
+      const remaining = typeof w?.remainingPercent === "number" && Number.isFinite(w.remainingPercent) ? w.remainingPercent : null
+      const countdown = fmtCountdown(w?.resetsAt ?? null)
+      const showCountdown = countdown !== "--" && countdown !== "--:--"
+      return <Section key={label} header={<Text>{label}</Text>}>
+        <VStack alignment="leading" spacing={7} padding={{ vertical: 2 }}>
+          <HStack spacing={8}>
+            <Text font={16} fontWeight="bold" monospacedDigit foregroundStyle={exhausted ? SUB : quotaColor(remaining)}>{`剩余额度 ${percent(w?.remainingPercent)}`}</Text>
+            <Spacer />
+            {showCountdown ? <Pill text={countdown} /> : null}
+          </HStack>
+          <MiniQuotaBar remaining={remaining} count={20} height={5} muted={exhausted} />
+        </VStack>
+        <DetailKV label="已用额度" value={percent(w?.usedPercent)} mono />
+        <DetailKV label="重置时间" value={cnTime(w?.resetsAt)} mono />
+      </Section>
+    })}
     {account.provider === "antigravity" ? <>
       <Section header={<Text>Antigravity AI Credits</Text>}>
-        <Text>{`套餐 ${account.antigravity?.tier || "未提供"}`}</Text>
-        <Text>{`剩余 ${account.antigravity?.creditAmount ?? "未提供"}`}</Text>
-        <Text>{`最低可用额度 ${account.antigravity?.minimumCreditAmount ?? "未提供"}`}</Text>
+        <DetailKV label="套餐" value={account.antigravity?.tier || "未提供"} />
+        <DetailKV label="剩余" value={account.antigravity?.creditAmount != null ? String(account.antigravity.creditAmount) : "未提供"} mono />
+        <DetailKV label="最低可用额度" value={account.antigravity?.minimumCreditAmount != null ? String(account.antigravity.minimumCreditAmount) : "未提供"} mono />
       </Section>
       {(account.antigravity?.groups ?? []).map((g, i) => <Section key={String(i)} header={<Text>{g.name}</Text>}>
-        {g.buckets.map((b, j) => <VStack key={String(j)} alignment="leading">
-          <Text>{`${b.name} · ${b.window || "窗口未提供"} · 剩余 ${typeof b.remainingPercent === "number" && Number.isFinite(b.remainingPercent) ? `${Math.round(b.remainingPercent)}%` : "未提供"}`}</Text>
-          <Text>{`重置时间 ${cnTime(b.resetsAt)}`}</Text>
-        </VStack>)}
+        {g.buckets.map((b, j) => {
+          const pct = typeof b.remainingPercent === "number" && Number.isFinite(b.remainingPercent) ? b.remainingPercent : null
+          return <VStack key={String(j)} alignment="leading" spacing={5} padding={{ vertical: 2 }}>
+            <HStack spacing={6}>
+              <Text font={13} fontWeight="semibold" lineLimit={1}>{b.name}</Text>
+              <Pill text={b.window || "窗口未提供"} />
+              <Spacer />
+              <Text font={13} fontWeight="semibold" monospacedDigit foregroundStyle={pct === 0 ? SUB : quotaColor(pct)}>
+                {pct != null ? `${Math.round(pct)}%` : "未提供"}
+              </Text>
+            </HStack>
+            <MiniQuotaBar remaining={pct} count={16} height={4} muted={pct === 0} />
+            <HStack spacing={6}>
+              <Text font={11} foregroundStyle={SUB}>重置时间</Text>
+              <Spacer />
+              <Text font={11} monospacedDigit foregroundStyle={SUB}>{cnTime(b.resetsAt)}</Text>
+            </HStack>
+          </VStack>
+        })}
       </Section>)}
     </> : <Section header={<Text>重置卡</Text>}>
-      <Text>{typeof account.resetCredits === "number" && Number.isFinite(account.resetCredits) && account.resetCredits >= 0 ? `可用重置卡 ${account.resetCredits}` : "可用重置卡 未提供"}</Text>
+      <HStack spacing={8}>
+        <Text font={13} foregroundStyle={SUB}>可用重置卡</Text>
+        <Spacer />
+        {hasCards ? <Pill text={String(account.resetCredits)} color={account.resetCredits! > 0 ? GREEN : SUB} bg={account.resetCredits! > 0 ? GREEN_PILL_BG : MUTED_PILL_BG} />
+          : <Text font={13} foregroundStyle={SUB}>未提供</Text>}
+      </HStack>
     </Section>}
   </>
 }
@@ -751,8 +871,8 @@ function SettingsView() {
   ] }}>
     <NavigationLink destination={<WidgetNamePage account={a} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
       <VStack alignment="leading" spacing={6} padding={{ vertical: 3 }}>
-        <AccountLine index={i} provider={a.provider} name={a.name} />
-        <AccountDashboardMeta acc={a} alias={widgetNames[a.id] || ""} />
+        <AccountHeaderLine index={i} provider={a.provider} name={a.name} alias={widgetNames[a.id] || ""} acc={a} />
+        <AccountDashboardMeta acc={a} />
       </VStack>
     </NavigationLink>
     <Spacer />
@@ -782,8 +902,8 @@ function SettingsView() {
         ] }}>
           <NavigationLink destination={<WidgetNamePage account={detailAcc} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
             <VStack alignment="leading" spacing={6} padding={{ vertical: 3 }}>
-              <AccountLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed />
-              <AccountDashboardMeta acc={detailAcc} alias={widgetNames[a.id] || ""} />
+              <AccountHeaderLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed alias={widgetNames[a.id] || ""} acc={detailAcc} />
+              <AccountDashboardMeta acc={detailAcc} />
             </VStack>
           </NavigationLink>
           <Spacer />
