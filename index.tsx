@@ -477,23 +477,24 @@ function AccountCacheSections({ account, source = getSource(), refreshError = ""
   return <>
     {identityHeader}
     {err ? <Section>{warningRow(err)}</Section> : null}
-    {([["5 h", account.fiveHour, fmtReset], ["7 d", account.sevenDay, fmtResetDays]] as const).map(([label, w, fmtCountdown]) => {
-      const remaining = typeof w?.remainingPercent === "number" && Number.isFinite(w.remainingPercent) ? w.remainingPercent : null
-      const countdown = fmtCountdown(w?.resetsAt ?? null)
-      const showCountdown = countdown !== "--" && countdown !== "--:--"
-      return <Section key={label} header={<Text>{label}</Text>}>
-        <VStack alignment="leading" spacing={7} padding={{ vertical: 2 }}>
+    <Section header={<Text>额度窗口</Text>}>
+      {([["5 h", account.fiveHour, fmtReset], ["7 d", account.sevenDay, fmtResetDays]] as const).map(([label, w, fmtCountdown]) => {
+        const remaining = typeof w?.remainingPercent === "number" && Number.isFinite(w.remainingPercent) ? w.remainingPercent : null
+        const countdown = fmtCountdown(w?.resetsAt ?? null)
+        const showCountdown = countdown !== "--" && countdown !== "--:--"
+        return <VStack key={label} alignment="leading" spacing={7} padding={{ vertical: 4 }}>
           <HStack spacing={8}>
-            <Text font={16} fontWeight="bold" monospacedDigit foregroundStyle={exhausted ? SUB : quotaColor(remaining)}>{`剩余额度 ${percent(w?.remainingPercent)}`}</Text>
+            <Pill text={label} color={ACCENT} bg={PILL_BG} />
+            <Text font={15} fontWeight="bold" monospacedDigit foregroundStyle={exhausted ? SUB : quotaColor(remaining)}>{`剩余额度 ${percent(w?.remainingPercent)}`}</Text>
             <Spacer />
             {showCountdown ? <Pill text={countdown} /> : null}
           </HStack>
           <MiniQuotaBar remaining={remaining} count={20} height={5} muted={exhausted} />
+          <DetailKV label="已用额度" value={percent(w?.usedPercent)} mono />
+          <DetailKV label="重置时间" value={cnTime(w?.resetsAt)} mono />
         </VStack>
-        <DetailKV label="已用额度" value={percent(w?.usedPercent)} mono />
-        <DetailKV label="重置时间" value={cnTime(w?.resetsAt)} mono />
-      </Section>
-    })}
+      })}
+    </Section>
     {account.provider === "antigravity" ? <>
       <Section header={<Text>Antigravity AI Credits</Text>}>
         <DetailKV label="套餐" value={account.antigravity?.tier || "未提供"} />
