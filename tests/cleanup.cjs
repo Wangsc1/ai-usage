@@ -18,7 +18,7 @@ function runtime(dir) {
   function load(name) {
     if (modules[name]) return modules[name].exports
     let source = fs.readFileSync(path.join(dir, name), 'utf8')
-    if (name === 'index.tsx') source = source.replace(/\nrun\(\)\s*$/, '\nexport { AccountCacheSections }')
+    if (name === 'index.tsx') source = source.replace(/\nrun\(\)\s*$/, '\nexport { AccountCacheSections, DashboardHeroCard, AccountDashboardMeta }')
     if (name === 'widget.tsx') source = source.replace(/\nrun\(\)\s*$/, '\nexport { Root }')
     const out = ts.transpileModule(source, { fileName: name, compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, jsxImportSource: 'scripting' }, reportDiagnostics: true })
     assert.equal(out.diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error).length, 0, name)
@@ -38,7 +38,7 @@ function runtime(dir) {
   return { load, scripting, store, kc, snapshot: n => JSON.stringify(expand(n)) }
 }
 const current = runtime(root), api = current.load('api.ts'), app = current.load('index.tsx'), widget = current.load('widget.tsx')
-assert.equal(api.VERSION, '1.68')
+assert.equal(api.VERSION, '1.69')
 assert.equal(api.VERSION, JSON.parse(fs.readFileSync(path.join(root, 'script.json'))).version)
 const index = fs.readFileSync(path.join(root, 'index.tsx'), 'utf8')
 assert.ok(!index.includes('const VERSION ='))
@@ -92,8 +92,23 @@ assert.ok(detail({ ...account, provider: 'deepseek', balance: { fetchedAt: 1, mo
   const loginStub = { url: 'https://claude.com/cai/oauth/authorize?state=s', redirect: '', manual: false, fallback: null, verifier: 'v', state: 's', expiresAt: now + 60000, cancelled: false, consumed: false, code: 'c', server: { stop: () => { throw Error('socket closed') } }, timer: null, progress: '' }
   api.cancelClaudeLogin(loginStub)
   assert.equal(loginStub.url, ''); assert.equal(loginStub.server, null)
+
+  // Dashboard hero card and per-account mini-progress summaries (read-only local cache).
+  const metric = { requests: 4, inputTokens: 1000, outputTokens: 500, cacheReadTokens: 3000, cacheCreationTokens: 0, totalTokens: 4500, costUsd: 1.25 }
+  current.store.set('ai_usage_parrot_stats_v1', { today: metric, month: { ...metric, totalTokens: 90000, costUsd: 24.5 }, todayByFamily: {}, monthByFamily: {}, fetchedAt: now })
+  const hero = current.snapshot(app.DashboardHeroCard({ source: 'official', statisticsSource: 'parrot', accountCount: 2, hiddenCount: 0 }))
+  assert.ok(hero.includes('官方直连') && hero.includes('2 账号') && hero.includes('$1.3') && hero.includes('$24.5') && hero.includes('75.0%'))
+  const emptyHero = current.snapshot(app.DashboardHeroCard({ source: 'sub2api', statisticsSource: 'sub2api', accountCount: 0, hiddenCount: 0 }))
+  assert.ok(emptyHero.includes('暂未缓存') && !emptyHero.includes('$0.0'))
+  const quotaMeta = current.snapshot(app.AccountDashboardMeta({ acc: { ...account, resetCredits: 3 }, alias: '主号' }))
+  assert.ok(quotaMeta.includes('主号') && quotaMeta.includes('RE:3') && quotaMeta.includes('5h') && quotaMeta.includes('7d') && quotaMeta.includes('63%'))
+  const dsMeta = current.snapshot(app.AccountDashboardMeta({ acc: { ...account, provider: 'deepseek', balance: { money: [{ currency: 'CNY', total: '12.50', granted: '2.50', toppedUp: '10.00', weekCost: null }], fetchedAt: now, stale: false, error: null, available: true, auth: 'API Key' } }, alias: '' }))
+  assert.ok(dsMeta.includes('¥ 12.50') && dsMeta.includes('API Key'))
+  const wbMeta = current.snapshot(app.AccountDashboardMeta({ acc: { ...account, provider: 'workbuddy', credits: { remaining: 80, capacity: 100, used: 20, reliable: true, status: 'known', complete: true, fetchedAt: now, packages: [], checkin: { checked: true, observedAt: now, active: true } } }, alias: '' }))
+  assert.ok(wbMeta.includes('剩余积分 80') && wbMeta.includes('已签到'))
+  current.store.clear()
 }
-console.log('PASS cleanup: shared 1.68 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
+console.log('PASS cleanup: shared 1.69 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
 if (process.env.CLEANUP_BASELINE_DIR) {
   const baselineDir = process.env.CLEANUP_BASELINE_DIR, previous = runtime(baselineDir), oldApi = previous.load('api.ts'), oldApp = previous.load('index.tsx'), oldWidget = previous.load('widget.tsx')
   assert.equal(svg, oldApi.WORKBUDDY_SVG ?? fs.readFileSync(path.join(baselineDir, 'assets/workbuddy-original.svg'), 'utf8'), 'SVG source preserved byte-for-byte')

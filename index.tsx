@@ -3,7 +3,7 @@ import {
   SecureField, SVG, Image, Text, TextField, Widget, WebView, VStack, useState, useEffect,
   ScrollView, LazyVGrid, ReorderableForEach, RoundedRectangle, modifiers, useObservable,
 } from "scripting"
-import { VERSION, Account, DataSource, StatisticsSource, REFRESH_OPTIONS, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, antigravityBrandImage, workBuddyBrandImage, getSource, saveSource, getStatisticsSource, saveStatisticsSource, getRefreshMinutes, saveRefreshMinutes, getConfig, saveConfig, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, loadUsage, refreshAccount, requestLocalWidgetProjection, accountScope, cachedAccounts, managementAccounts, sortAccounts, saveAccountOrder, saveVisibleAccountOrder, hiddenAccountIds, hideAccount, restoreHiddenAccounts, getWidgetName, getWidgetNames, saveWidgetName } from "./api"
+import { VERSION, Account, Metric, DataSource, StatisticsSource, REFRESH_OPTIONS, CLAUDE_SVG, OPENAI_SVG, DEEPSEEK_SVG, antigravityBrandImage, workBuddyBrandImage, getSource, saveSource, getStatisticsSource, saveStatisticsSource, getRefreshMinutes, saveRefreshMinutes, getConfig, saveConfig, getSub2APIConfig, saveSub2APIConfig, clearSub2APIConfig, loadUsage, refreshAccount, requestLocalWidgetProjection, accountScope, cachedAccounts, cachedDashboardOverview, managementAccounts, sortAccounts, saveAccountOrder, saveVisibleAccountOrder, hiddenAccountIds, hideAccount, restoreHiddenAccounts, getWidgetName, getWidgetNames, saveWidgetName, fmtPct, fmtReset, fmtResetDays, fmtTime, fmtTokens, fmtUsd } from "./api"
 import { officialAccounts, logoutOfficial, addDeepSeekAccount, ANTIGRAVITY_MODES, AntigravityMode, getAntigravityMode, saveAntigravityMode, projectAntigravityAccount, antigravityModeHint, requestAntigravityWidgetProjection, AntigravityLogin, beginAntigravityLogin, finishAntigravityLogin, cancelAntigravityLogin, CodexBrowserLogin, beginCodexBrowserLogin, finishCodexBrowserLogin, cancelCodexBrowserLogin, WorkBuddyLogin, beginWorkBuddyLogin, finishWorkBuddyLogin, cancelWorkBuddyLogin, ClaudeLogin, beginClaudeLogin, finishClaudeLogin, cancelClaudeLogin, claudeCooldownUntil, claudeCooldownMessage, fmtDeepSeekMoney, fmtWorkBuddyNumber, fmtWorkBuddyUsed, fmtWorkBuddyCheckin } from "./api"
 
 // Modern ForEach uses Observable data + builder + editActions="move" (views/for_each).
@@ -51,6 +51,165 @@ function useSortableRows<T extends { id: string }>(rows: T[], enabled: boolean,
 }
 // Same brand marks as the widget (shared constants from ./api); codex/openai accounts use the OpenAI mark.
 const ICON_SIZE = 17
+type DC = { light: string; dark: string }
+const C = (light: string, dark: string): DC => ({ light, dark })
+const FG = C("#1C1C1E", "#FFFFFF")
+const SUB = C("#5E6068", "#8E8E93")
+const ACCENT = C("#0A84FF", "#409CFF")
+const GREEN = C("#2E9E4F", "#7ED957")
+const ORANGE = C("#D9770B", "#FF9F0A")
+const RED = C("#D93025", "#FF453A")
+const HERO_BG = C("#EAF4FC", "#1E293B")
+const HERO_TILE_BG = C("rgba(255, 255, 255, 0.80)", "rgba(255, 255, 255, 0.08)")
+const PILL_BG = C("rgba(10, 132, 255, 0.12)", "rgba(64, 156, 255, 0.20)")
+const MUTED_PILL_BG = C("rgba(0, 0, 0, 0.06)", "rgba(255, 255, 255, 0.11)")
+const GREEN_PILL_BG = C("rgba(46, 158, 79, 0.13)", "rgba(126, 217, 87, 0.18)")
+const RED_PILL_BG = C("rgba(217, 48, 37, 0.12)", "rgba(255, 69, 58, 0.18)")
+const BAR_TRACK = C("rgba(0, 0, 0, 0.08)", "rgba(255, 255, 255, 0.14)")
+
+function quotaColor(remaining: number | null): DC {
+  if (remaining == null) return SUB
+  if (remaining <= 20) return RED
+  if (remaining <= 60) return ORANGE
+  return GREEN
+}
+function isAccountExhausted(acc?: Account): boolean {
+  if (!acc) return false
+  if (acc.provider === "workbuddy") return acc.credits?.reliable === true && acc.credits?.remaining === 0
+  return [acc.fiveHour?.remainingPercent, acc.sevenDay?.remainingPercent].some(v => typeof v === "number" && Number.isFinite(v) && v === 0)
+}
+function cacheRateText(m: Metric): string {
+  const inputSide = m.inputTokens + m.cacheReadTokens + m.cacheCreationTokens
+  return inputSide > 0 ? (m.cacheReadTokens / inputSide * 100).toFixed(1) + "%" : "--"
+}
+function Pill({ text, color = SUB, bg = MUTED_PILL_BG }: { text: string; color?: DC; bg?: DC }) {
+  return <HStack background={<RoundedRectangle cornerRadius={6} fill={bg} />}>
+    <Text font={10} fontWeight="semibold" monospacedDigit foregroundStyle={color} lineLimit={1} padding={{ horizontal: 6, vertical: 2 }}>{text}</Text>
+  </HStack>
+}
+function MiniQuotaBar({ remaining, muted = false }: { remaining: number | null; muted?: boolean }) {
+  const count = 10
+  const lit = remaining == null ? 0 : Math.round((Math.max(0, Math.min(100, remaining)) / 100) * count)
+  const activeColor = muted ? SUB : quotaColor(remaining)
+  return <HStack spacing={2}>
+    {Array.from({ length: count }, (_, i) => <RoundedRectangle key={String(i)} cornerRadius={2} fill={i < lit ? activeColor : BAR_TRACK} frame={{ maxWidth: "infinity", height: 4 }} />)}
+  </HStack>
+}
+function MiniQuotaBlock({ label, remaining, resetsAt, fmt, muted = false }: { label: string; remaining: number | null; resetsAt: string | null; fmt: (iso: string | null) => string; muted?: boolean }) {
+  const countdown = fmt(resetsAt)
+  const showReset = countdown !== "--" && countdown !== "--:--"
+  return <VStack alignment="leading" spacing={4} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+    <HStack spacing={4}>
+      <Text font={11} fontWeight="medium" monospaced foregroundStyle={SUB} lineLimit={1}>{label}</Text>
+      {showReset ? <Text font={10} monospacedDigit foregroundStyle={SUB} lineLimit={1}>{countdown}</Text> : null}
+      <Spacer />
+      <Text font={11} fontWeight="semibold" monospacedDigit foregroundStyle={muted ? SUB : quotaColor(remaining)} lineLimit={1}>{fmtPct(remaining)}</Text>
+    </HStack>
+    <MiniQuotaBar remaining={remaining} muted={muted} />
+  </VStack>
+}
+function AccountDashboardMeta({ acc, alias }: { acc?: Account; alias: string }) {
+  const exhausted = isAccountExhausted(acc)
+  const hasReset = typeof acc?.resetCredits === "number" && Number.isFinite(acc.resetCredits) && acc.resetCredits > 0
+  const hasBadges = !!alias || hasReset || (acc ? acc.enabled && !acc.available : false)
+  let detail: any = null
+  if (acc?.provider === "workbuddy") {
+    const c = acc.credits
+    const checkin = fmtWorkBuddyCheckin(c?.checkin)
+    const checkedIn = checkin === "已签到"
+    const pct = c?.reliable && typeof c.remaining === "number" && typeof c.capacity === "number" && c.capacity > 0
+      ? (c.remaining / c.capacity) * 100 : null
+    detail = c ? <VStack alignment="leading" spacing={4}>
+      <HStack spacing={6}>
+        <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={exhausted ? SUB : FG} lineLimit={1}>
+          {`剩余积分 ${c.reliable ? fmtWorkBuddyNumber(c.remaining) : "未提供"}`}
+        </Text>
+        <Spacer />
+        <Pill text={checkin} color={checkedIn ? GREEN : SUB} bg={checkedIn ? GREEN_PILL_BG : MUTED_PILL_BG} />
+      </HStack>
+      {pct != null ? <MiniQuotaBar remaining={pct} muted={exhausted} /> : null}
+      {c.error || acc.readError ? <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{c.error || acc.readError}</Text> : null}
+    </VStack> : <Text font={11} foregroundStyle={SUB}>点此查看详情或设置小组件名</Text>
+  } else if (acc?.provider === "deepseek") {
+    const b = acc.balance
+    const moneyText = b?.money?.length ? b.money.map(m => fmtDeepSeekMoney(m.currency, m.total)).join(" · ") : ""
+    const subText = b?.money?.length ? b.money.map(m => b.auth === "网页Token"
+      ? `近7日 ${fmtDeepSeekMoney(m.currency, m.weekCost)}`
+      : `充值 ${fmtDeepSeekMoney(m.currency, m.toppedUp)} · 赠送 ${fmtDeepSeekMoney(m.currency, m.granted)}`).join(" · ") : ""
+    detail = moneyText ? <VStack alignment="leading" spacing={2}>
+      <HStack spacing={6}>
+        <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1}>{`余额 ${moneyText}`}</Text>
+        <Spacer />
+        {b?.auth ? <Pill text={b.auth} /> : null}
+      </HStack>
+      {subText ? <Text font={11} foregroundStyle={SUB} lineLimit={1}>{subText}</Text> : null}
+      {b?.error || acc.readError ? <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{b?.error || acc.readError}</Text> : null}
+    </VStack> : <Text font={11} foregroundStyle={b?.error || acc.readError ? ORANGE : SUB} lineLimit={1}>{b?.error || acc.readError || "点此查看详情或设置小组件名"}</Text>
+  } else if (acc && (acc.fiveHour?.remainingPercent != null || acc.sevenDay?.remainingPercent != null)) {
+    detail = <VStack alignment="leading" spacing={4}>
+      <HStack spacing={12}>
+        <MiniQuotaBlock label="5h" remaining={acc.fiveHour?.remainingPercent ?? null} resetsAt={acc.fiveHour?.resetsAt ?? null} fmt={fmtReset} muted={exhausted} />
+        <MiniQuotaBlock label="7d" remaining={acc.sevenDay?.remainingPercent ?? null} resetsAt={acc.sevenDay?.resetsAt ?? null} fmt={fmtResetDays} muted={exhausted} />
+      </HStack>
+      {acc.readError ? <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{acc.readError}</Text> : null}
+    </VStack>
+  } else if (acc?.readError) {
+    detail = <Text font={11} foregroundStyle={ORANGE} lineLimit={1}>{acc.readError}</Text>
+  } else {
+    detail = <Text font={11} foregroundStyle={SUB} lineLimit={1}>暂未读取缓存 · 点此查看详情或设置名称</Text>
+  }
+  return <VStack alignment="leading" spacing={5}>
+    {hasBadges ? <HStack spacing={6}>
+      {alias ? <Pill text={alias} color={ACCENT} bg={PILL_BG} /> : null}
+      {hasReset ? <Pill text={`RE:${acc!.resetCredits}`} /> : null}
+      {acc && acc.enabled && !acc.available ? <Pill text="不可用" color={RED} bg={RED_PILL_BG} /> : null}
+    </HStack> : null}
+    {detail}
+  </VStack>
+}
+function DashboardHeroCard({ source, statisticsSource, accountCount, hiddenCount }: { source: DataSource; statisticsSource: StatisticsSource; accountCount: number; hiddenCount: number }) {
+  const overview = (typeof cachedDashboardOverview === "function" ? cachedDashboardOverview(source, statisticsSource) : null)
+    ?? { today: null, month: null, statsFetchedAt: null, quotaFetchedAt: null }
+  const sourceLabel = source === "official" ? "官方直连" : source === "sub2api" ? "Sub2API" : "Parrot"
+  const statsLabel = statisticsSource === "sub2api" ? "Sub2API" : "Parrot"
+  const latestAt = overview.quotaFetchedAt ?? overview.statsFetchedAt
+  const tile = (title: string, badge: string, m: Metric) => <VStack frame={{ maxWidth: "infinity", alignment: "leading" as any }} background={<RoundedRectangle cornerRadius={11} fill={HERO_TILE_BG} />}>
+    <VStack alignment="leading" spacing={5} padding={{ horizontal: 11, vertical: 10 }} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+      <HStack spacing={4}>
+        <Text font={11} fontWeight="semibold" foregroundStyle={SUB}>{title}</Text>
+        <Spacer />
+        <Text font={10} foregroundStyle={SUB}>{badge}</Text>
+      </HStack>
+      <Text font={21} fontWeight="bold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.75}>{fmtUsd(m.costUsd)}</Text>
+      <HStack spacing={6}>
+        <Text font={11} monospacedDigit foregroundStyle={SUB} lineLimit={1}>{`Token ${fmtTokens(m.totalTokens)}`}</Text>
+        <Spacer />
+        <Text font={11} fontWeight="medium" monospacedDigit foregroundStyle={ACCENT} lineLimit={1}>{`缓存 ${cacheRateText(m)}`}</Text>
+      </HStack>
+    </VStack>
+  </VStack>
+  return <VStack frame={{ maxWidth: "infinity", alignment: "leading" as any }} background={<RoundedRectangle cornerRadius={14} fill={HERO_BG} />}>
+    <VStack alignment="leading" spacing={11} padding={{ horizontal: 13, vertical: 13 }} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+      <HStack spacing={6}>
+        <Image systemName="gauge.with.dots.needle.67percent" font={14} foregroundStyle={ACCENT} />
+        <Text font={14} fontWeight="bold" foregroundStyle={FG}>{sourceLabel}</Text>
+        <Pill text={`${accountCount} 账号`} color={ACCENT} bg={PILL_BG} />
+        {hiddenCount > 0 ? <Pill text={`${hiddenCount} 隐藏`} /> : null}
+        <Spacer />
+        <Text font={11} monospacedDigit foregroundStyle={SUB}>{latestAt ? `更新 ${fmtTime(latestAt)}` : "本机缓存"}</Text>
+      </HStack>
+      {overview.today && overview.month ? <HStack spacing={9}>
+        {tile("今日用量", statsLabel, overview.today)}
+        {tile("本月用量", "全站汇总", overview.month)}
+      </HStack> : <HStack frame={{ maxWidth: "infinity", alignment: "leading" as any }} background={<RoundedRectangle cornerRadius={10} fill={HERO_TILE_BG} />}>
+        <HStack spacing={8} padding={{ horizontal: 11, vertical: 9 }} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+          <Image systemName="chart.bar.xaxis" font={13} foregroundStyle={ACCENT} />
+          <Text font={12} foregroundStyle={SUB} lineLimit={2}>{`今日/本月统计暂未缓存（${statsLabel}），点击右上角刷新获取`}</Text>
+        </HStack>
+      </HStack>}
+    </VStack>
+  </VStack>
+}
 function providerIconCode(provider: string) {
   return provider === "claude" ? CLAUDE_SVG : provider === "deepseek" ? DEEPSEEK_SVG : provider === "codex" || provider === "openai" ? OPENAI_SVG : null
 }
@@ -58,10 +217,10 @@ function providerWord(provider: string) { return provider === "antigravity" ? "A
 // "1. [icon] name"; unknown icon falls back to the original text label.
 function AccountLine({ index, provider, name, fixed = false }: { index: number; provider: string; name: string; fixed?: boolean }) {
   const code = providerIconCode(provider)
-  const nameText = <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{name}</Text>
-  if (!code && provider !== "workbuddy" && provider !== "antigravity") return <Text fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{`${index + 1}. ${providerWord(provider)} ${name}`}</Text>
-  return <HStack spacing={4}>
-    <Text>{`${index + 1}.`}</Text>
+  const nameText = <Text font={14} fontWeight="semibold" fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{name}</Text>
+  if (!code && provider !== "workbuddy" && provider !== "antigravity") return <Text font={14} fontWeight="semibold" fixedSize={fixed ? { horizontal: false, vertical: true } : undefined}>{`${index + 1}. ${providerWord(provider)} ${name}`}</Text>
+  return <HStack spacing={6}>
+    <Text font={12} fontWeight="medium" monospacedDigit>{`${index + 1}.`}</Text>
     {provider === "antigravity" ? <Image image={antigravityBrandImage()} renderingMode="original" resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} /> : provider === "workbuddy"
       ? <Image image={workBuddyBrandImage()} renderingMode="original" resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} />
       : <SVG code={code!} resizable frame={{ width: ICON_SIZE, height: ICON_SIZE }} />}
@@ -591,9 +750,9 @@ function SettingsView() {
     }} />
   ] }}>
     <NavigationLink destination={<WidgetNamePage account={a} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
-      <VStack alignment="leading" spacing={3}>
+      <VStack alignment="leading" spacing={6} padding={{ vertical: 3 }}>
         <AccountLine index={i} provider={a.provider} name={a.name} />
-        <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{widgetNames[a.id] || "使用原名（点此设置）"}</Text>
+        <AccountDashboardMeta acc={a} alias={widgetNames[a.id] || ""} />
       </VStack>
     </NavigationLink>
     <Spacer />
@@ -608,7 +767,9 @@ function SettingsView() {
     await test()
   }
 
-  const loginRow = (a: ReturnType<typeof officialAccounts>[number], i: number) => <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
+  const loginRow = (a: ReturnType<typeof officialAccounts>[number], i: number) => {
+    const detailAcc = loginAccountById.get(a.id) ?? { id: a.id, name: a.name, provider: a.provider, enabled: true, available: true, fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null }, sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null }
+    return <HStack key={a.id} trailingSwipeActions={{ allowsFullSwipe: false, actions: [
           <Button title="删除" role="destructive" disabled={busy || !!claude || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => {
           if (getSource() !== "official") return
           try {
@@ -619,14 +780,15 @@ function SettingsView() {
           } catch { /* local removal failure leaves the row in place */ }
         }} />
         ] }}>
-          <NavigationLink destination={<WidgetNamePage account={loginAccountById.get(a.id) ?? { id: a.id, name: a.name, provider: a.provider, enabled: true, available: true, fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null }, sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null }} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
-            <VStack alignment="leading" spacing={3}>
+          <NavigationLink destination={<WidgetNamePage account={detailAcc} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
+            <VStack alignment="leading" spacing={6} padding={{ vertical: 3 }}>
               <AccountLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed />
-              <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{widgetNames[a.id] || "使用原名（点此设置）"}</Text>
+              <AccountDashboardMeta acc={detailAcc} alias={widgetNames[a.id] || ""} />
             </VStack>
           </NavigationLink>
           <Spacer />
         </HStack>
+  }
 
   return <NavigationStack>
     <Form
@@ -649,34 +811,9 @@ function SettingsView() {
         primaryAction: <Button title={busy ? "刷新中…" : "刷新"} systemImage="arrow.clockwise" disabled={busy || (!!claude && !claude.manual) || !!codexBrowser || !!workbuddy || !!agBrowser} action={async () => { if (busy || auth.running || (auth.claude && !auth.claude.manual) || auth.codex || auth.workbuddy || auth.antigravity) return; await test() }} />,
       }}
     >
-      <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text>{VERSION}</Text></HStack>}>
-        <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
-          <Text tag={"official"}>OAuth,API,Token</Text>
-          <Text tag={"parrot"}>Parrot</Text>
-          <Text tag="sub2api">Sub2API</Text>
-        </Picker>
-        <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async (value: string) => {
-          const next = value as StatisticsSource
-          setSubError(""); saveStatisticsSource(next); setStatisticsSource(next); ensureSourceConfig(source, next); await test()
-        }}>
-          <Text tag="parrot">Parrot</Text><Text tag="sub2api">Sub2API</Text>
-        </Picker>
+      <Section>
+        <DashboardHeroCard source={source} statisticsSource={statisticsSource} accountCount={source === "official" ? sortedLogins.length : visible.length} hiddenCount={hiddenCount} />
       </Section>
-      {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>}>
-        <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
-        <TextField title={"管理密钥"} value={keyEditing ? key : maskedKey(key || cur.managementKey || "")} onFocus={() => { setKey(""); setKeyEditing(true) }} onBlur={() => setKeyEditing(false)} onChanged={(value: string) => { if (keyEditing && value !== maskedKey(cur.managementKey || "")) setKey(value) }} prompt="managementKey" />
-        <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
-      </Section> : null}
-      {statisticsSource === "sub2api" || source === "sub2api" ? <Section header={<Text>Sub2API连接</Text>}>
-        <TextField title="Sub2API地址" value={subUrl} onChanged={(value: string) => { setSubError(""); setSubUrl(value) }} prompt="https://你的部署地址" />
-        <TextField title="Sub2API管理员密钥" value={subKeyEditing ? subKey : maskedKey(subKey || subCur.adminKey || "")} onFocus={() => { setSubKey(""); setSubKeyEditing(true) }} onBlur={() => setSubKeyEditing(false)} onChanged={(value: string) => { if (subKeyEditing && value !== maskedKey(subCur.adminKey || "")) { setSubError(""); setSubKey(value) } }} prompt="Admin API Key" />
-        {subError ? <Text font={12} foregroundStyle="systemRed">{subError}</Text> : null}
-        <Button title="保存并测试" disabled={busy} action={async () => {
-          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subCur.timezone); setSubError(""); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
-          catch (e: any) { setSubError(e?.message || "Sub2API配置无效") }
-        }} />
-        {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubError(""); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
-      </Section> : null}
 
       {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{loginRows && logins.length > 1 ? officialEditMode ? <Button title={sortUI.editing ? "完成" : "编辑排序"} action={() => {
         if (getSource() !== "official") return
@@ -689,7 +826,7 @@ function SettingsView() {
       }} /> : <EditButton /> : null}</HStack>}>
         <HStack frame={{ maxWidth: "infinity" }}>
           {!dsAdding && (!claude || claude.manual && !busy) && !codexBrowser && !workbuddy && !wbPreparing && !agBrowser
-            ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
+            ? <Button title={"添加账号"} systemImage="plus.circle.fill" action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
             : <Text foregroundStyle="secondaryLabel">{loginProvider === "deepseek" ? "API Key" : "授权进行中"}</Text>}
           <Spacer />
           <Picker title="" pickerStyle="menu" tint="secondaryLabel" value={loginProvider} onChanged={(value: string) => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
@@ -704,8 +841,8 @@ function SettingsView() {
             catch { /* invalid input is not saved */ }
           }} />
         </> : null}
-        {loginProvider === "claude" && claudeCooling ? <Text>{claudeCooldownMessage()}</Text> : null}
-        {loginProvider === "claude" && claudeProgress && claudeProgress !== "等待Claude回调（尚未收到）" ? <Text>{claudeProgress}</Text> : null}
+        {loginProvider === "claude" && claudeCooling ? <Text font={12} foregroundStyle={ORANGE}>{claudeCooldownMessage()}</Text> : null}
+        {loginProvider === "claude" && claudeProgress && claudeProgress !== "等待Claude回调（尚未收到）" ? <Text font={12} foregroundStyle={SUB}>{claudeProgress}</Text> : null}
         {wbPreparing ? <Button title="取消登录" action={() => { stopAuth(); setBusy(false) }} /> : null}
         {workbuddy ? <>
           <Button title="点击登录" action={openWorkBuddy} disabled={busy} />
@@ -744,12 +881,44 @@ function SettingsView() {
         {!remoteRows && visible.length > 1 ? <NavigationLink destination={<AccountOrderPage key={source} source={source} expectedScope={listScope} onSaved={() => { if (getSource() === source && accountScope(source) === listScope) setAccounts(cachedAccounts()) }} />}>
           <Text>账号排序</Text>
         </NavigationLink> : null}
-        {hiddenCount > 0 ? <Button title={`恢复全部隐藏账号（${hiddenCount}）`} disabled={busy} action={async () => {
+        {hiddenCount > 0 ? <Button title={`恢复全部隐藏账号（${hiddenCount}）`} systemImage="eye" disabled={busy} action={async () => {
           if (busy || !restoreHiddenAccounts(source, listScope)) return
           setAccounts(cachedAccounts())
           await Widget.reloadAll()
         }} /> : null}
-        {!visible.length ? <Text>{hiddenCount ? "账号已全部在本机隐藏，可恢复；服务器账号未删除。" : "连接成功后显示账号列表"}</Text> : null}
+        {!visible.length ? <HStack spacing={8} padding={{ vertical: 4 }}>
+          <Image systemName={hiddenCount ? "eye.slash" : "tray"} font={14} foregroundStyle={SUB} />
+          <Text font={13} foregroundStyle={SUB}>{hiddenCount ? "账号已全部在本机隐藏，可恢复；服务器账号未删除。" : "连接成功后显示账号列表"}</Text>
+        </HStack> : null}
+      </Section> : null}
+
+      <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>数据来源</Text><Spacer /><Text font={11} fontWeight="medium" monospacedDigit foregroundStyle={SUB}>{VERSION}</Text></HStack>}>
+        <Picker title={"账号来源"} value={source} onChanged={changeSource} disabled={busy}>
+          <Text tag={"official"}>OAuth,API,Token</Text>
+          <Text tag={"parrot"}>Parrot</Text>
+          <Text tag="sub2api">Sub2API</Text>
+        </Picker>
+        <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async (value: string) => {
+          const next = value as StatisticsSource
+          setSubError(""); saveStatisticsSource(next); setStatisticsSource(next); ensureSourceConfig(source, next); await test()
+        }}>
+          <Text tag="parrot">Parrot</Text><Text tag="sub2api">Sub2API</Text>
+        </Picker>
+      </Section>
+      {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>}>
+        <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
+        <TextField title={"管理密钥"} value={keyEditing ? key : maskedKey(key || cur.managementKey || "")} onFocus={() => { setKey(""); setKeyEditing(true) }} onBlur={() => setKeyEditing(false)} onChanged={(value: string) => { if (keyEditing && value !== maskedKey(cur.managementKey || "")) setKey(value) }} prompt="managementKey" />
+        <Button title={busy ? "处理中…" : "保存并测试"} systemImage="checkmark.circle.fill" action={save} disabled={busy} />
+      </Section> : null}
+      {statisticsSource === "sub2api" || source === "sub2api" ? <Section header={<Text>Sub2API连接</Text>}>
+        <TextField title="Sub2API地址" value={subUrl} onChanged={(value: string) => { setSubError(""); setSubUrl(value) }} prompt="https://你的部署地址" />
+        <TextField title="Sub2API管理员密钥" value={subKeyEditing ? subKey : maskedKey(subKey || subCur.adminKey || "")} onFocus={() => { setSubKey(""); setSubKeyEditing(true) }} onBlur={() => setSubKeyEditing(false)} onChanged={(value: string) => { if (subKeyEditing && value !== maskedKey(subCur.adminKey || "")) { setSubError(""); setSubKey(value) } }} prompt="Admin API Key" />
+        {subError ? <Text font={12} foregroundStyle="systemRed">{subError}</Text> : null}
+        <Button title="保存并测试" systemImage="checkmark.circle.fill" disabled={busy} action={async () => {
+          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subCur.timezone); setSubError(""); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
+          catch (e: any) { setSubError(e?.message || "Sub2API配置无效") }
+        }} />
+        {hasSubKey ? <Button title="清除Sub2API配置" role="destructive" disabled={busy} action={async () => { clearSub2APIConfig(); setSubError(""); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
       <Section header={<Text>刷新预览</Text>}>
@@ -760,7 +929,7 @@ function SettingsView() {
         }}>
           {REFRESH_OPTIONS.map(m => <Text tag={String(m)}>{m}分钟</Text>)}
         </Picker>
-        <Button title="预览组件" action={() => Widget.preview({ family: "systemSmall" })} />
+        <Button title="预览组件" systemImage="rectangle.on.rectangle.angled" action={() => Widget.preview({ family: "systemSmall" })} />
       </Section>
 
 

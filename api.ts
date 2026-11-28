@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.68"
+export const VERSION = "1.69"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
@@ -2093,6 +2093,21 @@ function widgetCacheResult(source: DataSource, cache: UsageData): LoadResult {
   const stats = Storage.get<ParrotStats>(statisticsSource === "sub2api" ? KEY_SUB_STATS : KEY_STATS) ?? (statisticsSource === "parrot" ? Storage.get<UsageData>(KEY_CACHE) : null)
   return { data: { ...cache, accounts: visibleAccounts(cache.accounts, source), today: stats?.today ?? null, month: stats?.month ?? null, todayByFamily: stats?.todayByFamily ?? {}, monthByFamily: stats?.monthByFamily ?? {},
     statistics: { fetchedAt: stats?.fetchedAt ?? null, stale: true, error: stats?.today && stats?.month ? null : `${statisticsSource === "parrot" ? "Parrot" : "Sub2API"}统计缓存未提供` } }, stale: true, error: null }
+}
+// Read-only local overview for the App dashboard hero card; never reads Keychain or calls network.
+export function cachedDashboardOverview(source: DataSource = getSource(), statisticsSource: StatisticsSource = getStatisticsSource()): {
+  today: Metric | null; month: Metric | null; statsFetchedAt: number | null; quotaFetchedAt: number | null
+} {
+  const stats = Storage.get<ParrotStats>(statisticsSource === "sub2api" ? KEY_SUB_STATS : KEY_STATS)
+    ?? (statisticsSource === "parrot" ? Storage.get<UsageData>(KEY_CACHE) : null)
+  const quota = Storage.get<UsageData>(source === "official" ? CACHE : source === "sub2api" ? KEY_SUB_CACHE : KEY_CACHE)
+  const validAt = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null
+  return {
+    today: stats?.today && stats?.month ? stats.today : null,
+    month: stats?.today && stats?.month ? stats.month : null,
+    statsFetchedAt: stats?.today && stats?.month ? validAt(stats.fetchedAt) : null,
+    quotaFetchedAt: validAt(quota?.fetchedAt),
+  }
 }
 
 function antigravityWindows(groups: AntigravityQuota["groups"]): Pick<Account, "fiveHour" | "sevenDay"> {
