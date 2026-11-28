@@ -190,9 +190,9 @@ function DashboardHeroCard({ source, statisticsSource, accountCount, hiddenCount
   const sourceLabel = source === "official" ? "官方直连" : source === "sub2api" ? "Sub2API" : "Parrot"
   const statsLabel = statisticsSource === "sub2api" ? "Sub2API" : "Parrot"
   const latestAt = overview.quotaFetchedAt ?? overview.statsFetchedAt
-  const metricCell = (label: string, value: string, accent = false) => <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
+  const metricCell = (label: string, value: string) => <VStack alignment="leading" spacing={2} frame={{ maxWidth: "infinity", alignment: "leading" as any }}>
     <Text font={10} foregroundStyle={SUB} lineLimit={1}>{label}</Text>
-    <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={accent ? ACCENT : FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
+    <Text font={12} fontWeight="semibold" monospacedDigit foregroundStyle={FG} lineLimit={1} minScaleFactor={0.7}>{value}</Text>
   </VStack>
   const periodRow = (title: string, m: Metric, badge?: string) => <VStack alignment="leading" spacing={7}>
     <HStack spacing={6}>
@@ -206,7 +206,7 @@ function DashboardHeroCard({ source, statisticsSource, accountCount, hiddenCount
       {metricCell("输入", fmtTokens(m.inputTokens))}
       {metricCell("输出", fmtTokens(m.outputTokens))}
       {metricCell("缓存", fmtTokens(m.cacheReadTokens + m.cacheCreationTokens))}
-      {metricCell("缓存率", cacheRateText(m), true)}
+      {metricCell("缓存率", cacheRateText(m))}
       {metricCell("Token", fmtTokens(m.totalTokens))}
     </HStack>
   </VStack>

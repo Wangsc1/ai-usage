@@ -38,7 +38,7 @@ function runtime(dir) {
   return { load, scripting, store, kc, snapshot: n => JSON.stringify(expand(n)) }
 }
 const current = runtime(root), api = current.load('api.ts'), app = current.load('index.tsx'), widget = current.load('widget.tsx')
-assert.equal(api.VERSION, '1.71')
+assert.equal(api.VERSION, '1.72')
 assert.equal(api.VERSION, JSON.parse(fs.readFileSync(path.join(root, 'script.json'))).version)
 const index = fs.readFileSync(path.join(root, 'index.tsx'), 'utf8')
 assert.ok(!index.includes('const VERSION ='))
@@ -119,7 +119,7 @@ assert.ok(detailText({ ...account, provider: 'deepseek', balance: { fetchedAt: 1
   assert.ok(wbMeta.includes('剩余积分 80') && wbMeta.includes('已签到'))
   current.store.clear()
 }
-console.log('PASS cleanup: shared 1.71 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
+console.log('PASS cleanup: shared 1.72 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
 if (process.env.CLEANUP_BASELINE_DIR) {
   const baselineDir = process.env.CLEANUP_BASELINE_DIR, previous = runtime(baselineDir), oldApi = previous.load('api.ts'), oldApp = previous.load('index.tsx'), oldWidget = previous.load('widget.tsx')
   assert.equal(svg, oldApi.WORKBUDDY_SVG ?? fs.readFileSync(path.join(baselineDir, 'assets/workbuddy-original.svg'), 'utf8'), 'SVG source preserved byte-for-byte')
