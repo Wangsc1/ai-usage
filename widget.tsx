@@ -134,7 +134,7 @@ function ProviderIcon({ provider, size, muted = false }: { provider: string; siz
   if (provider === "workbuddy") return <Image image={workBuddyBrandImage(muted)} renderingMode="original" resizable frame={{ width: size, height: size }} />
   if (provider === "deepseek") return <SVG code={DEEPSEEK_SVG} resizable frame={{ width: size, height: size }} />
   if (provider === "claude") return <SVG code={muted ? graySvg(CLAUDE_PATH) : CLAUDE_SVG} resizable frame={{ width: size, height: size }} />
-  if (provider === "openai") return <SVG code={muted ? graySvg(OPENAI_PATH) : OPENAI_SVG} resizable frame={{ width: size, height: size }} />
+  if (provider === "openai" || provider === "codex") return <SVG code={muted ? graySvg(OPENAI_PATH) : OPENAI_SVG} resizable frame={{ width: size, height: size }} />
   return <Image systemName="sparkle" font={size * 0.85} foregroundStyle={muted ? SUB : FG} frame={{ width: size, height: size }} />
 }
 
@@ -143,7 +143,7 @@ function shortName(acc: Account) {
 }
 
 function providerName(p: string) {
-  return p === "antigravity" ? "Antigravity" : p === "workbuddy" ? "WorkBuddy" : p === "claude" ? "Claude" : p === "openai" ? "Codex" : p === "deepseek" ? "DeepSeek" : p
+  return p === "antigravity" ? "Antigravity" : p === "workbuddy" ? "WorkBuddy" : p === "claude" ? "Claude" : p === "openai" || p === "codex" ? "Codex" : p === "deepseek" ? "DeepSeek" : p
 }
 
 export function isQuotaExhausted(acc: Account): boolean {
@@ -265,7 +265,7 @@ function PeriodStats({ columns, labelFont, valueFont, gap, verticalGap, contentW
   // Large: known full content width, natural content height. No greedy reader or estimated-height reservation.
   if (contentWidth != null) return render(contentWidth)
   // Small retains its existing bounded reader and statistics geometry.
-  return <GeometryReader frame={{ height }}>{proxy => render(proxy.size.width)}</GeometryReader>
+  return <GeometryReader frame={{ height }}>{(proxy: { size: { width: number; height: number } }) => render(proxy.size.width)}</GeometryReader>
 }
 
 // Same Parrot summary scope as Large, not per-account totals.
@@ -322,7 +322,7 @@ function Small({ data }: { data: UsageData }) {
     {acc.provider === "workbuddy" ? <CreditsRows acc={acc} font={7} compact alignExpiryBottom /> : acc.provider === "deepseek" ? <BalanceRows acc={acc} font={8} /> : windowsOf(acc).map(x => <QuadWindow label={x.label} w={x.w} fmt={x.fmt} muted={x.muted} s={s} rowToBarGap={MEDIUM_SCALE.gap} />)}
   </VStack>
   return <GeometryReader>
-    {proxy => {
+    {(proxy: { size: { width: number; height: number } }) => {
       const region = smallRegionLayout(proxy.size.height)
       return <VStack alignment="leading" spacing={0} frame={{ width: proxy.size.width, height: proxy.size.height }}>
         <VStack alignment="leading" spacing={0}
@@ -424,7 +424,7 @@ function MediumTwo({ data }: { data: UsageData }) {
         modifiers={modifiers().padding({ bottom: 4 }).frame({ height: half }).frame({ maxWidth: "infinity", alignment: "topLeading" })}>
         {columns ? <PeriodStats columns={columns} labelFont={7 * statsScale} valueFont={8 * statsScale}
           gap={2} verticalGap={0} contentWidth={width} />
-          : <Text font={7} foregroundStyle={SUB}>Parrot今日/本月统计未提供</Text>}
+          : <Text font={7} foregroundStyle={SUB}>今日/本月统计未提供</Text>}
       </VStack>
       <HStack spacing={0} modifiers={modifiers().frame({ height: half }).frame({ maxWidth: "infinity" })}>
         {data.accounts.map((acc, i) => <VStack
@@ -471,7 +471,7 @@ function Large({ data }: { data: UsageData }) {
     modifiers={modifiers().fixedSize({ horizontal: false, vertical: !hasCredits })
       .frame({ maxWidth: "infinity", maxHeight: "infinity", alignment: "topLeading" })}>
     {m && month ? <PeriodStats labelFont={9} valueFont={11} sizingValueFont={12} gap={4} verticalGap={denseCredits ? 1 : 3} contentWidth={contentWidth}
-      columns={columns!} /> : <Text font={10} foregroundStyle={SUB}>Parrot今日/本月统计未提供</Text>}
+      columns={columns!} /> : <Text font={10} foregroundStyle={SUB}>今日/本月统计未提供</Text>}
     <Rectangle fill={DIVIDER} modifiers={modifiers().frame({ height: 1 }).frame({ maxWidth: "infinity" })} />
     <VStack alignment="leading" spacing={denseCredits ? 1 : 2} fixedSize={{ horizontal: false, vertical: true }} frame={{ maxWidth: "infinity" }}>
       {data.accounts.slice(0, 4).map((acc, i) => <VStack alignment="leading" spacing={1}

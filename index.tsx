@@ -54,7 +54,7 @@ const ICON_SIZE = 17
 function providerIconCode(provider: string) {
   return provider === "claude" ? CLAUDE_SVG : provider === "deepseek" ? DEEPSEEK_SVG : provider === "codex" || provider === "openai" ? OPENAI_SVG : null
 }
-function providerWord(provider: string) { return provider === "antigravity" ? "Antigravity" : provider === "workbuddy" ? "WorkBuddy" : provider === "deepseek" ? "DeepSeek" : provider === "claude" ? "Claude" : "Codex" }
+function providerWord(provider: string) { return provider === "antigravity" ? "Antigravity" : provider === "workbuddy" ? "WorkBuddy" : provider === "deepseek" ? "DeepSeek" : provider === "claude" ? "Claude" : provider === "codex" || provider === "openai" ? "Codex" : provider }
 // "1. [icon] name"; unknown icon falls back to the original text label.
 function AccountLine({ index, provider, name, fixed = false }: { index: number; provider: string; name: string; fixed?: boolean }) {
   const code = providerIconCode(provider)
@@ -97,7 +97,7 @@ function AccountOrderPage({ source, onSaved, expectedScope }: { source: DataSour
         <ReorderableForEach
           active={active}
           data={data.value}
-          builder={(a, i) => <VStack
+          builder={(a: Account, i: number) => <VStack
             key={a.id}
             modifiers={modifiers()
               .frame({ maxWidth: "infinity", alignment: "leading" as any })
@@ -157,7 +157,7 @@ function WidgetNamePage({ account, source, onSaved, expectedScope }: { account: 
       <Button title="保存" action={save} />
     </Section>
     {account.provider === "antigravity" ? <Section header={<Text>小组件额度显示</Text>}>
-      {source === "official" ? <Picker title="显示额度" value={quotaMode} onChanged={async value => {
+      {source === "official" ? <Picker title="显示额度" value={quotaMode} onChanged={async (value: string) => {
         if (getSource() !== source || !officialAccounts().some(a => a.id === account.id)) return
         const mode = ANTIGRAVITY_MODES.find(m => m.value === value)?.value
         if (!mode) return
@@ -335,6 +335,7 @@ function SettingsView() {
   const [subKey, setSubKey] = useState("")
   const [subKeyEditing, setSubKeyEditing] = useState(false)
   const [hasSubKey, setHasSubKey] = useState(!!subCur.adminKey)
+  const [subError, setSubError] = useState("")
   const cur = needParrot ? getConfig() : { baseUrl: "", managementKey: "" }
   if (needParrot) init.parrot = true
   const [baseUrl, setBaseUrl] = useState(cur.baseUrl ?? "")
@@ -377,6 +378,7 @@ function SettingsView() {
       setSortUI(current => ({ ...current, editing: false }))
     } catch { setSortUI({ editing: false, failed: true }) }
     stopAuth()
+    setSubError("")
     const next = value as DataSource
     saveSource(next)
     setSource(next)
@@ -464,7 +466,7 @@ function SettingsView() {
     const p = loopbackProviders[kind], d = auth[kind]
     if (!d || auth.running) return
     const epoch = auth.epoch
-    const valid = () => auth.alive && auth[kind] === d && auth.epoch === epoch
+    const valid = () => auth.alive && auth[kind] === d && auth.epoch === epoch && getSource() === "official"
     auth.running = true; setBusy(true); setBrowserError("")
     try { await presentIsolatedAuthorization(release => { if (valid()) auth.releaseBrowser = release }, d.url, pushAuthorization) }
     catch (e: any) { if (valid()) setBrowserError((e.message || `无法打开${p.label}授权页`) + "，请重试登录") }
@@ -474,7 +476,7 @@ function SettingsView() {
     }
   }
   function startClaude(manual = false) {
-    if (auth.running) return
+    if (!auth.alive || auth.running || busy || getSource() !== "official") return
     if (claudeCooldownUntil()) return
     stopAuth(); setBrowserError("")
     try {
@@ -617,7 +619,7 @@ function SettingsView() {
           } catch { /* local removal failure leaves the row in place */ }
         }} />
         ] }}>
-          <NavigationLink destination={<WidgetNamePage account={loginAccountById.get(a.id)!} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
+          <NavigationLink destination={<WidgetNamePage account={loginAccountById.get(a.id) ?? { id: a.id, name: a.name, provider: a.provider, enabled: true, available: true, fiveHour: { usedPercent: null, remainingPercent: null, resetsAt: null }, sevenDay: { usedPercent: null, remainingPercent: null, resetsAt: null }, resetCredits: null }} source="official" onSaved={() => setAccounts(cachedAccounts())} />}>
             <VStack alignment="leading" spacing={3}>
               <AccountLine index={i} provider={a.provider} name={a.provider === "claude" ? a.email || "邮箱未提供" : a.name} fixed />
               <Text font={12} foregroundStyle="secondaryLabel">自定义小组件用户名：{widgetNames[a.id] || "使用原名（点此设置）"}</Text>
@@ -632,7 +634,7 @@ function SettingsView() {
       environments={source === "official" && loginRows && officialEditMode ? { editMode: officialEditMode } : undefined}
       navigationDestination={{
         isPresented: authorization != null,
-        onChanged: value => { if (!value) authorization?.onBack() },
+        onChanged: (value: boolean) => { if (!value) authorization?.onBack() },
         content: authorization ? <WebView
           controller={authorization.controller}
           frame={{ maxWidth: "infinity", maxHeight: "infinity" }}
@@ -653,26 +655,27 @@ function SettingsView() {
           <Text tag={"parrot"}>Parrot</Text>
           <Text tag="sub2api">Sub2API</Text>
         </Picker>
-        <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async value => {
+        <Picker title="统计来源" value={statisticsSource} disabled={busy} onChanged={async (value: string) => {
           const next = value as StatisticsSource
-          saveStatisticsSource(next); setStatisticsSource(next); ensureSourceConfig(source, next); await test()
+          setSubError(""); saveStatisticsSource(next); setStatisticsSource(next); ensureSourceConfig(source, next); await test()
         }}>
           <Text tag="parrot">Parrot</Text><Text tag="sub2api">Sub2API</Text>
         </Picker>
       </Section>
       {source === "parrot" || statisticsSource === "parrot" ? <Section header={<Text>Parrot 连接</Text>}>
         <TextField title={"地址"} value={baseUrl} onChanged={setBaseUrl} prompt={"填写你自己的 Parrot 地址"} />
-        <TextField title={"管理密钥"} value={keyEditing ? key : maskedKey(key || cur.managementKey || "")} onFocus={() => { setKey(""); setKeyEditing(true) }} onBlur={() => setKeyEditing(false)} onChanged={value => { if (keyEditing && value !== maskedKey(cur.managementKey || "")) setKey(value) }} prompt="managementKey" />
+        <TextField title={"管理密钥"} value={keyEditing ? key : maskedKey(key || cur.managementKey || "")} onFocus={() => { setKey(""); setKeyEditing(true) }} onBlur={() => setKeyEditing(false)} onChanged={(value: string) => { if (keyEditing && value !== maskedKey(cur.managementKey || "")) setKey(value) }} prompt="managementKey" />
         <Button title={busy ? "处理中…" : "保存并测试"} action={save} disabled={busy} />
       </Section> : null}
       {statisticsSource === "sub2api" || source === "sub2api" ? <Section header={<Text>Sub2API连接</Text>}>
-        <TextField title="Sub2API地址" value={subUrl} onChanged={setSubUrl} prompt="https://你的部署地址" />
-        <TextField title="Sub2API管理员密钥" value={subKeyEditing ? subKey : maskedKey(subKey || subCur.adminKey || "")} onFocus={() => { setSubKey(""); setSubKeyEditing(true) }} onBlur={() => setSubKeyEditing(false)} onChanged={value => { if (subKeyEditing && value !== maskedKey(subCur.adminKey || "")) setSubKey(value) }} prompt="Admin API Key" />
+        <TextField title="Sub2API地址" value={subUrl} onChanged={(value: string) => { setSubError(""); setSubUrl(value) }} prompt="https://你的部署地址" />
+        <TextField title="Sub2API管理员密钥" value={subKeyEditing ? subKey : maskedKey(subKey || subCur.adminKey || "")} onFocus={() => { setSubKey(""); setSubKeyEditing(true) }} onBlur={() => setSubKeyEditing(false)} onChanged={(value: string) => { if (subKeyEditing && value !== maskedKey(subCur.adminKey || "")) { setSubError(""); setSubKey(value) } }} prompt="Admin API Key" />
+        {subError ? <Text font={12} foregroundStyle="systemRed">{subError}</Text> : null}
         <Button title="保存并测试" disabled={busy} action={async () => {
-          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subCur.timezone); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
-          catch { /* invalid configuration is not saved */ }
+          try { saveSub2APIConfig(subUrl, subKey.trim() || getSub2APIConfig().adminKey || "", subCur.timezone); setSubError(""); setSubKey(""); setSubKeyEditing(false); setHasSubKey(true); setAccounts(cachedAccounts()); await test() }
+          catch (e: any) { setSubError(e?.message || "Sub2API配置无效") }
         }} />
-        {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
+        {hasSubKey ? <Button title="清除Sub2API配置" disabled={busy} action={async () => { clearSub2APIConfig(); setSubError(""); setSubKey(""); setSubKeyEditing(false); setSubUrl(""); setHasSubKey(false); setAccounts(cachedAccounts()); await test() }} /> : null}
       </Section> : null}
 
       {source === "official" ? <Section header={<HStack frame={{ maxWidth: "infinity" }}><Text>登录账号</Text><Spacer />{loginRows && logins.length > 1 ? officialEditMode ? <Button title={sortUI.editing ? "完成" : "编辑排序"} action={() => {
@@ -689,7 +692,7 @@ function SettingsView() {
             ? <Button title={"添加账号"} action={addOfficial} disabled={busy || (loginProvider === "claude" && claudeCooling)} />
             : <Text foregroundStyle="secondaryLabel">{loginProvider === "deepseek" ? "API Key" : "授权进行中"}</Text>}
           <Spacer />
-          <Picker title="" pickerStyle="menu" tint="secondaryLabel" value={loginProvider} onChanged={value => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
+          <Picker title="" pickerStyle="menu" tint="secondaryLabel" value={loginProvider} onChanged={(value: string) => { stopAuth(); setLoginProvider(value); setBusy(false); setBrowserError("") }} disabled={busy}>
             <Text tag="antigravity">Antigravity</Text><Text tag="codex">Codex</Text><Text tag="claude">Claude</Text><Text tag="deepseek">DeepSeek</Text><Text tag="workbuddy">WorkBuddy</Text>
           </Picker>
         </HStack>

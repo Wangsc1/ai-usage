@@ -158,6 +158,14 @@ async function main(){
   r.setHandler((u,o)=>u.includes('/usage/by_api_key/cost?')?r.response(503):base(u,o));await r.button().props.action();assert.equal(r.store.get(r.cacheKey).accounts.find(a=>a.id===r.id).balance.money[0].weekCost,old);assert.ok(text(r).includes('读取失败'))
  }
  {
+  const r=runtime('official','antigravity'),base=r.handler()
+  r.setHandler((u,o)=>u.endsWith(':loadCodeAssist')?r.response(200,{paidTier:{name:'NoProjectTier',availableCredits:[{creditType:'GOOGLE_ONE_AI',creditAmount:5}]}}):base(u,o))
+  await r.button().props.action()
+  const savedAcc=r.store.get(r.cacheKey).accounts.find(a=>a.id===r.id)
+  assert.equal(savedAcc.antigravity.tier,'NoProjectTier');assert.equal(savedAcc.antigravity.creditAmount,5)
+  assert.ok(savedAcc.antigravity.groups.length>0);assert.ok(text(r).includes('未返回 project'))
+ }
+ {
   const r=runtime('official','claude'),base=r.handler();r.setHandler((u,o)=>u.endsWith('/api/oauth/usage')?{status:429,headers:{get:()=> '60'},json:async()=>({})}:base(u,o));await r.button().props.action();const count=r.calls.length;await r.button().props.action();assert.equal(r.calls.length,count);assert.ok(text(r).includes('冷却'));assert.equal(r.counts().reloads,0)
  }
  {

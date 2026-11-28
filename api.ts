@@ -1,13 +1,14 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.66"
+export const VERSION = "1.67"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
+let officialIdentityRevision = 0
 // Login/removal revisions invalidate delayed detail reads even if an ID is reused.
 const detailIdentityRevisions = new Map<string, number>()
-function changeDetailIdentity(id: string) { detailIdentityRevisions.set(id, (detailIdentityRevisions.get(id) ?? 0) + 1) }
+function changeDetailIdentity(id: string) { officialIdentityRevision++; detailIdentityRevisions.set(id, (detailIdentityRevisions.get(id) ?? 0) + 1) }
 export function saveSource(source: DataSource) {
   if (source !== getSource()) { officialRenewalScope++; pendingCodexRenewals.clear(); ClaudeOAuth.clearRenewalCandidates() }
   Storage.set("ai_usage_source_v1", source)
@@ -134,10 +135,10 @@ function orderKey(source: DataSource) { return `ai_usage_${source}_order_v1` }
 export function saveAccountOrder(ids: string[], source: DataSource = getSource()) {
   Storage.set(orderKey(source), [...new Set(ids)])
 }
-export function sortAccounts(accounts: Account[], source: DataSource = getSource()): Account[] {
+export function sortAccounts<T extends { id: string }>(accounts: T[], source: DataSource = getSource()): T[] {
   const ids = Storage.get<string[]>(orderKey(source)) ?? []
   const byId = new Map(accounts.map(a => [a.id, a]))
-  const ordered: Account[] = []
+  const ordered: T[] = []
   for (const id of ids) {
     const a = byId.get(id)
     if (a) { ordered.push(a); byId.delete(id) }
@@ -651,30 +652,31 @@ export async function refreshAccount(id: string, source: DataSource, scope = acc
     }
     if (!current()) throw new DetailRefreshError("当前账号、来源或配置已改变，已丢弃迟到结果")
     if (!account) throw new DetailRefreshError("当前账号登录已更新或移除，未保存结果")
-    const error = account.readError || (account.balance?.stale ? account.balance.error : null) || account.credits?.error
+    const nonFatalAntigravity = account.provider === "antigravity" && !!account.antigravity?.groups.length && !!account.readError && !/失败|未提供额度分组/.test(account.readError)
+    const error = (nonFatalAntigravity ? null : account.readError) || (account.balance?.stale ? account.balance.error : null) || account.credits?.error
     if (error) throw new DetailRefreshError(error)
     // Merge into the LATEST snapshot synchronously, never the pre-request full snapshot.
     const latest = Storage.get<UsageData>(key)
     if (source !== "official" && !latest?.accounts.some(a => a.id === id)) throw new DetailRefreshError("当前账号已不在本机缓存中")
     const next = { ...old, ...account }
-    delete next.readError
+    if (!nonFatalAntigravity) delete next.readError
     const accounts = latest?.accounts ?? []
     Storage.set(key, { ...(latest ?? { today: null, month: null, todayByFamily: {}, monthByFamily: {}, fetchedAt: 0 }),
       accounts: accounts.some(a => a.id === id) ? accounts.map(a => a.id === id ? next : a) : [...accounts, next] })
     saveCards?.()
     requestLocalWidgetProjection(source)
-    return { account: projectAntigravityAccount(next, source), error: warning || next.balance?.error || next.credits?.checkin?.error || null }
+    return { account: projectAntigravityAccount(next, source), error: warning || next.readError || next.balance?.error || next.credits?.checkin?.error || null }
   } catch (e: any) {
     const safe = e instanceof DetailRefreshError ? e.message : e instanceof HttpError ? `Parrot当前账号读取失败（HTTP ${e.status}）` : /^(Codex|Claude|Antigravity|WorkBuddy|DeepSeek|官方|钥匙串|Sub2API)/.test(e?.message ?? "") ? e.message : "当前账号刷新失败，请重试"
     return { account: null, error: safe }
   }
 }
 
-let usageFlight: { scope: number; source: DataSource; stats: StatisticsSource; parrotURL: string | null; parrotKey: string | null; subURL: string | null; subKey: string | null; tz: string; promise: Promise<LoadResult> } | null = null
+let usageFlight: { scope: number; officialRev: number; source: DataSource; stats: StatisticsSource; parrotURL: string | null; parrotKey: string | null; subURL: string | null; subKey: string | null; tz: string; promise: Promise<LoadResult> } | null = null
 export function loadUsage(): Promise<LoadResult> {
-  const source = getSource(), scope = accountScope(source), stats = getStatisticsSource(), pc = getConfig(), sc = getSub2APIConfig()
+  const source = getSource(), scope = accountScope(source), officialRev = source === "official" ? officialIdentityRevision : 0, stats = getStatisticsSource(), pc = getConfig(), sc = getSub2APIConfig()
   const f = usageFlight
-  if (f && f.scope === scope && f.source === source && f.stats === stats && f.parrotURL === pc.baseUrl && f.parrotKey === pc.managementKey && f.subURL === sc.baseUrl && f.subKey === sc.adminKey && f.tz === sc.timezone) return f.promise
+  if (f && f.scope === scope && f.officialRev === officialRev && f.source === source && f.stats === stats && f.parrotURL === pc.baseUrl && f.parrotKey === pc.managementKey && f.subURL === sc.baseUrl && f.subKey === sc.adminKey && f.tz === sc.timezone) return f.promise
   const promise = (async (): Promise<LoadResult> => {
     const [quota, result] = await Promise.all([source === "official" ? loadOfficialUsage() : source === "sub2api" ? loadSub2APIQuota() : loadParrotQuota(), stats === "sub2api" ? loadSub2APIStats() : loadParrotStats()])
     if (getSource() !== source || accountScope(source) !== scope) return { data: null, stale: false, error: "账号来源或配置已改变" }
@@ -683,7 +685,7 @@ export function loadUsage(): Promise<LoadResult> {
       todayByFamily: result.data?.todayByFamily ?? {}, monthByFamily: result.data?.monthByFamily ?? {},
       statistics: { fetchedAt: result.data?.fetchedAt ?? null, stale: !!result.error && !!result.data, error: result.error } } }
   })()
-  usageFlight = { source, scope, stats, parrotURL: pc.baseUrl, parrotKey: pc.managementKey, subURL: sc.baseUrl, subKey: sc.adminKey, tz: sc.timezone, promise }
+  usageFlight = { source, scope, officialRev, stats, parrotURL: pc.baseUrl, parrotKey: pc.managementKey, subURL: sc.baseUrl, subKey: sc.adminKey, tz: sc.timezone, promise }
   promise.finally(() => { if (usageFlight?.promise === promise) usageFlight = null }).catch(() => {})
   return promise
 }
@@ -765,6 +767,7 @@ function credentials(): Credential[] {
   if (!raw) return []
   try {
     const items: Credential[] = JSON.parse(raw)
+    if (!Array.isArray(items)) throw new Error()
     let changed = false
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
@@ -789,8 +792,15 @@ function officialDisplay(item: Credential, index: number): string {
   return item.email || `账号 ${index + 1}（邮箱未提供）`
 }
 export function officialAccounts(): { id: string; name: string; email: string; provider: "codex" | "claude" | "deepseek" | "workbuddy" | "antigravity" }[] {
+  const safe = <T>(fn: () => T[]): T[] => { try { return fn() } catch { return [] } }
   // Legacy Codex records have no provider field; their dedicated credential collection identifies them.
-  return [...credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const })), ...claudeAccounts(), ...dsCredentials().map(a => ({ id: a.id, name: a.name, email: "", provider: "deepseek" as const })), ...WorkBuddyCN.accounts(), ...Antigravity.accounts()]
+  return [
+    ...safe(() => credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const }))),
+    ...safe(claudeAccounts),
+    ...safe(() => dsCredentials().map(a => ({ id: a.id, name: a.name, email: "", provider: "deepseek" as const }))),
+    ...safe(WorkBuddyCN.accounts),
+    ...safe(Antigravity.accounts),
+  ]
 }
 // Local management includes authorized accounts even before their first usage collection.
 export function managementAccounts(knownOfficial?: ReturnType<typeof officialAccounts>, sort = true): Account[] {
@@ -820,11 +830,11 @@ export function officialCached(accounts?: ReturnType<typeof officialAccounts>, s
   return cache ? { ...cache, accounts: cache.accounts.map(a => projectAntigravityAccount(a, "official")) } : null
 }
 export function logoutOfficial(id: string) {
-  if (id.startsWith("antigravity:")) { Antigravity.logout(id); saveAntigravityMode(id, "summary", "official"); if (!Antigravity.accounts().length) Storage.remove(AG_LOCAL_WIDGET_UNTIL) }
+  if (id.startsWith("antigravity:")) { Antigravity.logout(id); forgetRenewalCooldown("Antigravity", id); saveAntigravityMode(id, "summary", "official"); if (!Antigravity.accounts().length) Storage.remove(AG_LOCAL_WIDGET_UNTIL) }
   else if (id.startsWith("workbuddy:")) WorkBuddyCN.logout(id)
   else if (id.startsWith("deepseek:")) { if (!Keychain.set(DS_KEY, JSON.stringify(dsCredentials().filter(x => x.id !== id)))) throw new Error("DeepSeek钥匙串保存失败"); changeDetailIdentity(id) }
-  else if (id.startsWith("claude:")) logoutClaude(id)
-  else { persist(credentials().filter(x => x.id !== id)); forgetCodexRenewal(id) }
+  else if (id.startsWith("claude:")) { logoutClaude(id); forgetRenewalCooldown("Claude", id) }
+  else { persist(credentials().filter(x => x.id !== id)); forgetCodexRenewal(id); forgetRenewalCooldown("Codex", id) }
   saveWidgetName(id, "", "official")
   const cache = officialSnapshot()
   if (cache) Storage.set(CACHE, { ...cache, accounts: cache.accounts.filter(a => a.id !== id) })
@@ -992,6 +1002,20 @@ function renewalDeadline(provider: string, id: string): number {
   const at = (Storage.get<Record<string, number>>(RENEWAL_LIMIT) ?? {})[`${provider}:${id}`]
   return typeof at === "number" && Number.isFinite(at) && at > Date.now() ? at : 0
 }
+function forgetRenewalCooldown(provider: string, id: string) {
+  const all = Storage.get<Record<string, number>>(RENEWAL_LIMIT)
+  if (!all) return
+  const target = `${provider}:${id}`, now = Date.now(), next: Record<string, number> = {}
+  let changed = false
+  for (const [k, v] of Object.entries(all)) {
+    if (k === target || typeof v !== "number" || !Number.isFinite(v) || v <= now) changed = true
+    else next[k] = v
+  }
+  if (changed) {
+    if (Object.keys(next).length) Storage.set(RENEWAL_LIMIT, next)
+    else Storage.remove(RENEWAL_LIMIT)
+  }
+}
 function renewalWait(provider: string, until: number): string {
   return `${provider}续期冷却至${formatBeijingDeadline(until)}，剩余${Math.ceil((until - Date.now()) / 1000)}秒；保留登录，冷却后下次刷新再尝试`
 }
@@ -1004,8 +1028,10 @@ async function renewalFailure(provider: string, id: string, response: any): Prom
   if (fallback) until = Date.now() + 300000 // Local backoff only, not a claimed service deadline.
   if (response.status === 429 || response.status >= 500) {
     if (until) {
-      const key = `${provider}:${id}`, all = Storage.get<Record<string, number>>(RENEWAL_LIMIT) ?? {}
-      Storage.set(RENEWAL_LIMIT, { ...all, [key]: Math.max(until, renewalDeadline(provider, id)) })
+      const key = `${provider}:${id}`, now = Date.now(), all = Storage.get<Record<string, number>>(RENEWAL_LIMIT) ?? {}, next: Record<string, number> = {}
+      for (const [k, v] of Object.entries(all)) if (typeof v === "number" && Number.isFinite(v) && v > now) next[k] = v
+      next[key] = Math.max(until, next[key] ?? 0)
+      Storage.set(RENEWAL_LIMIT, next)
     }
     return new Error(`${provider}续期暂时失败（HTTP ${response.status}），保留登录${until ? `；${fallback ? "服务未提供有效等待时间，本机退避5分钟；" : ""}${renewalWait(provider, until)}` : "；下次刷新再尝试"}`)
   }
@@ -1244,9 +1270,9 @@ function active(d: ClaudeLogin) {
 }
 export function cancelClaudeLogin(d: ClaudeLogin) {
   d.cancelled = true
-  d.verifier = ""; d.state = ""; d.code = null
+  d.verifier = ""; d.state = ""; d.code = null; d.url = ""
   if (d.timer != null) { clearTimeout(d.timer); d.timer = null }
-  if (d.server) { d.server.stop(); d.server = null }
+  if (d.server) { try { d.server.stop() } catch { /* ignore native stop errors during teardown */ } d.server = null }
 }
 export function beginClaudeLogin(onCode: () => void = () => {}, onExpire: () => void = () => {}, manual = false, onProgress?: (stage: string) => void): ClaudeLogin {
   if (claudeCooldownUntil()) throw new Error(claudeCooldownMessage())
@@ -1459,7 +1485,7 @@ function remember429(key: string, id: string, r: any): number {
   return until
 }
 const waitText = (until: number) => `冷却至${formatBeijingDeadline(until)}，剩余${Math.ceil((until - Date.now()) / 1000)}秒`
-type CardCache = Record<string, { count: number | null; at: number }>
+type CardCache = Record<string, { count: number | null; at: number; until?: number }>
 const claudeLoads = new Map<string, Promise<Account>>()
 export function forgetClaudeUsageState(id: string) {
   for (const key of [USAGE_LIMIT, CARDS]) {
@@ -1509,21 +1535,29 @@ async function loadClaudeAccount(item: Credential, observed?: (value: unknown) =
     }
     if (r.status !== 200) throw new Error(`Claude额度读取失败（HTTP ${r.status}，GET /api/oauth/usage）`)
     const mapped = mapClaudeUsage(await json(r)); check()
-    const cards = Storage.get<CardCache>(CARDS) ?? {}, cached = cards[item.id]
+    const cards = Storage.get<CardCache>(CARDS) ?? {}, rawCached = cards[item.id] as CardCache[string] | number | undefined
+    const cached = rawCached && typeof rawCached === "object" ? rawCached : undefined
+    const cardLimited = typeof rawCached === "number"
+      ? (Number.isFinite(rawCached) && rawCached > Date.now() ? rawCached : 0)
+      : (typeof cached?.until === "number" && Number.isFinite(cached.until) && cached.until > Date.now() ? cached.until : 0)
     if (mapped.resetCredits != null) Storage.set(CARDS, { ...cards, [item.id]: { count: mapped.resetCredits, at: Date.now() } })
-    else if (cached && typeof cached.at === "number" && Date.now() - cached.at < CARD_INTERVAL) mapped.resetCredits = cached.count
-    else if (!deadline(CARDS, item.id)) {
+    else if (cached && typeof cached.at === "number" && cached.at > 0 && Date.now() - cached.at < CARD_INTERVAL) mapped.resetCredits = cached.count
+    else if (cardLimited) mapped.resetCredits = cached?.count ?? null
+    else {
       // Optional same-endpoint selector at most hourly; never the reset_rate_limits POST/claim endpoint.
       try {
         const cardResponse = await request(API + "/usage?cedar_ember=1&skip_spend=1", { headers: { Authorization: `Bearer ${current.access}`,
           "anthropic-beta": "oauth-2025-04-20", "Content-Type": "application/json" } })
         check()
-        if (cardResponse.status === 429 || cardResponse.status === 403) remember429(CARDS, item.id, cardResponse)
-        else if (cardResponse.status === 200) {
+        if (cardResponse.status === 429 || cardResponse.status === 403) {
+          const until = Date.now() + Math.min(retryAfterMs(cardResponse) || 300000, 3600000)
+          mapped.resetCredits = cached?.count ?? null
+          Storage.set(CARDS, { ...(Storage.get<CardCache>(CARDS) ?? {}), [item.id]: { count: mapped.resetCredits, at: cached?.at ?? 0, until: Math.max(until, cardLimited) } })
+        } else if (cardResponse.status === 200) {
           mapped.resetCredits = claudeResetCount(await json(cardResponse)); check()
           Storage.set(CARDS, { ...(Storage.get<CardCache>(CARDS) ?? {}), [item.id]: { count: mapped.resetCredits, at: Date.now() } })
-        }
-      } catch { /* optional card lookup must not block the successfully read quota */ }
+        } else if (cached?.count != null) mapped.resetCredits = cached.count
+      } catch { if (cached?.count != null) mapped.resetCredits = cached.count /* optional card lookup must not block the successfully read quota */ }
     }
     check()
     if (!credentials().some(a => a.id === item.id)) throw new Error("该Claude账号已退出")
@@ -1550,7 +1584,9 @@ export type DeepSeekBalance = { money: DeepSeekMoney[]; fetchedAt: number | null
 const DS_KEY = "ai_usage_deepseek_credentials_v1"
 type DeepSeekCredential = { id: string; name: string; mode: "api" | "web"; token: string }
 class DeepSeekReadError extends Error {}
-function dsCredentials(): DeepSeekCredential[] { try { return JSON.parse(Keychain.get(DS_KEY) || "[]") } catch { return [] } }
+function dsCredentials(): DeepSeekCredential[] {
+  try { const rows = JSON.parse(Keychain.get(DS_KEY) || "[]"); return Array.isArray(rows) ? rows : [] } catch { return [] }
+}
 export function addDeepSeekAccount(name: string, mode: "api" | "web", token: string): string {
   if (!name.trim() || !token.trim() || !["api", "web"].includes(mode)) throw new Error("DeepSeek名称、认证方式和凭据不能为空")
   if (typeof Crypto === "undefined" || typeof Crypto.generateSymmetricKey !== "function") throw new Error("当前Scripting不支持安全随机ID，请更新Scripting")
@@ -1613,7 +1649,7 @@ async function dsOfficial(item: DeepSeekCredential): Promise<Account | null> {
     const old = officialCached()?.accounts.find(a => a.id === item.id)
     let account: Account
     try {
-      const headers = { Authorization: `Bearer ${item.token}`, Accept: "application/json", "User-Agent": "ai-usage/1.10.0" }
+      const headers = { Authorization: `Bearer ${item.token}`, Accept: "application/json", "User-Agent": `ai-usage/${VERSION}` }
       if (item.mode === "api") {
         const r = await fetch("https://api.deepseek.com/user/balance", { headers, timeout: 15 })
         if (r.status !== 200) throw new DeepSeekReadError(`DeepSeek API余额 HTTP ${r.status}`)

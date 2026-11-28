@@ -3,7 +3,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const ts = require(process.env.TYPESCRIPT_PATH || 'typescript')
 const root = path.resolve(__dirname, '..'), now = 1800000000000
 function runtime(dir) {
-  const modules = {}, store = new Map()
+  const modules = {}, store = new Map(), kc = new Map()
   const scripting = new Proxy({
     Widget: { family: 'systemSmall', parameter: '', displaySize: { width: 360, height: 380 } },
     AppIntentProtocol: { AppIntent: 0 }, AppIntentManager: { register: () => () => ({}) },
@@ -12,7 +12,7 @@ function runtime(dir) {
   class Clock extends Date { constructor(...args) { super(...(args.length ? args : [now])) } static now() { return now } }
   const context = vm.createContext({ Date: Clock, console, Map, Set, Math, Promise,
     Storage: { get: k => store.get(k) ?? null, set: (k, v) => store.set(k, v), remove: k => store.delete(k) },
-    Keychain: { get: () => null }, UIImage: { fromBase64String: s => ({ base64: s }) },
+    Keychain: { get: k => kc.get(k) ?? null, set: (k, v) => { kc.set(k, v); return true }, remove: k => { kc.delete(k); return true } }, UIImage: { fromBase64String: s => ({ base64: s }) },
     fetch: () => { throw Error('cleanup tests must not contact a network') },
   })
   function load(name) {
@@ -35,10 +35,10 @@ function runtime(dir) {
     if (n.type === 'GeometryReader') return expand(n.props.children({ size: { width: 330, height: 134 } }))
     return Object.fromEntries(Object.entries(n).map(([k, v]) => [k, typeof v === 'function' ? '[callback]' : expand(v)]))
   }
-  return { load, scripting, snapshot: n => JSON.stringify(expand(n)) }
+  return { load, scripting, store, kc, snapshot: n => JSON.stringify(expand(n)) }
 }
 const current = runtime(root), api = current.load('api.ts'), app = current.load('index.tsx'), widget = current.load('widget.tsx')
-assert.equal(api.VERSION, '1.66')
+assert.equal(api.VERSION, '1.67')
 assert.equal(api.VERSION, JSON.parse(fs.readFileSync(path.join(root, 'script.json'))).version)
 const index = fs.readFileSync(path.join(root, 'index.tsx'), 'utf8')
 assert.ok(!index.includes('const VERSION ='))
@@ -63,7 +63,27 @@ for (const at of [null, undefined, NaN, Infinity, -1, 0, 8640000000000001]) {
   assert.ok(detail({ ...account, provider: 'deepseek', balance: { fetchedAt: at, money: [] } }).includes('余额采集时间 未提供'))
 }
 assert.ok(detail({ ...account, provider: 'deepseek', balance: { fetchedAt: 1, money: [] } }).includes('余额采集时间 1970-01-01 08:00:00'))
-console.log('PASS cleanup: shared 1.66 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
+// Corrupted Keychain isolation, uncached codex widget branding, safe server.stop teardown, and renewal cooldown cleanup.
+{
+  current.kc.set('ai_usage_workbuddy_cn_cli_v1', '{broken-json')
+  current.kc.set('ai_usage_deepseek_credentials_v1', '{}')
+  current.kc.set('ai_usage_claude_oauth_v1', JSON.stringify([{ id: 'claude:ok:org', accountId: 'ok', organizationId: 'org', email: 'ok@example.test', access: 't', refresh: 'r', expiresAt: now + 60000, scope: 'user:profile' }]))
+  const listed = api.officialAccounts()
+  assert.equal(listed.length, 1); assert.equal(listed[0].id, 'claude:ok:org')
+  current.store.set('ai_usage_oauth_renewal_cooldown_v1', { 'Claude:claude:ok:org': now + 60000, 'Codex:expired': now - 1, 'Claude:other': now + 60000 })
+  api.logoutOfficial('claude:ok:org')
+  assert.deepEqual(JSON.parse(JSON.stringify(current.store.get('ai_usage_oauth_renewal_cooldown_v1'))), { 'Claude:other': now + 60000 })
+  current.kc.clear(); current.store.clear()
+
+  const codexTree = current.snapshot(widget.Root({ data: { accounts: [{ ...account, id: 'codex-uncached', provider: 'codex' }], fetchedAt: now, today: null, month: null, todayByFamily: {}, monthByFamily: {} }, error: null }))
+  const openaiTree = current.snapshot(widget.Root({ data: { accounts: [{ ...account, id: 'codex-uncached', provider: 'openai' }], fetchedAt: now, today: null, month: null, todayByFamily: {}, monthByFamily: {} }, error: null }))
+  assert.equal(codexTree, openaiTree)
+
+  const loginStub = { url: 'https://claude.com/cai/oauth/authorize?state=s', redirect: '', manual: false, fallback: null, verifier: 'v', state: 's', expiresAt: now + 60000, cancelled: false, consumed: false, code: 'c', server: { stop: () => { throw Error('socket closed') } }, timer: null, progress: '' }
+  api.cancelClaudeLogin(loginStub)
+  assert.equal(loginStub.url, ''); assert.equal(loginStub.server, null)
+}
+console.log('PASS cleanup: shared 1.67 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
 if (process.env.CLEANUP_BASELINE_DIR) {
   const baselineDir = process.env.CLEANUP_BASELINE_DIR, previous = runtime(baselineDir), oldApi = previous.load('api.ts'), oldApp = previous.load('index.tsx'), oldWidget = previous.load('widget.tsx')
   assert.equal(svg, oldApi.WORKBUDDY_SVG ?? fs.readFileSync(path.join(baselineDir, 'assets/workbuddy-original.svg'), 'utf8'), 'SVG source preserved byte-for-byte')

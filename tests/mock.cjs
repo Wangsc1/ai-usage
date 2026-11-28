@@ -197,7 +197,7 @@ async function main() {
     for(let i=0;i<(family==='systemSmall'?2:4);i++)assert.ok(allTexts.includes('匿名'+i))
     if(family==='systemSmall')assert.ok(!allTexts.includes('匿名2'))
     if(family==='systemLarge'){
-      assert.ok(texts.includes('Parrot今日/本月统计未提供'));assert.ok(!texts.includes('$0.00'))
+      assert.ok(texts.includes('今日/本月统计未提供'));assert.ok(!texts.includes('$0.00'))
       const labels=tree.filter(x=>x.type==='HStack' && x.props.spacing===0 && Array.isArray(x.props.children) && ['5h','7d'].includes(x.props.children[0]?.props?.children))
       assert.equal(labels.length,8);assert.ok(labels.every(x=>x.props.children.length===2 && x.props.children.every(t=>t.type==='Text' && t.props.font===9 && t.props.monospaced && t.props.lineLimit===1)));assert.ok(labels.every(x=>x.props.children[1].props.children.startsWith(' · ')))
     }
@@ -552,7 +552,7 @@ async function main() {
     scripting.Widget.family='systemMedium'
     for(const missing of [{...input,today:null},{...input,month:null},{...input,today:null,month:null}]){
       const absent=findTwo(expand(Root({data:missing,stale:false,error:null})))
-      assert.equal(absent.upper.props.children.props.children,'Parrot今日/本月统计未提供')
+      assert.equal(absent.upper.props.children.props.children,'今日/本月统计未提供')
       assert.deepEqual(Array.from(absent.lower.props.children,c=>c.props.children.props.acc.id),selected)
       assert.ok(!expand(absent.upper).some(x=>x.type==='GeometryReader'))
     }
@@ -1866,8 +1866,8 @@ async function main() {
   // Card selector 429 never becomes a quota failure; it is remembered and not retried.
   now+=3600001;budgetRows.forEach(a=>a.expiresAt=now+7200000);kc.set('ai_usage_claude_oauth_v1',JSON.stringify(budgetRows))
   cardMode='429';before=calls.length;rows=await api.loadClaudeAccounts()
-  assert.deepEqual(countCalls(before),{usage:nAcc,cards:nAcc});assert.ok(rows.every(a=>a.fiveHour.remainingPercent===62.5))
-  before=calls.length;await api.loadClaudeAccounts();assert.deepEqual(countCalls(before),{usage:nAcc,cards:0});cardMode='positive'
+  assert.deepEqual(countCalls(before),{usage:nAcc,cards:nAcc});assert.ok(rows.every(a=>a.fiveHour.remainingPercent===62.5&&a.resetCredits===2))
+  before=calls.length;rows=await api.loadClaudeAccounts();assert.deepEqual(countCalls(before),{usage:nAcc,cards:0});assert.ok(rows.every(a=>a.resetCredits===2));cardMode='positive'
   // Plain usage 429: exact path + Retry-After, cache preserved, no retry, later refreshes send nothing until deadline.
   const isolatedCodex=kc.get('ai_usage_official_oauth_v1');kc.delete('ai_usage_official_oauth_v1')
   const officialBefore=await api.loadOfficialUsage();assert.equal(officialBefore.stale,false,String(officialBefore.error))
@@ -2413,7 +2413,7 @@ async function main() {
         if(apiFail)throw Error('DeepSeek SECRET-DS-SYNTHETIC-API transport')
         return resp(200,malformedAPI?{}:balance())
       }
-      assert.equal(h.get('authorization'),'Bearer DS-SYNTHETIC-WEB');assert.equal(h.get('referer'),'https://platform.deepseek.com/usage');assert.equal(h.get('user-agent'),'ai-usage/1.10.0')
+      assert.equal(h.get('authorization'),'Bearer DS-SYNTHETIC-WEB');assert.equal(h.get('referer'),'https://platform.deepseek.com/usage');assert.equal(h.get('user-agent'),`ai-usage/${api.VERSION}`)
       if(u.endsWith('/get_user_summary')){webReads++;return webFail?resp(401):resp(200,{code:0,data:{biz_data:{normal_wallets:[{currency:'CNY',balance:'0.1'},{currency:'CNY',balance:'0.2'},{currency:'USD',balance:'2.00'}],bonus_wallets:[{currency:'CNY',balance:'0.00001'},{currency:'USD',balance:'1.00'}],total_costs:[]}}})}
       const url=new URL(u);assert.equal(url.pathname,'/api/v0/usage/by_api_key/cost');const midnight=Math.floor((now/1000+28800)/86400)*86400-28800
       assert.equal(Number(url.searchParams.get('start')),midnight-6*86400);assert.equal(Number(url.searchParams.get('end')),midnight+86400);assert.equal(url.searchParams.get('tz'),'28800')
