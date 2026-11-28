@@ -38,7 +38,7 @@ function runtime(dir) {
   return { load, scripting, store, kc, snapshot: n => JSON.stringify(expand(n)) }
 }
 const current = runtime(root), api = current.load('api.ts'), app = current.load('index.tsx'), widget = current.load('widget.tsx')
-assert.equal(api.VERSION, '1.67')
+assert.equal(api.VERSION, '1.68')
 assert.equal(api.VERSION, JSON.parse(fs.readFileSync(path.join(root, 'script.json'))).version)
 const index = fs.readFileSync(path.join(root, 'index.tsx'), 'utf8')
 assert.ok(!index.includes('const VERSION ='))
@@ -47,6 +47,16 @@ assert.equal('WORKBUDDY_SVG' in api, false)
 const svg = fs.readFileSync(path.join(root, 'assets/workbuddy-original.svg'), 'utf8')
 assert.ok(svg.startsWith('<svg ') && svg.trimEnd().endsWith('</svg>'))
 const files = ['api.ts', 'index.tsx', 'widget.tsx', 'app_intents.tsx'].map(f => path.join(root, f))
+// Scripting may transpile .ts files with TSX/JSX enabled; verify every production file parses cleanly as TSX too.
+for (const file of files) {
+  const out = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    fileName: file.replace(/\.ts$/, '.tsx'),
+    compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, jsxImportSource: 'scripting' },
+    reportDiagnostics: true,
+  })
+  assert.deepEqual(out.diagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, ' ')), [], path.basename(file) + ' must transpile cleanly under TSX mode')
+  new Function(out.outputText)
+}
 const program = ts.createProgram(files, { noEmit: true, noUnusedLocals: true, noUnusedParameters: true, jsx: ts.JsxEmit.Preserve, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext, skipLibCheck: true })
 assert.deepEqual(ts.getPreEmitDiagnostics(program).filter(d => [6133, 6192, 6196, 6198].includes(d.code)).map(d => ts.flattenDiagnosticMessageText(d.messageText, ' ')), [])
 for (const v of [null, '', 'invalid', new Date(now - 1).toISOString()]) assert.equal(api.fmtResetDays(v), '--')
@@ -83,7 +93,7 @@ assert.ok(detail({ ...account, provider: 'deepseek', balance: { fetchedAt: 1, mo
   api.cancelClaudeLogin(loginStub)
   assert.equal(loginStub.url, ''); assert.equal(loginStub.server, null)
 }
-console.log('PASS cleanup: shared 1.67 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
+console.log('PASS cleanup: shared 1.68 version, standalone SVG, zero unused symbols, reset and Beijing date valid/missing/invalid/epoch behavior')
 if (process.env.CLEANUP_BASELINE_DIR) {
   const baselineDir = process.env.CLEANUP_BASELINE_DIR, previous = runtime(baselineDir), oldApi = previous.load('api.ts'), oldApp = previous.load('index.tsx'), oldWidget = previous.load('widget.tsx')
   assert.equal(svg, oldApi.WORKBUDDY_SVG ?? fs.readFileSync(path.join(baselineDir, 'assets/workbuddy-original.svg'), 'utf8'), 'SVG source preserved byte-for-byte')

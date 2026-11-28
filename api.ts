@@ -1,7 +1,7 @@
 // Parrot 管理接口数据层（Scripting 中 fetch / Keychain / Storage 为全局对象）
 
 
-export const VERSION = "1.67"
+export const VERSION = "1.68"
 export type DataSource = "parrot" | "official" | "sub2api"
 export function getSource(): DataSource { const s = Storage.get<string>("ai_usage_source_v1"); return s === "official" || s === "sub2api" ? s : "parrot" }
 let officialRenewalScope = 0
@@ -792,7 +792,7 @@ function officialDisplay(item: Credential, index: number): string {
   return item.email || `账号 ${index + 1}（邮箱未提供）`
 }
 export function officialAccounts(): { id: string; name: string; email: string; provider: "codex" | "claude" | "deepseek" | "workbuddy" | "antigravity" }[] {
-  const safe = <T>(fn: () => T[]): T[] => { try { return fn() } catch { return [] } }
+  function safe<T>(fn: () => T[]): T[] { try { return fn() } catch { return [] } }
   // Legacy Codex records have no provider field; their dedicated credential collection identifies them.
   return [
     ...safe(() => credentials().map((item, i) => ({ id: item.id, name: officialDisplay(item, i), email: item.email || "", provider: "codex" as const }))),
